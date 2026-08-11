@@ -191,11 +191,14 @@ class App:
 
     # -----------------------------------------------------------------
     def _build_menu(self):
-        """Menu bar: File / Actions / View / Options / Help. Keeps the main screen compact."""
+        """Menu bar: File / Actions / View / Help. Keeps the main screen compact."""
         menubar = tk.Menu(self.root)
 
-        # --- File ---
+        # --- File --- (Thiết lập... opens the combined Kết nối / Đường dẫn / Tự động
+        # truy vấn dialog, with config.ini actions at its bottom)
         file_menu = tk.Menu(menubar, tearoff=0)
+        file_menu.add_command(label="Thiết lập...", command=self._open_settings_dialog)
+        file_menu.add_separator()
         file_menu.add_command(label="Mở thư mục CSV", command=self._on_open_folder)
         file_menu.add_command(label="Mở thư mục data", command=self._on_open_data)
         file_menu.add_separator()
@@ -211,23 +214,18 @@ class App:
         action_menu.add_command(label="Về hiện tại", command=self._on_now)
         menubar.add_cascade(label="Thao tác", menu=action_menu)
 
-        # --- View --- (mirrors the "Xem gần nhất" / "Xem lịch sử" buttons on the main screen)
+        # --- View --- (mirrors the "Xem gần nhất" / "Xem lịch sử" buttons on the main
+        # screen; "Hiển thị nhật ký" toggles the log frame)
         view_menu = tk.Menu(menubar, tearoff=0)
         view_menu.add_command(label="Xem gần nhất",
                               command=lambda: self._open_csv_viewer("latest.csv", "latest.csv"))
         view_menu.add_command(label="Xem lịch sử",
                               command=lambda: self._open_csv_viewer(
                                   "history.csv", "history.csv", with_station_filter=True))
+        view_menu.add_separator()
+        view_menu.add_checkbutton(label="Hiển thị nhật ký", variable=self.v["show_log"],
+                                  command=self._on_toggle_log)
         menubar.add_cascade(label="Xem", menu=view_menu)
-
-        # --- Options --- (Hiển thị nhật ký toggles the log frame; Thiết lập... opens the
-        # combined Kết nối / Đường dẫn / Tự động truy vấn dialog, with config.ini actions
-        # at its bottom)
-        opt_menu = tk.Menu(menubar, tearoff=0)
-        opt_menu.add_checkbutton(label="Hiển thị nhật ký", variable=self.v["show_log"],
-                                 command=self._on_toggle_log)
-        opt_menu.add_command(label="Thiết lập...", command=self._open_settings_dialog)
-        menubar.add_cascade(label="Tùy chọn", menu=opt_menu)
 
         # --- Help ---
         help_menu = tk.Menu(menubar, tearoff=0)
@@ -452,14 +450,14 @@ class App:
             "   Bấm 'Về hiện tại' để tự điền ngày hệ thống.\n\n"
             "2. Bấm 'Chạy' để tải bản tin từ FTP và giải mã.\n"
             "   Theo dõi tiến trình ở thanh trạng thái và Nhật ký bên dưới.\n\n"
-            "3. Xem kết quả:\n"
+            "3. Menu Xem:\n"
             "   • 'Xem gần nhất' — bản tin mới nhất của TẤT CẢ các trạm.\n"
             "   • 'Xem lịch sử' — lịch sử theo giờ của TẤT CẢ các trạm;\n"
             "     dùng ô 'Trạm' trong cửa sổ xem để lọc riêng 1 trạm\n"
             "     (mặc định lọc theo station_code trong config.ini).\n"
-            "   Trong cửa sổ xem, bấm 'Xem raw' để đối chiếu bản tin gốc.\n\n"
-            "4. Menu Tùy chọn:\n"
-            "   • 'Hiển thị nhật ký' — bật/tắt khung Nhật ký (mặc định tắt).\n"
+            "     Trong cửa sổ xem, bấm 'Xem raw' để đối chiếu bản tin gốc.\n"
+            "   • 'Hiển thị nhật ký' — bật/tắt khung Nhật ký (mặc định tắt).\n\n"
+            "4. Menu Tệp:\n"
             "   • 'Thiết lập...' — mở hộp thoại gồm:\n"
             "     - Kết nối: host/user/mật khẩu FTP.\n"
             "     - Đường dẫn: thư mục server, thư mục xuất CSV,\n"
@@ -471,8 +469,7 @@ class App:
             "       file để sửa tay; cũng là nơi đổi trạm mặc định\n"
             "       cho bộ lọc lịch sử (station_code).\n"
             "     - 'Lưu thiết lập' — lưu ngay các mục trên vào\n"
-            "       config.ini để lần chạy sau tự nạp lại.\n\n"
-            "5. Menu Tệp:\n"
+            "       config.ini để lần chạy sau tự nạp lại.\n"
             "   • 'Mở thư mục CSV' — xem file latest.csv / history.csv.\n"
             "   • 'Mở thư mục data' — xem các bản tin gốc (.txt) đã tải về.")
 
