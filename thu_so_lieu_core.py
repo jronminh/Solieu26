@@ -98,6 +98,9 @@ CONFIG = {
     "end_hour": 23,
 
     "viewer_hidden_columns": [],         # GUI-only: columns hidden in the CSV viewer
+
+    "auto_query_value": 15,              # GUI-only: auto-query interval (0 = disabled)
+    "auto_query_unit":  "minutes",       # GUI-only: "minutes" or "hours" — unit for auto_query_value
 }
 
 
@@ -114,8 +117,9 @@ CONFIG_FILENAME = "config.ini"          # default name, looked up next to the sc
 CONFIG_SECTION  = "thu_so_lieu"
 
 _STR_KEYS  = ("ftp_host", "ftp_user", "ftp_pass",
-              "remote_dir", "output_dir", "station_code")
-_INT_KEYS  = ("end_hour", "ftp_timeout", "retry_temp", "retry_wait")
+              "remote_dir", "output_dir", "station_code", "auto_query_unit")
+_INT_KEYS  = ("end_hour", "ftp_timeout", "retry_temp", "retry_wait",
+              "auto_query_value")
 
 
 def _to_bool(v: str):

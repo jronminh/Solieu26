@@ -130,6 +130,8 @@ def write_minimal_config(path: str, values: dict):
         f"date = {values['date']}",
         f"end_hour = {values['end_hour']}",
         f"delete_on_exit = {'true' if values['delete_on_exit'] else 'false'}",
+        f"auto_query_value = {values['auto_query_value']}",
+        f"auto_query_unit = {values['auto_query_unit']}",
     ]
     with open(path, "w", encoding="utf-8") as f:
         f.write("\n".join(lines) + "\n")
@@ -141,6 +143,7 @@ class App:
         self.q = queue.Queue()
         self.worker = None
         self.last_output_dir = None
+        self.auto_job = None        # root.after() id for the pending auto-query tick
         self._dialogs = {}          # keeps references to open dialogs (avoids reopening duplicates)
 
         # Load the external config (if any) BEFORE prefilling the form
@@ -168,6 +171,8 @@ class App:
             "date":        tk.StringVar(value=(default_date or today).strftime("%Y-%m-%d")),
             "delete_on_exit": tk.BooleanVar(value=bool(d.get("delete_on_exit", False))),
             "show_log":    tk.BooleanVar(value=False),   # log frame hidden by default
+            "auto_value":  tk.StringVar(value=str(d.get("auto_query_value", 15))),
+            "auto_unit":   tk.StringVar(value="Hours" if d.get("auto_query_unit", "minutes") == "hours" else "Minutes"),
         }
 
         self._build_menu()
@@ -182,10 +187,11 @@ class App:
             self._log("OK", f"Đã nạp {len(self.cfg_overrides)} thiết lập từ config: {self.cfg_path}")
         else:
             self._log("INFO", f"Không thấy config ({self.cfg_path}) — dùng mặc định trong mã.")
+        self._schedule_auto_tick()
 
     # -----------------------------------------------------------------
     def _build_menu(self):
-        """Menu bar: File / Options / Help. Keeps the main screen compact."""
+        """Menu bar: File / Actions / View / Options / Help. Keeps the main screen compact."""
         menubar = tk.Menu(self.root)
 
         # --- File ---
@@ -199,15 +205,28 @@ class App:
         # Not run yet → no CSV folder to open
         self.file_menu.entryconfig("Mở thư mục CSV", state="disabled")
 
-        # --- Options ---
+        # --- Actions --- (mirrors the "Chạy" / "Về hiện tại" buttons on the main screen)
+        action_menu = tk.Menu(menubar, tearoff=0)
+        action_menu.add_command(label="Chạy", command=self._on_run)
+        action_menu.add_command(label="Về hiện tại", command=self._on_now)
+        menubar.add_cascade(label="Thao tác", menu=action_menu)
+
+        # --- View --- (mirrors the "Xem gần nhất" / "Xem lịch sử" buttons on the main screen)
+        view_menu = tk.Menu(menubar, tearoff=0)
+        view_menu.add_command(label="Xem gần nhất",
+                              command=lambda: self._open_csv_viewer("latest.csv", "latest.csv"))
+        view_menu.add_command(label="Xem lịch sử",
+                              command=lambda: self._open_csv_viewer(
+                                  "history.csv", "history.csv", with_station_filter=True))
+        menubar.add_cascade(label="Xem", menu=view_menu)
+
+        # --- Options --- (Hiển thị nhật ký toggles the log frame; Thiết lập... opens the
+        # combined Kết nối / Đường dẫn / Tự động truy vấn dialog, with config.ini actions
+        # at its bottom)
         opt_menu = tk.Menu(menubar, tearoff=0)
-        opt_menu.add_command(label="Kết nối...", command=self._open_connection_dialog)
-        opt_menu.add_command(label="Đường dẫn...", command=self._open_paths_dialog)
-        opt_menu.add_separator()
         opt_menu.add_checkbutton(label="Hiển thị nhật ký", variable=self.v["show_log"],
                                  command=self._on_toggle_log)
-        opt_menu.add_separator()
-        opt_menu.add_command(label="Tạo/sửa config.ini", command=self._on_edit_config)
+        opt_menu.add_command(label="Thiết lập...", command=self._open_settings_dialog)
         menubar.add_cascade(label="Tùy chọn", menu=opt_menu)
 
         # --- Help ---
@@ -223,31 +242,34 @@ class App:
         frm = ttk.Frame(self.root, padding=10)
         frm.pack(fill="both", expand=True)
 
+        # --- Top row: Query form (left) + action buttons stacked (right) ---
+        top = ttk.Frame(frm)
+        top.pack(fill="x")
+
         # --- Query --- (chỉ còn Ngày — luôn truy vấn trọn 00h–23h của ngày đó)
-        q_box = ttk.LabelFrame(frm, text="Truy vấn", padding=8)
-        q_box.pack(fill="x")
+        q_box = ttk.LabelFrame(top, text="Truy vấn", padding=8)
+        q_box.pack(side="left", fill="both", expand=True)
         self._row(q_box, 0, "Ngày (YYYY-MM-DD)", self.v["date"], width=14)
         q_box.columnconfigure(1, weight=1)
 
-        # --- Run button + utilities ---
-        run_bar = ttk.Frame(frm)
-        run_bar.pack(fill="x", pady=(10, 4))
-        self.run_btn = ttk.Button(run_bar, text="Chạy", command=self._on_run)
-        self.run_btn.pack(side="left")
-        ttk.Button(run_bar, text="Về hiện tại",
-                   command=self._on_now).pack(side="left", padx=6)
-        # Both CSV-view buttons pushed to the right ("Xem gần nhất" left of the two, "Xem lịch sử" outermost)
-        ttk.Button(run_bar, text="Xem lịch sử",
+        # --- Actions: stacked vertically so they line up as one column ---
+        btn_col = ttk.Frame(top)
+        btn_col.pack(side="left", fill="y", padx=(8, 0))
+        self.run_btn = ttk.Button(btn_col, text="Chạy", command=self._on_run)
+        self.run_btn.pack(fill="x")
+        ttk.Button(btn_col, text="Về hiện tại",
+                   command=self._on_now).pack(fill="x", pady=(4, 0))
+        ttk.Button(btn_col, text="Xem gần nhất",
+                   command=lambda: self._open_csv_viewer("latest.csv", "latest.csv")
+                   ).pack(fill="x", pady=(4, 0))
+        ttk.Button(btn_col, text="Xem lịch sử",
                    command=lambda: self._open_csv_viewer("history.csv", "history.csv",
                                                          with_station_filter=True)
-                   ).pack(side="right")
-        ttk.Button(run_bar, text="Xem gần nhất",
-                   command=lambda: self._open_csv_viewer("latest.csv", "latest.csv")
-                   ).pack(side="right", padx=6)
+                   ).pack(fill="x", pady=(4, 0))
 
         # --- Progress bar (spans the window's full width) ---
         self.bar = ttk.Progressbar(frm, mode="determinate")
-        self.bar.pack(fill="x")
+        self.bar.pack(fill="x", pady=(10, 0))
 
         # --- Status bar at the BOTTOM: indicator sits at bottom-right ---
         statusbar = ttk.Frame(frm)
@@ -336,42 +358,90 @@ class App:
         ww, wh = win.winfo_width(), win.winfo_height()
         win.geometry(f"+{max(rx + (rw - ww)//2, 0)}+{max(ry + (rh - wh)//3, 0)}")
 
-    def _open_connection_dialog(self):
-        self._log("ACT", "Mở hộp thoại Kết nối")
-        win = self._make_dialog("connection", "Kết nối FTP")
+    def _open_settings_dialog(self):
+        """Combined settings dialog: Kết nối / Đường dẫn / Tự động truy vấn, plus
+        config.ini actions (create-or-edit at bottom-left, explicit save at bottom-right)."""
+        self._log("ACT", "Mở hộp thoại Thiết lập")
+        win = self._make_dialog("settings", "Thiết lập")
         if win is None:
             return
         frm = ttk.Frame(win, padding=12)
         frm.pack(fill="both", expand=True)
-        self._row(frm, 0, "Host",     self.v["ftp_host"])
-        self._row(frm, 1, "User",     self.v["ftp_user"])
-        self._row(frm, 2, "Password", self.v["ftp_pass"], show="*")
-        frm.columnconfigure(1, weight=1)
-        ttk.Button(frm, text="Đóng", command=win.destroy).grid(
-            row=3, column=1, sticky="e", pady=(12, 0))
-        win.minsize(360, 0)
-        self._center_over_root(win)
 
-    def _open_paths_dialog(self):
-        self._log("ACT", "Mở hộp thoại Đường dẫn")
-        win = self._make_dialog("paths", "Đường dẫn")
-        if win is None:
-            return
-        frm = ttk.Frame(win, padding=12)
-        frm.pack(fill="both", expand=True)
-        self._row(frm, 0, "Thư mục server",   self.v["remote_dir"])
-        self._row(frm, 1, "Thư mục xuất CSV",  self.v["output_dir"])
-        ttk.Button(frm, text="Chọn...",
+        conn_box = ttk.LabelFrame(frm, text="Kết nối", padding=8)
+        conn_box.pack(fill="x")
+        self._row(conn_box, 0, "Host",     self.v["ftp_host"])
+        self._row(conn_box, 1, "User",     self.v["ftp_user"])
+        self._row(conn_box, 2, "Password", self.v["ftp_pass"], show="*")
+        conn_box.columnconfigure(1, weight=1)
+
+        path_box = ttk.LabelFrame(frm, text="Đường dẫn", padding=8)
+        path_box.pack(fill="x", pady=(8, 0))
+        self._row(path_box, 0, "Thư mục server",  self.v["remote_dir"])
+        self._row(path_box, 1, "Thư mục xuất CSV", self.v["output_dir"])
+        ttk.Button(path_box, text="Chọn...",
                    command=lambda: self._browse_output(parent=win)).grid(row=1, column=2, padx=4)
-        ttk.Checkbutton(frm, text="Xóa file tải về sau khi xong",
+        ttk.Checkbutton(path_box, text="Xóa file tải về sau khi xong",
                         variable=self.v["delete_on_exit"],
                         command=self._on_toggle_delete).grid(
-                        row=2, column=0, columnspan=3, sticky="w", pady=(10, 0))
-        frm.columnconfigure(1, weight=1)
-        ttk.Button(frm, text="Đóng", command=win.destroy).grid(
-            row=3, column=1, columnspan=2, sticky="e", pady=(12, 0))
+                        row=2, column=0, columnspan=3, sticky="w", pady=(6, 0))
+        path_box.columnconfigure(1, weight=1)
+
+        # Auto-query: re-runs the pipeline on a timer (system time → "Về hiện tại" →
+        # "Chạy"). 0 = tắt tự động truy vấn.
+        auto_box = ttk.LabelFrame(frm, text="Tự động truy vấn", padding=8)
+        auto_box.pack(fill="x", pady=(8, 0))
+        auto_entry = ttk.Entry(auto_box, textvariable=self.v["auto_value"], width=6)
+        auto_entry.grid(row=0, column=0, padx=(0, 4))
+        auto_entry.bind("<FocusOut>", self._on_auto_change)
+        auto_entry.bind("<Return>", self._on_auto_change)
+        auto_unit = ttk.Combobox(auto_box, textvariable=self.v["auto_unit"],
+                                 values=["Minutes", "Hours"], state="readonly", width=8)
+        auto_unit.grid(row=0, column=1)
+        auto_unit.bind("<<ComboboxSelected>>", self._on_auto_change)
+        ttk.Label(auto_box, text="(0 = tắt)").grid(row=0, column=2, padx=(8, 0))
+
+        btn_bar = ttk.Frame(frm)
+        btn_bar.pack(fill="x", pady=(12, 0))
+        ttk.Button(btn_bar, text="Tạo/sửa config.ini",
+                   command=self._on_edit_config).pack(side="left")
+        ttk.Button(btn_bar, text="Lưu thiết lập",
+                   command=self._on_save_settings).pack(side="right")
+
         win.minsize(420, 0)
         self._center_over_root(win)
+
+    def _on_save_settings(self):
+        """Persist every field in the Thiết lập dialog to config.ini in one shot."""
+        self._log("ACT", "Lưu thiết lập")
+        v = self._auto_effective_value()
+        self.v["auto_value"].set(str(v))
+        unit_key = "hours" if self.v["auto_unit"].get() == "Hours" else "minutes"
+        values = {
+            "ftp_host":           self.v["ftp_host"].get().strip(),
+            "ftp_user":           self.v["ftp_user"].get().strip(),
+            "ftp_pass":           self.v["ftp_pass"].get(),
+            "remote_dir":         self.v["remote_dir"].get().strip(),
+            "output_dir":         self.v["output_dir"].get().strip(),
+            "delete_on_exit":     "true" if self.v["delete_on_exit"].get() else "false",
+            "auto_query_value":   str(v),
+            "auto_query_unit":    unit_key,
+        }
+        try:
+            for key, value in values.items():
+                core.update_ini_key(self.cfg_path, core.CONFIG_SECTION, key, value)
+            core.CONFIG.update({
+                "ftp_host": values["ftp_host"], "ftp_user": values["ftp_user"],
+                "ftp_pass": values["ftp_pass"], "remote_dir": values["remote_dir"],
+                "output_dir": values["output_dir"],
+                "delete_on_exit": self.v["delete_on_exit"].get(),
+                "auto_query_value": v, "auto_query_unit": unit_key,
+            })
+            self._log("OK", f"Đã lưu thiết lập vào config: {self.cfg_path}")
+        except OSError as e:
+            self._log("ERR", f"Không lưu được thiết lập: {e}")
+            messagebox.showerror("Lỗi", f"Không lưu được thiết lập:\n{e}")
+        self._schedule_auto_tick()
 
     # ----- Help ---------------------------------------------------
     def _on_help_usage(self):
@@ -389,13 +459,19 @@ class App:
             "     (mặc định lọc theo station_code trong config.ini).\n"
             "   Trong cửa sổ xem, bấm 'Xem raw' để đối chiếu bản tin gốc.\n\n"
             "4. Menu Tùy chọn:\n"
-            "   • 'Kết nối...' — sửa host/user/mật khẩu FTP.\n"
-            "   • 'Đường dẫn...' — đổi thư mục server, thư mục xuất CSV,\n"
-            "     bật/tắt xóa file tải về sau khi xong.\n"
             "   • 'Hiển thị nhật ký' — bật/tắt khung Nhật ký (mặc định tắt).\n"
-            "   • 'Tạo/sửa config.ini' — lưu thiết lập hiện tại ra file\n"
-            "     để lần chạy sau tự nạp lại, khỏi nhập lại từ đầu; cũng là\n"
-            "     nơi đổi trạm mặc định cho bộ lọc lịch sử (station_code).\n\n"
+            "   • 'Thiết lập...' — mở hộp thoại gồm:\n"
+            "     - Kết nối: host/user/mật khẩu FTP.\n"
+            "     - Đường dẫn: thư mục server, thư mục xuất CSV,\n"
+            "       bật/tắt xóa file tải về sau khi xong.\n"
+            "     - Tự động truy vấn: tự chạy lại sau mỗi N phút/giờ\n"
+            "       (0 = tắt); mỗi lần tự chạy sẽ tự cập nhật Ngày\n"
+            "       theo giờ hệ thống rồi 'Chạy' như bình thường.\n"
+            "     - 'Tạo/sửa config.ini' — tạo (nếu chưa có) rồi mở\n"
+            "       file để sửa tay; cũng là nơi đổi trạm mặc định\n"
+            "       cho bộ lọc lịch sử (station_code).\n"
+            "     - 'Lưu thiết lập' — lưu ngay các mục trên vào\n"
+            "       config.ini để lần chạy sau tự nạp lại.\n\n"
             "5. Menu Tệp:\n"
             "   • 'Mở thư mục CSV' — xem file latest.csv / history.csv.\n"
             "   • 'Mở thư mục data' — xem các bản tin gốc (.txt) đã tải về.")
@@ -672,6 +748,52 @@ class App:
         self.v["date"].set(now.strftime("%Y-%m-%d"))
         self._log("ACT", f"Về hiện tại: ngày {now:%Y-%m-%d}")
 
+    # ----- Auto-query (timer) ----------------------------------------
+    def _auto_effective_minutes(self) -> int:
+        """Current interval in minutes; 0 means auto-query is off."""
+        try:
+            v = int(self.v["auto_value"].get().strip())
+        except ValueError:
+            v = 0
+        v = max(v, 0)
+        return v * 60 if self.v["auto_unit"].get() == "Hours" else v
+
+    def _schedule_auto_tick(self):
+        """(Re)schedule the next auto-query tick from the current value/unit; cancels any pending one first."""
+        if self.auto_job is not None:
+            self.root.after_cancel(self.auto_job)
+            self.auto_job = None
+        minutes = self._auto_effective_minutes()
+        if minutes <= 0:
+            return
+        self.auto_job = self.root.after(minutes * 60 * 1000, self._on_auto_tick)
+
+    def _on_auto_tick(self):
+        self.auto_job = None
+        if self.worker and self.worker.is_alive():
+            self._log("SKIP", "Tự động truy vấn: bỏ qua vì đang có tác vụ chạy")
+        else:
+            self._log("ACT", "Tự động truy vấn: về hiện tại rồi chạy")
+            self._on_now()
+            self._on_run()
+        self._schedule_auto_tick()
+
+    def _on_auto_change(self, event=None):
+        """Entry/dropdown changed: normalize the value and reschedule the timer right away
+        (takes effect immediately); persisting to config.ini happens via 'Lưu thiết lập'."""
+        v = self._auto_effective_value()
+        self.v["auto_value"].set(str(v))
+        unit = self.v["auto_unit"].get()
+        state = "tắt" if v == 0 else f"mỗi {v} {unit.lower()}"
+        self._log("ACT", f"Tùy chọn 'Tự động truy vấn': {state}")
+        self._schedule_auto_tick()
+
+    def _auto_effective_value(self) -> int:
+        try:
+            return max(int(self.v["auto_value"].get().strip()), 0)
+        except ValueError:
+            return 0
+
     def _on_toggle_delete(self):
         state = "Bật" if self.v["delete_on_exit"].get() else "Tắt"
         self._log("ACT", f"Tùy chọn 'Xóa file tải về sau khi xong': {state}")
@@ -714,6 +836,8 @@ class App:
             "date": self.v["date"].get().strip(),
             "end_hour": 23,
             "delete_on_exit": self.v["delete_on_exit"].get(),
+            "auto_query_value": self._auto_effective_value(),
+            "auto_query_unit": "hours" if self.v["auto_unit"].get() == "Hours" else "minutes",
         }
 
     def _on_edit_config(self):
