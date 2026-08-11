@@ -193,10 +193,10 @@ class App:
         self._build_ui()
         self._fit_window_to_content()
         # Floor = the natural size with the log hidden (its default state) — small
-        # enough to fit just the query box + the 4 buttons, but never smaller.
+        # enough to fit just the info box + the 5 buttons, but never smaller.
         self.root.minsize(self.root.winfo_width(), self.root.winfo_height())
         self.root.after(100, self._poll)
-        self._log("INFO", "Khởi động xong — sẵn sàng. Điền thông tin rồi bấm 'Chạy'.")
+        self._log("INFO", "Khởi động xong — sẵn sàng. Điền thông tin rồi bấm 'Truy vấn'.")
         if self.cfg_overrides:
             self._log("OK", f"Đã nạp {len(self.cfg_overrides)} thiết lập từ config: {self.cfg_path}")
         else:
@@ -222,9 +222,9 @@ class App:
         # Not run yet → no CSV folder to open
         self.file_menu.entryconfig("Mở thư mục CSV", state="disabled")
 
-        # --- Actions --- (mirrors the "Chạy" / "Về hiện tại" buttons on the main screen)
+        # --- Actions --- (mirrors the "Truy vấn" / "Về hiện tại" buttons on the main screen)
         action_menu = tk.Menu(menubar, tearoff=0)
-        action_menu.add_command(label="Chạy", command=self._on_run)
+        action_menu.add_command(label="Truy vấn", command=self._on_run)
         action_menu.add_command(label="Về hiện tại", command=self._on_now)
         menubar.add_cascade(label="Thao tác", menu=action_menu)
 
@@ -264,8 +264,8 @@ class App:
         top = ttk.Frame(frm)
         top.pack(fill="x", pady=(8, 0))
 
-        # --- Thông tin truy vấn --- (read-only status; recomputed by _refresh_info_panel)
-        q_box = ttk.LabelFrame(top, text="Thông tin truy vấn", padding=8)
+        # --- Thông tin --- (read-only status; recomputed by _refresh_info_panel)
+        q_box = ttk.LabelFrame(top, text="Thông tin", padding=8)
         q_box.pack(side="left", fill="both", expand=True)
         ttk.Label(q_box, text="Máy chủ:").grid(row=0, column=0, sticky="w", padx=6, pady=2)
         ttk.Label(q_box, textvariable=self.v["ftp_host"]).grid(row=0, column=1, sticky="w", padx=6, pady=2)
@@ -284,7 +284,7 @@ class App:
         # --- Actions: stacked vertically so they line up as one column ---
         btn_col = ttk.Frame(top)
         btn_col.pack(side="left", fill="y", padx=(8, 0))
-        self.run_btn = ttk.Button(btn_col, text="Chạy", command=self._on_run)
+        self.run_btn = ttk.Button(btn_col, text="Truy vấn", command=self._on_run)
         self.run_btn.pack(fill="x")
         ttk.Button(btn_col, text="Về hiện tại",
                    command=self._on_now).pack(fill="x", pady=(4, 0))
@@ -295,6 +295,8 @@ class App:
                    command=lambda: self._open_csv_viewer("history.csv", "history.csv",
                                                          with_station_filter=True)
                    ).pack(fill="x", pady=(4, 0))
+        ttk.Button(btn_col, text="Thiết lập",
+                   command=self._open_settings_dialog).pack(fill="x", pady=(4, 0))
 
         # --- Progress bar (spans the window's full width) ---
         self.bar = ttk.Progressbar(frm, mode="determinate")
@@ -417,7 +419,7 @@ class App:
         path_box.columnconfigure(1, weight=1)
 
         # Auto-query: re-runs the pipeline on a timer (system time → "Về hiện tại" →
-        # "Chạy"). 0 = tắt tự động truy vấn.
+        # "Truy vấn"). 0 = tắt tự động truy vấn.
         auto_box = ttk.LabelFrame(frm, text="Tự động truy vấn", padding=8)
         auto_box.pack(fill="x", pady=(8, 0))
         auto_entry = ttk.Entry(auto_box, textvariable=self.v["auto_value"], width=6)
@@ -479,7 +481,7 @@ class App:
             "Cách sử dụng",
             "1. Chọn Ngày (YYYY-MM-DD) — luôn truy vấn trọn 00h–23h ngày đó.\n"
             "   Bấm 'Về hiện tại' để tự điền ngày hệ thống.\n\n"
-            "2. Bấm 'Chạy' để tải bản tin từ FTP và giải mã.\n"
+            "2. Bấm 'Truy vấn' để tải bản tin từ FTP và giải mã.\n"
             "   Theo dõi tiến trình ở thanh trạng thái và Nhật ký bên dưới.\n\n"
             "3. Menu Xem:\n"
             "   • 'Xem gần nhất' — bản tin mới nhất của TẤT CẢ các trạm.\n"
@@ -495,7 +497,7 @@ class App:
             "       bật/tắt xóa file tải về sau khi xong.\n"
             "     - Tự động truy vấn: tự chạy lại sau mỗi N phút/giờ\n"
             "       (0 = tắt); mỗi lần tự chạy sẽ tự cập nhật Ngày\n"
-            "       theo giờ hệ thống rồi 'Chạy' như bình thường.\n"
+            "       theo giờ hệ thống rồi 'Truy vấn' như bình thường.\n"
             "     - 'Tạo/sửa config.ini' — tạo (nếu chưa có) rồi mở\n"
             "       file để sửa tay; cũng là nơi đổi trạm mặc định\n"
             "       cho bộ lọc lịch sử (station_code).\n"
@@ -530,10 +532,10 @@ class App:
         self._log("ACT", f"Xem {filename}")
         path = os.path.join(self._current_output_dir(), filename)
         if not os.path.isfile(path):
-            self._log("ERR", f"Chưa có {filename} trong {self._current_output_dir()} — hãy Chạy trước")
+            self._log("ERR", f"Chưa có {filename} trong {self._current_output_dir()} — hãy Truy vấn trước")
             messagebox.showwarning(
                 "Chưa có file",
-                f"Không tìm thấy:\n{path}\n\nHãy bấm 'Chạy' để tạo file trước.")
+                f"Không tìm thấy:\n{path}\n\nHãy bấm 'Truy vấn' để tạo file trước.")
             return
 
         key = "view_" + filename
@@ -969,7 +971,7 @@ class App:
 
     # -----------------------------------------------------------------
     def _on_run(self):
-        self._log("ACT", "Bấm 'Chạy'")
+        self._log("ACT", "Bấm 'Truy vấn'")
         if self.worker and self.worker.is_alive():
             self._log("WARN", "Bỏ qua: một tác vụ đang chạy")
             return
