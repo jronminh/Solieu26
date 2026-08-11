@@ -775,8 +775,10 @@ def flatten_record(record: dict, source_file: str = None,
       - *_hshs columns stay PURELY NUMERIC (rare qualitative values → left blank).
       - 'raw' is pushed to the END (for lookup only, not mixed into clean data).
 
-    Default cloud layer count is 4 (observations top out at 3 in practice, one
-    spare for safety); adjust max_cloud_layers if more are needed.
+    max_cloud_layers is normally computed per batch by cloud_layers_needed()
+    below (so a day with only 1-layer reports doesn't drag along empty
+    cloud_2_*/cloud_3_*/cloud_4_* columns) — the default of 4 here only
+    applies when flatten_record is called on its own.
     """
     location = record.get("location") or {}
     head     = record.get("head") or {}
@@ -833,6 +835,14 @@ def flatten_record(record: dict, source_file: str = None,
     return flat
 
 
+def cloud_layers_needed(records: list, cap: int = 4) -> int:
+    """How many cloud_N_* column groups a batch actually needs (>=1, capped at
+    `cap`). Keeps the common case — 0 or 1 reported layer — from carrying
+    always-empty cloud_2_*/cloud_3_*/cloud_4_* columns into the CSV/viewer."""
+    longest = max((len(r.get("cloud") or []) for r in records), default=0)
+    return max(1, min(longest, cap))
+
+
 def write_csv(file_path: str, rows: list):
     if not rows:
         return
@@ -843,7 +853,9 @@ def write_csv(file_path: str, rows: list):
 
 
 def export_latest_to_csv(latest_file: str, latest_data: list, out_dir: str) -> str:
-    rows = [flatten_record(r, source_file=latest_file) for r in latest_data]
+    n_cloud = cloud_layers_needed(latest_data)
+    rows = [flatten_record(r, source_file=latest_file, max_cloud_layers=n_cloud)
+            for r in latest_data]
     out_path = os.path.join(out_dir, "latest.csv")
     write_csv(out_path, rows)
     return out_path
@@ -851,7 +863,8 @@ def export_latest_to_csv(latest_file: str, latest_data: list, out_dir: str) -> s
 
 def export_history_to_csv(history: list, out_dir: str) -> str:
     # obs_time / date / hour / source_file are all derived by flatten_record from the filename.
-    rows = [flatten_record(item["data"], source_file=item["file"])
+    n_cloud = cloud_layers_needed([item["data"] for item in history])
+    rows = [flatten_record(item["data"], source_file=item["file"], max_cloud_layers=n_cloud)
             for item in history]
     out_path = os.path.join(out_dir, "history.csv")
     write_csv(out_path, rows)
