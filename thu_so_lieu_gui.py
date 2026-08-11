@@ -99,10 +99,10 @@ def open_folder(path: str):
 def open_in_editor(path: str):
     """Open a FILE with its default application (for editing). Returns (ok, reason/path)."""
     if not path:
-        return False, "chưa có đường dẫn file"
+        return False, "chưa có đường dẫn tệp"
     path = os.path.abspath(path)
     if not os.path.isfile(path):
-        return False, f"file không tồn tại: {path}"
+        return False, f"tệp không tồn tại: {path}"
     try:
         if os.name == "nt":
             os.startfile(path)                       # Windows: opens with the app associated to .ini
@@ -176,7 +176,7 @@ class App:
             "delete_on_exit": tk.BooleanVar(value=bool(d.get("delete_on_exit", False))),
             "show_log":    tk.BooleanVar(value=False),   # log frame hidden by default
             "auto_value":  tk.StringVar(value=str(d.get("auto_query_value", 15))),
-            "auto_unit":   tk.StringVar(value="Hours" if d.get("auto_query_unit", "minutes") == "hours" else "Minutes"),
+            "auto_unit":   tk.StringVar(value="Giờ" if d.get("auto_query_unit", "minutes") == "hours" else "Phút"),
         }
 
         # Read-only labels in the "Thông tin truy vấn" panel — recomputed by
@@ -215,7 +215,7 @@ class App:
         file_menu.add_command(label="Thiết lập", command=self._open_settings_dialog)
         file_menu.add_separator()
         file_menu.add_command(label="Mở thư mục CSV", command=self._on_open_folder)
-        file_menu.add_command(label="Mở thư mục data", command=self._on_open_data)
+        file_menu.add_command(label="Mở thư mục tải về", command=self._on_open_data)
         file_menu.add_separator()
         file_menu.add_command(label="Thoát", command=self._on_exit)
         menubar.add_cascade(label="Tệp", menu=file_menu)
@@ -258,7 +258,7 @@ class App:
         q_box.pack(side="left", fill="both", expand=True)
         ttk.Label(q_box, text="Máy chủ:").grid(row=0, column=0, sticky="w", padx=6, pady=2)
         ttk.Label(q_box, textvariable=self.v["ftp_host"]).grid(row=0, column=1, sticky="w", padx=6, pady=2)
-        ttk.Label(q_box, text="File gần nhất:").grid(row=1, column=0, sticky="w", padx=6, pady=2)
+        ttk.Label(q_box, text="Tệp gần nhất:").grid(row=1, column=0, sticky="w", padx=6, pady=2)
         ttk.Label(q_box, textvariable=self.info["latest_file"]).grid(row=1, column=1, sticky="w", padx=6, pady=2)
         ttk.Label(q_box, text="Kết quả xuất CSV:").grid(row=2, column=0, sticky="w", padx=6, pady=2)
         ttk.Label(q_box, textvariable=self.info["csv_result"]).grid(row=2, column=1, sticky="w", padx=6, pady=2)
@@ -266,7 +266,7 @@ class App:
         ttk.Label(q_box, textvariable=self.info["data_status"]).grid(row=3, column=1, sticky="w", padx=6, pady=2)
         ttk.Label(q_box, text="Tự động truy vấn:").grid(row=4, column=0, sticky="w", padx=6, pady=2)
         ttk.Label(q_box, textvariable=self.info["auto_status"]).grid(row=4, column=1, sticky="w", padx=6, pady=2)
-        ttk.Label(q_box, text="File thiếu trên server:").grid(row=5, column=0, sticky="w", padx=6, pady=2)
+        ttk.Label(q_box, text="Tệp thiếu trên máy chủ:").grid(row=5, column=0, sticky="w", padx=6, pady=2)
         ttk.Label(q_box, textvariable=self.info["missing"]).grid(row=5, column=1, sticky="w", padx=6, pady=2)
         q_box.columnconfigure(1, weight=1)
 
@@ -395,18 +395,18 @@ class App:
 
         conn_box = ttk.LabelFrame(frm, text="Kết nối", padding=8)
         conn_box.pack(fill="x")
-        self._row(conn_box, 0, "Host",     self.v["ftp_host"])
-        self._row(conn_box, 1, "User",     self.v["ftp_user"])
-        self._row(conn_box, 2, "Password", self.v["ftp_pass"], show="*")
+        self._row(conn_box, 0, "Máy chủ",  self.v["ftp_host"])
+        self._row(conn_box, 1, "Tài khoản", self.v["ftp_user"])
+        self._row(conn_box, 2, "Mật khẩu", self.v["ftp_pass"], show="*")
         conn_box.columnconfigure(1, weight=1)
 
         path_box = ttk.LabelFrame(frm, text="Đường dẫn", padding=8)
         path_box.pack(fill="x", pady=(8, 0))
-        self._row(path_box, 0, "Thư mục server",  self.v["remote_dir"])
+        self._row(path_box, 0, "Thư mục máy chủ",  self.v["remote_dir"])
         self._row(path_box, 1, "Thư mục xuất CSV", self.v["output_dir"])
-        ttk.Button(path_box, text="Chọn...",
+        ttk.Button(path_box, text="Chọn",
                    command=lambda: self._browse_output(parent=win)).grid(row=1, column=2, padx=4)
-        ttk.Checkbutton(path_box, text="Xóa file tải về sau khi xong",
+        ttk.Checkbutton(path_box, text="Xóa tệp tải về sau khi xong",
                         variable=self.v["delete_on_exit"],
                         command=self._on_toggle_delete).grid(
                         row=2, column=0, columnspan=3, sticky="w", pady=(6, 0))
@@ -421,7 +421,7 @@ class App:
         auto_entry.bind("<FocusOut>", self._on_auto_change)
         auto_entry.bind("<Return>", self._on_auto_change)
         auto_unit = ttk.Combobox(auto_box, textvariable=self.v["auto_unit"],
-                                 values=["Minutes", "Hours"], state="readonly", width=8)
+                                 values=["Phút", "Giờ"], state="readonly", width=8)
         auto_unit.grid(row=0, column=1)
         auto_unit.bind("<<ComboboxSelected>>", self._on_auto_change)
         ttk.Label(auto_box, text="(0 = tắt)").grid(row=0, column=2, padx=(8, 0))
@@ -441,7 +441,7 @@ class App:
         self._log("ACT", "Lưu thiết lập")
         v = self._auto_effective_value()
         self.v["auto_value"].set(str(v))
-        unit_key = "hours" if self.v["auto_unit"].get() == "Hours" else "minutes"
+        unit_key = "hours" if self.v["auto_unit"].get() == "Giờ" else "minutes"
         values = {
             "ftp_host":           self.v["ftp_host"].get().strip(),
             "ftp_user":           self.v["ftp_user"].get().strip(),
@@ -493,22 +493,22 @@ class App:
             "   • 'Xem lịch sử' — lịch sử theo giờ của TẤT CẢ các trạm;\n"
             "     dùng ô 'Trạm' trong cửa sổ xem để lọc riêng 1 trạm\n"
             "     (mặc định lọc theo station_code trong config.ini).\n"
-            "     Trong cửa sổ xem, bấm 'Xem raw' để đối chiếu bản tin gốc.\n\n"
+            "     Trong cửa sổ xem, bấm 'Xem bản gốc' để đối chiếu bản tin gốc.\n\n"
             "5. Menu Tệp:\n"
             "   • 'Thiết lập' — mở hộp thoại gồm:\n"
-            "     - Kết nối: host/user/mật khẩu FTP.\n"
-            "     - Đường dẫn: thư mục server, thư mục xuất CSV,\n"
-            "       bật/tắt xóa file tải về sau khi xong.\n"
+            "     - Kết nối: máy chủ/tài khoản/mật khẩu FTP.\n"
+            "     - Đường dẫn: thư mục máy chủ, thư mục xuất CSV,\n"
+            "       bật/tắt xóa tệp tải về sau khi xong.\n"
             "     - Tự động truy vấn: tự chạy lại sau mỗi N phút/giờ\n"
             "       (0 = tắt); chỉ hoạt động ở chế độ thường (mỗi lần\n"
             "       tự chạy luôn dùng ngày hôm nay).\n"
             "     - 'Tạo/sửa config.ini' — tạo (nếu chưa có) rồi mở\n"
-            "       file để sửa tay; cũng là nơi đổi trạm mặc định\n"
+            "       tệp để sửa tay; cũng là nơi đổi trạm mặc định\n"
             "       cho bộ lọc lịch sử (station_code).\n"
             "     - 'Lưu thiết lập' — lưu ngay các mục trên vào\n"
             "       config.ini để lần chạy sau tự nạp lại.\n"
-            "   • 'Mở thư mục CSV' — xem file latest.csv / history.csv.\n"
-            "   • 'Mở thư mục data' — xem các bản tin gốc (.txt) đã tải về.")
+            "   • 'Mở thư mục CSV' — xem tệp latest.csv / history.csv.\n"
+            "   • 'Mở thư mục tải về' — xem các bản tin gốc (.txt) đã tải về.")
 
     def _on_help_about(self):
         self._log("ACT", "Mở 'Tác giả'")
@@ -538,8 +538,8 @@ class App:
         if not os.path.isfile(path):
             self._log("ERR", f"Chưa có {filename} trong {self._current_output_dir()} — hãy Truy vấn trước")
             messagebox.showwarning(
-                "Chưa có file",
-                f"Không tìm thấy:\n{path}\n\nHãy bấm 'Truy vấn' để tạo file trước.")
+                "Chưa có tệp",
+                f"Không tìm thấy:\n{path}\n\nHãy bấm 'Truy vấn' để tạo tệp trước.")
             return
 
         key = "view_" + filename
@@ -563,7 +563,7 @@ class App:
         # Toolbar
         bar = ttk.Frame(win, padding=(8, 6))
         bar.pack(fill="x")
-        win._toggle_btn = ttk.Button(bar, text="Xem raw",
+        win._toggle_btn = ttk.Button(bar, text="Xem bản gốc",
                                      command=lambda: self._toggle_viewer_mode(win))
         win._toggle_btn.pack(side="left")
         ttk.Button(bar, text="Làm mới",
@@ -613,7 +613,7 @@ class App:
             with open(path, newline="", encoding="utf-8-sig") as f:
                 rows = list(csv.reader(f))
         except OSError as e:
-            win._status.config(text=f"Lỗi đọc file: {e}")
+            win._status.config(text=f"Lỗi đọc tệp: {e}")
             self._log("ERR", f"Không đọc được {os.path.basename(path)}: {e}")
             return
 
@@ -621,7 +621,7 @@ class App:
             win._header, win._data = [], []
             win._tree.delete(*win._tree.get_children())
             win._tree["columns"] = ()
-            win._status.config(text="File rỗng")
+            win._status.config(text="Tệp rỗng")
             return
 
         win._header, win._data = rows[0], rows[1:]
@@ -632,7 +632,7 @@ class App:
     def _toggle_viewer_mode(self, win):
         """Switch between Data mode (hides raw) and Raw mode (identity cols + raw)."""
         win._mode = "raw" if win._mode == "data" else "data"
-        self._log("ACT", f"Xem CSV — chế độ {'Raw' if win._mode == 'raw' else 'Số liệu'}")
+        self._log("ACT", f"Xem CSV — chế độ {'Bản gốc' if win._mode == 'raw' else 'Số liệu'}")
         self._render_viewer(win)
 
     def _on_station_filter_change(self, win):
@@ -762,9 +762,9 @@ class App:
                         values=[r[idx[c]] if idx[c] < len(r) else "" for c in cols])
 
         tree.xview_moveto(0)
-        win._status.config(text=f"Chế độ: {'Raw' if mode == 'raw' else 'Số liệu'} — "
+        win._status.config(text=f"Chế độ: {'Bản gốc' if mode == 'raw' else 'Số liệu'} — "
                                 f"{len(data)} dòng × {len(cols)} cột")
-        win._toggle_btn.config(text="Xem số liệu" if mode == "raw" else "Xem raw")
+        win._toggle_btn.config(text="Xem số liệu" if mode == "raw" else "Xem bản gốc")
 
     def _open_csv_external(self, path: str):
         """Open the CSV file with its default application (usually Excel on Windows)."""
@@ -812,9 +812,9 @@ class App:
         if self.last_result is not None:
             lr = result.get("latest_records", 0)
             hr = result.get("history_records", 0)
-            self.info["csv_result"].set(f"{lr} trạm (latest.csv) · {hr} record (history.csv)")
+            self.info["csv_result"].set(f"{lr} trạm (latest.csv) · {hr} bản ghi (history.csv)")
             missing = len(result.get("missing") or [])
-            self.info["missing"].set("Không thiếu" if missing == 0 else f"{missing} file")
+            self.info["missing"].set("Không thiếu" if missing == 0 else f"{missing} tệp")
         else:
             self.info["csv_result"].set("—")
             self.info["missing"].set("—")
@@ -851,7 +851,7 @@ class App:
         except ValueError:
             v = 0
         v = max(v, 0)
-        return v * 60 if self.v["auto_unit"].get() == "Hours" else v
+        return v * 60 if self.v["auto_unit"].get() == "Giờ" else v
 
     def _schedule_auto_tick(self):
         """(Re)schedule the next auto-query tick from the current value/unit; cancels any pending
@@ -894,7 +894,7 @@ class App:
 
     def _on_toggle_delete(self):
         state = "Bật" if self.v["delete_on_exit"].get() else "Tắt"
-        self._log("ACT", f"Tùy chọn 'Xóa file tải về sau khi xong': {state}")
+        self._log("ACT", f"Tùy chọn 'Xóa tệp tải về sau khi xong': {state}")
 
     def _on_toggle_log(self):
         show = self.v["show_log"].get()
@@ -934,7 +934,7 @@ class App:
             "end_hour": 23,
             "delete_on_exit": self.v["delete_on_exit"].get(),
             "auto_query_value": self._auto_effective_value(),
-            "auto_query_unit": "hours" if self.v["auto_unit"].get() == "Hours" else "minutes",
+            "auto_query_unit": "hours" if self.v["auto_unit"].get() == "Giờ" else "minutes",
         }
 
     def _on_edit_config(self):
@@ -960,7 +960,7 @@ class App:
         else:
             self._log("ERR", f"Không mở được config: {info}")
             messagebox.showwarning("Không mở được",
-                                   f"{info}\n\nBạn có thể mở tay file:\n{path}")
+                                   f"{info}\n\nBạn có thể mở tay tệp:\n{path}")
 
     def _browse_output(self, parent=None):
         self._log("ACT", "Chọn thư mục xuất CSV")
@@ -1020,8 +1020,8 @@ class App:
             messagebox.showerror("Nhập sai", str(e))
             return
         if not cfg["ftp_host"]:
-            self._log("ERR", "Nhập sai: chưa nhập FTP host")
-            messagebox.showerror("Nhập sai", "Chưa nhập FTP host")
+            self._log("ERR", "Nhập sai: chưa nhập máy chủ FTP")
+            messagebox.showerror("Nhập sai", "Chưa nhập máy chủ FTP")
             return
 
         self._divider()
@@ -1092,7 +1092,7 @@ class App:
             self.status.config(text="Không có dữ liệu")
             miss = result.get("missing") or []
             if miss:
-                self._log("WARN", f"Thiếu {len(miss)} file trên server")
+                self._log("WARN", f"Thiếu {len(miss)} tệp trên máy chủ")
             return
 
         self.status.config(text="Hoàn tất")
@@ -1100,7 +1100,7 @@ class App:
         if result.get("latest_csv"):
             parts.append(f"latest.csv ({result['latest_records']} trạm)")
         if result.get("history_csv"):
-            parts.append(f"history.csv ({result['history_records']} record)")
+            parts.append(f"history.csv ({result['history_records']} bản ghi)")
         self._log("OK", "Hoàn tất — đã xuất: " + (", ".join(parts) if parts else "(không có)"))
 
 

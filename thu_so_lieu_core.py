@@ -325,7 +325,7 @@ def download_files(ftp: FTP, cfg: dict, log=_console_log, progress=None) -> dict
                 log("SKIP", f"Đã có sẵn   {filename}")
                 files.append(local_path); skipped.append(filename)
             else:
-                log("MISS", f"Server chưa có  {filename}")
+                log("MISS", f"Máy chủ chưa có {filename}")
                 missing.append(filename)
 
             if progress:
@@ -397,7 +397,7 @@ def download_files_range(ftp: FTP, cfg: dict, log=_console_log, progress=None) -
                 log("SKIP", f"Đã có sẵn   {filename}")
                 files.append(local_path); skipped.append(filename)
             else:
-                log("MISS", f"Server chưa có  {filename}")
+                log("MISS", f"Máy chủ chưa có {filename}")
                 missing.append(filename)
 
             if progress:
@@ -891,11 +891,11 @@ def run_pipeline(cfg: dict, log=_console_log, progress=None) -> dict:
         result["missing"] = dl["missing"]
 
         if not files:
-            log("WARN", "Không tải được file nào")
+            log("WARN", "Không tải được tệp nào")
             return result
 
         files = sorted(files)
-        log("INFO", f"Tổng số file có sẵn: {len(files)}")
+        log("INFO", f"Tổng số tệp có sẵn: {len(files)}")
 
         output_dir = os.path.abspath(cfg.get("output_dir") or DEFAULT_OUTPUT_DIR)
         os.makedirs(output_dir, exist_ok=True)
@@ -904,15 +904,15 @@ def run_pipeline(cfg: dict, log=_console_log, progress=None) -> dict:
         latest_file, latest_data = decode_latest_file(files)
         if latest_file:
             result["latest_file"] = os.path.basename(latest_file)
-            log("INFO", f"File mới nhất: {os.path.basename(latest_file)} "
-                        f"({len(latest_data)} record)")
+            log("INFO", f"Tệp mới nhất: {os.path.basename(latest_file)} "
+                        f"({len(latest_data)} bản ghi)")
             csv_path = export_latest_to_csv(latest_file, latest_data, output_dir)
             result["latest_csv"] = csv_path
             result["latest_records"] = len(latest_data)
-            log("OK", f"Đã xuất snapshot: {csv_path}")
+            log("OK", f"Đã xuất dữ liệu mới nhất: {csv_path}")
 
         history = get_full_history(files)
-        log("INFO", f"Lịch sử đầy đủ: {len(history)} record (mọi trạm, mọi giờ)")
+        log("INFO", f"Lịch sử đầy đủ: {len(history)} bản ghi (mọi trạm, mọi giờ)")
         if history:
             csv_path = export_history_to_csv(history, output_dir)
             result["history_csv"] = csv_path
