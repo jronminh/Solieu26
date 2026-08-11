@@ -205,7 +205,8 @@ class App:
 
     # -----------------------------------------------------------------
     def _build_menu(self):
-        """Menu bar: File / Actions / View / Help. Keeps the main screen compact."""
+        """Menu bar: File / Help only — Actions and View were removed (every command they
+        held mirrors a button/checkbox already on the main screen)."""
         menubar = tk.Menu(self.root)
 
         # --- File --- (Thiết lập... opens the combined Kết nối / Đường dẫn / Tự động
@@ -221,24 +222,6 @@ class App:
         self.file_menu = file_menu               # lets us enable/disable "Open CSV folder" by state
         # Not run yet → no CSV folder to open
         self.file_menu.entryconfig("Mở thư mục CSV", state="disabled")
-
-        # --- Actions --- (mirrors the "Truy vấn" button on the main screen)
-        action_menu = tk.Menu(menubar, tearoff=0)
-        action_menu.add_command(label="Truy vấn", command=self._on_run)
-        menubar.add_cascade(label="Thao tác", menu=action_menu)
-
-        # --- View --- (mirrors the "Xem gần nhất" / "Xem lịch sử" buttons on the main
-        # screen; "Hiển thị nhật ký" toggles the log frame)
-        view_menu = tk.Menu(menubar, tearoff=0)
-        view_menu.add_command(label="Xem gần nhất",
-                              command=lambda: self._open_csv_viewer("latest.csv", "latest.csv"))
-        view_menu.add_command(label="Xem lịch sử",
-                              command=lambda: self._open_csv_viewer(
-                                  "history.csv", "history.csv", with_station_filter=True))
-        view_menu.add_separator()
-        view_menu.add_checkbutton(label="Hiển thị nhật ký", variable=self.v["show_log"],
-                                  command=self._on_toggle_log)
-        menubar.add_cascade(label="Xem", menu=view_menu)
 
         # --- Help ---
         help_menu = tk.Menu(menubar, tearoff=0)
@@ -314,6 +297,8 @@ class App:
                                          variable=self.v["advanced_mode"],
                                          command=self._on_toggle_advanced)
         self.adv_check.pack(side="left")
+        ttk.Checkbutton(statusbar, text="Hiển thị nhật ký", variable=self.v["show_log"],
+                        command=self._on_toggle_log).pack(side="left", padx=(10, 0))
         self.status = ttk.Label(statusbar, text="Sẵn sàng", anchor="e")
         self.status.pack(side="right")
 
@@ -500,14 +485,15 @@ class App:
             "   cao'); bỏ tick để quay lại chế độ thường và tự động truy\n"
             "   vấn tiếp tục chạy theo thiết lập đã lưu.\n\n"
             "3. Bấm 'Truy vấn' để tải bản tin từ FTP và giải mã.\n"
-            "   Theo dõi tiến trình ở thanh trạng thái và Nhật ký bên dưới.\n\n"
-            "4. Menu Xem:\n"
+            "   Theo dõi tiến trình ở thanh trạng thái; tick 'Hiển thị\n"
+            "   nhật ký' (góc dưới bên trái) để xem/ẩn khung Nhật ký\n"
+            "   (mặc định tắt).\n\n"
+            "4. Nút 'Xem gần nhất' / 'Xem lịch sử' trên màn hình chính:\n"
             "   • 'Xem gần nhất' — bản tin mới nhất của TẤT CẢ các trạm.\n"
             "   • 'Xem lịch sử' — lịch sử theo giờ của TẤT CẢ các trạm;\n"
             "     dùng ô 'Trạm' trong cửa sổ xem để lọc riêng 1 trạm\n"
             "     (mặc định lọc theo station_code trong config.ini).\n"
-            "     Trong cửa sổ xem, bấm 'Xem raw' để đối chiếu bản tin gốc.\n"
-            "   • 'Hiển thị nhật ký' — bật/tắt khung Nhật ký (mặc định tắt).\n\n"
+            "     Trong cửa sổ xem, bấm 'Xem raw' để đối chiếu bản tin gốc.\n\n"
             "5. Menu Tệp:\n"
             "   • 'Thiết lập...' — mở hộp thoại gồm:\n"
             "     - Kết nối: host/user/mật khẩu FTP.\n"
