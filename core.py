@@ -1,12 +1,10 @@
 """
-thu_so_lieu_core_en.py
-========================
-English-language variant of thu_so_lieu_core.py — same logic, same config.ini
-schema/section (fully interchangeable), only the user-facing log strings and
-the weather-code lookup tables (which end up as CSV values) are in English.
+core.py
+====================
+Core: fetch + decode surface weather observation bulletins (no UI, no tkinter).
 
 Runs standalone:
-    python thu_so_lieu_core_en.py [config.ini path]
+    python core.py [config.ini path]
 
 Uses the CONFIG dict defined below as defaults. If a config.ini file exists
 (next to this script, or the path given on the command line), its keys
@@ -14,9 +12,9 @@ override CONFIG — see "LOADING THE EXTERNAL CONFIG" below for the exact keys.
 Logs go through the callback log(level, msg); the default _console_log prints
 them to stdout as "HH:MM:SS  LEVEL  message".
 
-thu_so_lieu_gui_en.py is a thin Tkinter wrapper around this module (`import
-thu_so_lieu_core_en as core`) — it calls core.apply_config_file()/core.run_pipeline()
-and never touches the FTP/decode internals directly.
+gui.py is a thin Tkinter wrapper around this module (`import core`) — it
+calls core.apply_config_file()/core.run_pipeline() and never touches the
+FTP/decode internals directly.
 """
 
 import csv
@@ -29,7 +27,7 @@ import time
 from ftplib import FTP, error_perm, error_temp
 
 # Console output must survive non-UTF-8 terminals — Windows cmd.exe's default
-# codepage (cp1252/cp437) can't encode some characters and would otherwise
+# codepage (cp1252/cp437) can't encode Vietnamese diacritics and would otherwise
 # crash the very first _console_log() call when running standalone.
 for _stream in (sys.stdout, sys.stderr):
     try:
@@ -42,14 +40,19 @@ for _stream in (sys.stdout, sys.stderr):
 # PATH & FTP CONSTANTS
 # =============================================================================
 
-try:
-    SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-except NameError:                       # frozen/packaged run has no __file__
-    SCRIPT_DIR = os.path.abspath(".")
+if getattr(sys, "frozen", False):
+    # Running as a PyInstaller-built exe: __file__ would point into the
+    # temporary extraction folder, so anchor to the exe's own location instead.
+    SCRIPT_DIR = os.path.dirname(os.path.abspath(sys.executable))
+else:
+    try:
+        SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+    except NameError:
+        SCRIPT_DIR = os.path.abspath(".")
 
 # Downloaded files go into the OS temp dir; use a fixed subfolder (NOT random)
 # so a later run still recognizes old files and can SKIP instead of re-downloading.
-TEMP_DL_DIR = os.path.join(tempfile.gettempdir(), "thu_so_lieu_qt")
+TEMP_DL_DIR = os.path.join(tempfile.gettempdir(), "solieu26_dl")
 
 DEFAULT_OUTPUT_DIR = SCRIPT_DIR          # default CSV location, next to the script (absolute)
 
@@ -81,15 +84,15 @@ def _console_log(level: str, msg: str):
 # =============================================================================
 
 CONFIG = {
-    "ftp_host": "khituongpkkq.com.vn",
-    "ftp_user": "khituong",
-    "ftp_pass": "Ktkq22@#",
+    "ftp_host": "",
+    "ftp_user": "",
+    "ftp_pass": "",
     "ftp_timeout": FTP_TIMEOUT,
 
     "retry_temp": RETRY_TEMP,
     "retry_wait": RETRY_WAIT,
 
-    "remote_dir": "/Quantrac",
+    "remote_dir": "Quantrac",
     "local_dir":  TEMP_DL_DIR,           # downloads go into temp
     "output_dir": DEFAULT_OUTPUT_DIR,
     "delete_on_exit": False,
@@ -116,7 +119,7 @@ CONFIG = {
 # =============================================================================
 
 CONFIG_FILENAME = "config.ini"          # default name, looked up next to the script
-CONFIG_SECTION  = "thu_so_lieu"
+CONFIG_SECTION  = "Solieu26"
 
 _STR_KEYS  = ("ftp_host", "ftp_user", "ftp_pass",
               "remote_dir", "output_dir", "station_code", "auto_query_unit")
@@ -142,7 +145,7 @@ def load_config_file(path: str) -> dict:
     try:
         parser.read(path, encoding="utf-8")
     except Exception as e:
-        _console_log("WARN", f"Could not read config '{path}': {e}")
+        _console_log("WARN", f"Không đọc được config '{path}': {e}")
         return {}
 
     if parser.has_section(CONFIG_SECTION):
@@ -159,17 +162,17 @@ def load_config_file(path: str) -> dict:
             try:
                 out[k] = int(raw[k])
             except ValueError:
-                _console_log("WARN", f"config '{k}' is not an integer → ignored")
+                _console_log("WARN", f"config '{k}' không phải số nguyên → bỏ qua")
     if "delete_on_exit" in raw:
         try:
             out["delete_on_exit"] = _to_bool(raw["delete_on_exit"])
         except ValueError:
-            _console_log("WARN", "config 'delete_on_exit' is not true/false → ignored")
+            _console_log("WARN", "config 'delete_on_exit' không phải true/false → bỏ qua")
     if "date" in raw:
         try:
             out["date"] = datetime.datetime.strptime(raw["date"].strip(), "%Y-%m-%d")
         except ValueError:
-            _console_log("WARN", "config 'date' has the wrong format (expected YYYY-MM-DD) → ignored")
+            _console_log("WARN", "config 'date' sai định dạng YYYY-MM-DD → bỏ qua")
     if "viewer_hidden_columns" in raw:
         val = raw["viewer_hidden_columns"].strip()
         out["viewer_hidden_columns"] = [c.strip() for c in val.split(",") if c.strip()]
@@ -308,7 +311,7 @@ def download_files(ftp: FTP, cfg: dict, log=_console_log, progress=None) -> dict
     try:
         ftp.cwd(target_dir)
     except (error_perm, error_temp) as e:
-        log("ERR", f"Could not access folder {target_dir}: {e}")
+        log("ERR", f"Không truy cập được thư mục {target_dir}: {e}")
         return {"files": [], "downloaded": [], "skipped": [], "missing": []}
 
     files, downloaded, skipped, missing = [], [], [], []
@@ -321,13 +324,13 @@ def download_files(ftp: FTP, cfg: dict, log=_console_log, progress=None) -> dict
                                    retry_temp=retry_temp, retry_wait=retry_wait)
 
             if status == 0:
-                log("OK", f"Downloaded    {filename}")
+                log("OK", f"Tải về      {filename}")
                 files.append(local_path); downloaded.append(filename)
             elif status == 1:
-                log("SKIP", f"Already have  {filename}")
+                log("SKIP", f"Đã có sẵn   {filename}")
                 files.append(local_path); skipped.append(filename)
             else:
-                log("MISS", f"Not on server {filename}")
+                log("MISS", f"Máy chủ chưa có {filename}")
                 missing.append(filename)
 
             if progress:
@@ -381,7 +384,7 @@ def download_files_range(ftp: FTP, cfg: dict, log=_console_log, progress=None) -
                     ftp.cwd(target_dir)
                     current_dir = target_dir
                 except (error_perm, error_temp) as e:
-                    log("ERR", f"Could not access folder {target_dir}: {e}")
+                    log("ERR", f"Không truy cập được thư mục {target_dir}: {e}")
                     current_dir = target_dir   # avoid retrying cwd for every hour in this month
                     missing.append(filename)
                     if progress:
@@ -393,13 +396,13 @@ def download_files_range(ftp: FTP, cfg: dict, log=_console_log, progress=None) -
                                    retry_temp=retry_temp, retry_wait=retry_wait)
 
             if status == 0:
-                log("OK", f"Downloaded    {filename}")
+                log("OK", f"Tải về      {filename}")
                 files.append(local_path); downloaded.append(filename)
             elif status == 1:
-                log("SKIP", f"Already have  {filename}")
+                log("SKIP", f"Đã có sẵn   {filename}")
                 files.append(local_path); skipped.append(filename)
             else:
-                log("MISS", f"Not on server {filename}")
+                log("MISS", f"Máy chủ chưa có {filename}")
                 missing.append(filename)
 
             if progress:
@@ -436,63 +439,63 @@ TABLES = {
         '95': 600,   '96': 1000,  '97': 1500,  '98': 2000,
     },
     "ww": {
-        '00': 'Cloud development not observed', '01': 'Clouds dissolving',
-        '02': 'Sky state unchanged',             '03': 'Clouds developing',
-        '04': 'Smoke',                           '05': 'Haze',
-        '06': 'Dust suspended in the air',       '07': 'Dust raised by wind',
-        '08': 'Dust whirls',                     '09': 'Duststorm/sandstorm in sight',
-        '10': 'Mist',                            '11': 'Shallow fog, patches',
-        '12': 'Shallow fog, continuous',         '13': 'Lightning, no thunder',
-        '14': 'Precipitation in sight, distant', '15': 'Precipitation in sight, distant',
-        '16': 'Precipitation in sight, near',    '17': 'Thunderstorm, no precipitation',
-        '18': 'Squalls',                         '19': 'Funnel cloud / tornado',
-        '20': 'Drizzle in preceding hour',       '21': 'Rain in preceding hour',
-        '22': 'Snow in preceding hour',          '23': 'Rain and snow in preceding hour',
-        '24': 'Freezing rain in preceding hour', '25': 'Rain shower in preceding hour',
-        '26': 'Snow shower in preceding hour',   '27': 'Hail shower in preceding hour',
-        '28': 'Fog in preceding hour',           '29': 'Thunderstorm in preceding hour',
-        '30': 'Duststorm/sandstorm',             '31': 'Duststorm/sandstorm',
-        '32': 'Duststorm/sandstorm',             '33': 'Severe duststorm/sandstorm',
-        '34': 'Severe duststorm/sandstorm',      '35': 'Severe duststorm/sandstorm',
-        '36': 'Drifting snow',                   '37': 'Drifting snow',
-        '38': 'Blowing snow',                    '39': 'Blowing snow',
-        '40': 'Fog',                             '41': 'Fog, patches',
-        '42': 'Fog, sky visible',                '43': 'Fog, sky obscured',
-        '44': 'Fog, sky visible, thickening',    '45': 'Fog, sky obscured, thickening',
-        '46': 'Fog with rime, sky visible',      '47': 'Fog with rime, sky obscured',
-        '48': 'Fog depositing rime, sky visible','49': 'Fog depositing rime, sky obscured',
-        '50': 'Drizzle, slight, intermittent',   '51': 'Drizzle, slight, continuous',
-        '52': 'Drizzle, moderate, intermittent', '53': 'Drizzle, moderate, continuous',
-        '54': 'Drizzle, heavy, intermittent',    '55': 'Drizzle, heavy, continuous',
-        '56': 'Freezing drizzle, slight',        '57': 'Freezing drizzle, moderate/heavy',
-        '58': 'Drizzle and rain, slight',        '59': 'Drizzle and rain, moderate/heavy',
-        '60': 'Rain, slight, intermittent',      '61': 'Rain, slight, continuous',
-        '62': 'Rain, moderate, intermittent',    '63': 'Rain, moderate, continuous',
-        '64': 'Rain, heavy, intermittent',       '65': 'Rain, heavy, continuous',
-        '66': 'Freezing rain, slight',           '67': 'Freezing rain, moderate/heavy',
-        '68': 'Rain and snow, slight',           '69': 'Rain and snow, moderate/heavy',
-        '70': 'Snow, slight, intermittent',      '71': 'Snow, slight, continuous',
-        '72': 'Snow, moderate, intermittent',    '73': 'Snow, moderate, continuous',
-        '74': 'Snow, heavy, intermittent',       '75': 'Snow, heavy, continuous',
-        '76': 'Ice needles',                     '77': 'Snow grains',
-        '78': 'Star-shaped snow crystals',       '79': 'Ice pellets',
-        '80': 'Rain shower, slight',             '81': 'Rain shower, moderate/heavy',
-        '82': 'Rain shower, violent',            '83': 'Rain and snow shower, slight',
-        '84': 'Rain and snow shower, moderate/heavy', '85': 'Snow shower, slight',
-        '86': 'Snow shower, moderate/heavy',     '87': 'Hail shower, slight',
-        '88': 'Hail shower, moderate/heavy',     '89': 'Hail shower, violent',
-        '90': 'Hail shower, violent',            '91': 'Rain after thunderstorm, slight',
-        '92': 'Rain after thunderstorm, moderate/heavy', '93': 'Hail after thunderstorm, slight',
-        '94': 'Hail after thunderstorm, moderate/heavy', '95': 'Thunderstorm, slight, with rain',
-        '96': 'Thunderstorm, slight, with hail', '97': 'Thunderstorm, heavy, with rain',
-        '98': 'Thunderstorm with duststorm/sandstorm', '99': 'Thunderstorm, heavy, with hail',
+        '00': 'Không quan sát được mây',   '01': 'Mây tan (mỏng dần)',
+        '02': 'Thời tiết không đổi',       '03': 'Mây hình thành (phát triển)',
+        '04': 'Khói',                      '05': 'Mù khô',
+        '06': 'Bụi lơ lửng',              '07': 'Bụi',
+        '08': 'Lốc bụi',                  '09': 'Bão bụi',
+        '10': 'Mù',                        '11': 'Sương mù mỏng',
+        '12': 'Sương mù mỏng',             '13': 'Chớp',
+        '14': 'Mưa xa',                    '15': 'Mưa xa',
+        '16': 'Mưa xa',                    '17': 'Dông',
+        '18': 'Tố',                        '19': 'Vòi rồng',
+        '20': 'Mưa phùn giờ trước',        '21': 'Mưa giờ trước',
+        '22': 'Tuyết giờ trước',           '23': 'Mưa lẫn tuyết giờ trước',
+        '24': 'Mưa đông kết giờ trước',    '25': 'Mưa rào giờ trước',
+        '26': 'Tuyết rào giờ trước',       '27': 'Mưa đá rào giờ trước',
+        '28': 'Sương mù giờ trước',        '29': 'Dông giờ trước',
+        '30': 'Bão bụi (cát)',             '31': 'Bão bụi (cát)',
+        '32': 'Bão bụi (cát)',             '33': 'Bão bụi (cát) mạnh',
+        '34': 'Bão bụi (cát) mạnh',       '35': 'Bão bụi (cát) mạnh',
+        '36': 'Tuyết cuốn',               '37': 'Tuyết cuốn',
+        '38': 'Tuyết cuốn',               '39': 'Tuyết cuốn',
+        '40': 'Sương mù',                  '41': 'Sương mù',
+        '42': 'Sương mù',                  '43': 'Sương mù',
+        '44': 'Sương mù',                  '45': 'Sương mù',
+        '46': 'Sương mù',                  '47': 'Sương mù',
+        '48': 'Sương mù',                  '49': 'Sương mù',
+        '50': 'Mưa phùn',                  '51': 'Mưa phùn',
+        '52': 'Mưa phùn',                  '53': 'Mưa phùn',
+        '54': 'Mưa phùn',                  '55': 'Mưa phùn',
+        '56': 'Mưa phùn',                  '57': 'Mưa phùn',
+        '58': 'Mưa phùn',                  '59': 'Mưa phùn',
+        '60': 'Mưa nhẹ',                   '61': 'Mưa nhẹ',
+        '62': 'Mưa vừa',                   '63': 'Mưa vừa',
+        '64': 'Mưa to',                    '65': 'Mưa to',
+        '66': 'Mưa đông kết',              '67': 'Mưa đông kết',
+        '68': 'Mưa và tuyết',              '69': 'Mưa và tuyết',
+        '70': 'Tuyết nhẹ',                 '71': 'Tuyết nhẹ',
+        '72': 'Tuyết trung bình',          '73': 'Tuyết trung bình',
+        '74': 'Tuyết mạnh',               '75': 'Tuyết mạnh',
+        '76': 'Kim nước đá',               '77': 'Tuyết hạt',
+        '78': 'Tuyết hình sao',            '79': 'Hạt nước đá',
+        '80': 'Mưa rào nhẹ',              '81': 'Mưa rào vừa',
+        '82': 'Mưa to',                    '83': 'Mưa rào lẫn tuyết',
+        '84': 'Mưa rào lẫn tuyết',        '85': 'Tuyết rào nhẹ',
+        '86': 'Tuyết rào mạnh',           '87': 'Mưa đá rào',
+        '88': 'Mưa đá rào',               '89': 'Mưa đá rào',
+        '90': 'Mưa đá rào',               '91': 'Mưa sau dông',
+        '92': 'Mưa sau dông',             '93': 'Mưa đá sau dông',
+        '94': 'Mưa đá sau dông',          '95': 'Dông nhẹ và mưa',
+        '96': 'Dông nhẹ và mưa',          '97': 'Dông mạnh có mưa',
+        '98': 'Dông với bão bụi',         '99': 'Dông mạnh có mưa đá',
     },
     "W1W2": {
-        '0': 'Mostly clear',        '1': 'Variable cloud',
-        '2': 'Mostly cloudy',       '3': 'Duststorm/sandstorm',
-        '4': 'Fog',                 '5': 'Drizzle',
-        '6': 'Rain',                '7': 'Snow',
-        '8': 'Shower(s)',           '9': 'Thunderstorm',
+        '0': 'Ít mây',              '1': 'Lượng mây thay đổi',
+        '2': 'Nhiều mây',           '3': 'Bão cát',
+        '4': 'Sương mù',            '5': 'Mưa phùn',
+        '6': 'Mưa',                 '7': 'Tuyết',
+        '8': 'Mưa rào',             '9': 'Dông',
     },
     "VV_special": {
         '90': '0.0', '91': '0.1', '92': '0.2', '93': '0.5', '94': '1',
@@ -777,8 +780,10 @@ def flatten_record(record: dict, source_file: str = None,
       - *_hshs columns stay PURELY NUMERIC (rare qualitative values → left blank).
       - 'raw' is pushed to the END (for lookup only, not mixed into clean data).
 
-    Default cloud layer count is 4 (observations top out at 3 in practice, one
-    spare for safety); adjust max_cloud_layers if more are needed.
+    max_cloud_layers is normally computed per batch by cloud_layers_needed()
+    below (so a day with only 1-layer reports doesn't drag along empty
+    cloud_2_*/cloud_3_*/cloud_4_* columns) — the default of 4 here only
+    applies when flatten_record is called on its own.
     """
     location = record.get("location") or {}
     head     = record.get("head") or {}
@@ -835,6 +840,14 @@ def flatten_record(record: dict, source_file: str = None,
     return flat
 
 
+def cloud_layers_needed(records: list, cap: int = 4) -> int:
+    """How many cloud_N_* column groups a batch actually needs (>=1, capped at
+    `cap`). Keeps the common case — 0 or 1 reported layer — from carrying
+    always-empty cloud_2_*/cloud_3_*/cloud_4_* columns into the CSV/viewer."""
+    longest = max((len(r.get("cloud") or []) for r in records), default=0)
+    return max(1, min(longest, cap))
+
+
 def write_csv(file_path: str, rows: list):
     if not rows:
         return
@@ -845,7 +858,9 @@ def write_csv(file_path: str, rows: list):
 
 
 def export_latest_to_csv(latest_file: str, latest_data: list, out_dir: str) -> str:
-    rows = [flatten_record(r, source_file=latest_file) for r in latest_data]
+    n_cloud = cloud_layers_needed(latest_data)
+    rows = [flatten_record(r, source_file=latest_file, max_cloud_layers=n_cloud)
+            for r in latest_data]
     out_path = os.path.join(out_dir, "latest.csv")
     write_csv(out_path, rows)
     return out_path
@@ -853,7 +868,8 @@ def export_latest_to_csv(latest_file: str, latest_data: list, out_dir: str) -> s
 
 def export_history_to_csv(history: list, out_dir: str) -> str:
     # obs_time / date / hour / source_file are all derived by flatten_record from the filename.
-    rows = [flatten_record(item["data"], source_file=item["file"])
+    n_cloud = cloud_layers_needed([item["data"] for item in history])
+    rows = [flatten_record(item["data"], source_file=item["file"], max_cloud_layers=n_cloud)
             for item in history]
     out_path = os.path.join(out_dir, "history.csv")
     write_csv(out_path, rows)
@@ -876,11 +892,11 @@ def run_pipeline(cfg: dict, log=_console_log, progress=None) -> dict:
               "history_csv": None, "history_records": 0,
               "output_dir": cfg.get("output_dir", DEFAULT_OUTPUT_DIR)}
 
-    log("INFO", f"Temp download folder: {cfg.get('local_dir')}")
-    log("INFO", "Connecting to FTP…")
+    log("INFO", f"Thư mục tải tạm: {cfg.get('local_dir')}")
+    log("INFO", "Đang kết nối FTP…")
     ftp = FTP(cfg["ftp_host"], timeout=cfg.get("ftp_timeout", FTP_TIMEOUT))
     ftp.login(cfg["ftp_user"], cfg["ftp_pass"])
-    log("OK", "FTP login successful")
+    log("OK", "Đăng nhập FTP thành công")
 
     files = []
     try:
@@ -893,11 +909,11 @@ def run_pipeline(cfg: dict, log=_console_log, progress=None) -> dict:
         result["missing"] = dl["missing"]
 
         if not files:
-            log("WARN", "No files downloaded")
+            log("WARN", "Không tải được tệp nào")
             return result
 
         files = sorted(files)
-        log("INFO", f"Total files available: {len(files)}")
+        log("INFO", f"Tổng số tệp có sẵn: {len(files)}")
 
         output_dir = os.path.abspath(cfg.get("output_dir") or DEFAULT_OUTPUT_DIR)
         os.makedirs(output_dir, exist_ok=True)
@@ -906,20 +922,20 @@ def run_pipeline(cfg: dict, log=_console_log, progress=None) -> dict:
         latest_file, latest_data = decode_latest_file(files)
         if latest_file:
             result["latest_file"] = os.path.basename(latest_file)
-            log("INFO", f"Latest file: {os.path.basename(latest_file)} "
-                        f"({len(latest_data)} records)")
+            log("INFO", f"Tệp mới nhất: {os.path.basename(latest_file)} "
+                        f"({len(latest_data)} bản ghi)")
             csv_path = export_latest_to_csv(latest_file, latest_data, output_dir)
             result["latest_csv"] = csv_path
             result["latest_records"] = len(latest_data)
-            log("OK", f"Exported latest data: {csv_path}")
+            log("OK", f"Đã xuất dữ liệu mới nhất: {csv_path}")
 
         history = get_full_history(files)
-        log("INFO", f"Full history: {len(history)} records (every station, every hour)")
+        log("INFO", f"Lịch sử đầy đủ: {len(history)} bản ghi (mọi trạm, mọi giờ)")
         if history:
             csv_path = export_history_to_csv(history, output_dir)
             result["history_csv"] = csv_path
             result["history_records"] = len(history)
-            log("OK", f"Exported history: {csv_path}")
+            log("OK", f"Đã xuất lịch sử: {csv_path}")
 
         result["ok"] = True
         return result
@@ -942,13 +958,13 @@ def run_pipeline(cfg: dict, log=_console_log, progress=None) -> dict:
 # =============================================================================
 
 def main():
-    # Allows: python thu_so_lieu_core_en.py [config_ini_path]
+    # Allows: python core.py [config_ini_path]
     config_path = sys.argv[1] if len(sys.argv) > 1 else None
     path_used, overrides = apply_config_file(config_path)
     if overrides:
-        _console_log("OK", f"Loaded {len(overrides)} settings from config: {path_used}")
+        _console_log("OK", f"Đã nạp {len(overrides)} thiết lập từ config: {path_used}")
     else:
-        _console_log("INFO", f"Config not found ({path_used}) — using defaults in code.")
+        _console_log("INFO", f"Không thấy config ({path_used}) — dùng mặc định trong mã.")
     run_pipeline(CONFIG, log=_console_log)
 
 

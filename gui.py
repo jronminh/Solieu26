@@ -1,10 +1,10 @@
 """
-thu_so_lieu_gui.py
+gui.py
 ===================
-Tkinter GUI wrapping thu_so_lieu_core (imported as `core`).
+Tkinter GUI wrapping core.py (imported as `core`).
 
-Run:  python thu_so_lieu_gui.py [config.ini path]
-Requires thu_so_lieu_core.py in the same folder.
+Run:  python gui.py [config.ini path]
+Requires core.py in the same folder.
 
 Anti-freeze architecture: heavy work (FTP + decode + CSV export, all in core)
 runs on a worker thread that never touches widgets — it only pushes ('log' /
@@ -23,7 +23,7 @@ import threading
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox, scrolledtext
 
-import thu_so_lieu_core as core
+import core
 
 
 # =============================================================================
@@ -76,12 +76,12 @@ NUMERIC_VIEWER_COLUMNS = {
     "cloud_layers", "hour",
 }
 
-# Columns permanently kept out of the CSV viewer table — unlike self.hidden_cols
-# (user-toggled via "Hiển thị", persisted to config), these never appear as a
-# checkbox option either, so there's no way to bring them back short of opening
-# the CSV file itself. The data still goes into latest.csv/history.csv as normal.
+# Columns that never appear in the CSV viewer — not shown in either mode, and
+# not offered in the "Hiển thị" picker either, so they can't be toggled back on
+# from the GUI. They stay in the exported CSV file untouched; the only way to
+# see them is opening latest.csv/history.csv directly (e.g. in Excel).
 ALWAYS_HIDDEN_VIEWER_COLUMNS = {
-    "obs_time", "date", "source_file", "station_code", "lat", "lon", "cloud_layers",
+    "date", "hour", "source_file", "station_code", "lat", "lon", "cloud_layers",
 }
 
 
@@ -126,9 +126,9 @@ def open_in_editor(path: str):
 def write_minimal_config(path: str, values: dict):
     """Write a minimal config.ini from the current settings (only the keys the GUI has)."""
     lines = [
-        "# config.ini cho thu_so_lieu.py — sửa giá trị rồi lưu lại.",
+        "# config.ini cho Solieu26 — sửa giá trị rồi lưu lại.",
         "# Xóa dòng nào muốn dùng mặc định trong mã.",
-        "[thu_so_lieu]",
+        "[Solieu26]",
         f"ftp_host = {values['ftp_host']}",
         f"ftp_user = {values['ftp_user']}",
         f"ftp_pass = {values['ftp_pass']}",
@@ -164,7 +164,7 @@ class App:
         # (latest/history have the same schema); loaded from config, saved back on change.
         self.hidden_cols = set(core.CONFIG.get("viewer_hidden_columns", []))
 
-        root.title("Thu số liệu quan trắc")
+        root.title("Solieu26")
         root.minsize(200, 150)   # temporary low floor, replaced below once real content is laid out
 
         # CSV viewer Treeview look — taller rows + bold headings read better than
@@ -528,7 +528,7 @@ class App:
         self._log("ACT", "Mở 'Tác giả'")
         messagebox.showinfo(
             "Tác giả",
-            "Thu số liệu quan trắc\n\n"
+            "Solieu26\n\n"
             "Tác giả:\n"
             "  congminh9981 — congminh9981@gmail.com\n"
             "  Claude (Anthropic) — đồng tác giả")
@@ -698,8 +698,6 @@ class App:
         frm = ttk.Frame(dlg, padding=12)
         frm.pack(fill="both", expand=True)
 
-        # ALWAYS_HIDDEN_VIEWER_COLUMNS don't get a checkbox at all — they're not
-        # meant to be toggleable back on from the GUI.
         header = [c for c in (win._header or []) if c not in ALWAYS_HIDDEN_VIEWER_COLUMNS]
         col_vars = {}
         ncols = 3
@@ -759,28 +757,34 @@ class App:
             cols = [c for c in prefer if c in header]
         else:
             cols = [c for c in header if c != "raw"]   # data mode: all columns, minus raw
+        # ALWAYS_HIDDEN_VIEWER_COLUMNS are dropped in both modes — they stay in the
+        # CSV file, just never rendered here (see the constant's docstring above).
         cols = [c for c in cols
-                if c not in self.hidden_cols and c not in ALWAYS_HIDDEN_VIEWER_COLUMNS]
+                if c not in ALWAYS_HIDDEN_VIEWER_COLUMNS and c not in self.hidden_cols]
 
         idx = {c: header.index(c) for c in cols}
 
         tree.delete(*tree.get_children())
         tree["columns"] = cols
-        # Width comes from the DATA only (not the header/title) — a header like
+        # Width from the ACTUAL DATA, not the header text — a header like
         # "temperature_c" is much longer than any value it holds, so sizing off
-        # it would waste space. Data is right-aligned in every cell.
+        # the header (the old behavior) left short numeric columns wide and sparse.
+        # Falls back to the header length only when a column has no data to sample
+        # (e.g. cloud_2_* with no station reporting a 2nd layer at all).
         sample_rows = data[:300]
         for c in cols:
             is_sorted = (c == win._sort_col)
             arrow = "" if not is_sorted else (" ▼" if win._sort_reverse else " ▲")
             tree.heading(c, text=c + arrow, command=lambda c=c: self._sort_viewer(win, c))
             if c == "raw":
-                tree.column(c, width=560, stretch=True, anchor="e")
+                tree.column(c, width=560, stretch=True, anchor="w")
             else:
                 i = idx[c]
-                longest = max([1] + [len(r[i]) for r in sample_rows if i < len(r) and r[i]])
-                w = max(50, min(220, (longest + 2) * 7))
-                tree.column(c, width=w, stretch=False, anchor="e")
+                vals = [len(r[i]) for r in sample_rows if i < len(r) and r[i]]
+                longest = max(vals) if vals else len(c)
+                w = max(50, min(200, (longest + 2) * 7))
+                anchor = "e" if (c in NUMERIC_VIEWER_COLUMNS or c.endswith("_hshs")) else "w"
+                tree.column(c, width=w, stretch=False, anchor=anchor)
 
         for i, r in enumerate(data):
             tree.insert("", "end", tags=("odd" if i % 2 else "even",),
@@ -1130,7 +1134,7 @@ class App:
 
 
 def main():
-    # Allows: python thu_so_lieu_gui.py [config_ini_path]
+    # Allows: python gui.py [config_ini_path]
     config_path = sys.argv[1] if len(sys.argv) > 1 else None
     root = tk.Tk()
     App(root, config_path=config_path)

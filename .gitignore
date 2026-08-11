@@ -1,6 +1,11 @@
 __pycache__/
 *.pyc
 
+# PyInstaller build artifacts
+build/
+dist/
+*.spec
+
 # Generated output (re-created by running the app)
 data/
 *.csv
