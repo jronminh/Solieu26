@@ -127,7 +127,6 @@ def write_minimal_config(path: str, values: dict):
         f"remote_dir = {values['remote_dir']}",
         f"output_dir = {values['output_dir']}",
         f"station_code = {values['station_code']}",
-        f"date = {values['date']}",
         f"end_hour = {values['end_hour']}",
         f"delete_on_exit = {'true' if values['delete_on_exit'] else 'false'}",
         f"auto_query_value = {values['auto_query_value']}",
@@ -162,9 +161,6 @@ class App:
 
         d = core.CONFIG
         today = datetime.date.today()
-        default_date = d.get("date")
-        if isinstance(default_date, datetime.datetime):
-            default_date = default_date.date()
 
         self.v = {
             "ftp_host":    tk.StringVar(value=d.get("ftp_host", "")),
@@ -172,7 +168,11 @@ class App:
             "ftp_pass":    tk.StringVar(value=d.get("ftp_pass", "")),
             "remote_dir":  tk.StringVar(value=d.get("remote_dir", "/Quantrac")),
             "output_dir":  tk.StringVar(value=d.get("output_dir") or core.DEFAULT_OUTPUT_DIR),
-            "date":        tk.StringVar(value=(default_date or today).strftime("%Y-%m-%d")),
+            # Advanced mode (date-range query) — off by default; normal mode always
+            # queries "today", no date field shown.
+            "advanced_mode": tk.BooleanVar(value=False),
+            "start_date":  tk.StringVar(value=today.strftime("%Y-%m-%d")),
+            "end_date":    tk.StringVar(value=today.strftime("%Y-%m-%d")),
             "delete_on_exit": tk.BooleanVar(value=bool(d.get("delete_on_exit", False))),
             "show_log":    tk.BooleanVar(value=False),   # log frame hidden by default
             "auto_value":  tk.StringVar(value=str(d.get("auto_query_value", 15))),
@@ -222,10 +222,9 @@ class App:
         # Not run yet → no CSV folder to open
         self.file_menu.entryconfig("Mở thư mục CSV", state="disabled")
 
-        # --- Actions --- (mirrors the "Truy vấn" / "Về hiện tại" buttons on the main screen)
+        # --- Actions --- (mirrors the "Truy vấn" button on the main screen)
         action_menu = tk.Menu(menubar, tearoff=0)
         action_menu.add_command(label="Truy vấn", command=self._on_run)
-        action_menu.add_command(label="Về hiện tại", command=self._on_now)
         menubar.add_cascade(label="Thao tác", menu=action_menu)
 
         # --- View --- (mirrors the "Xem gần nhất" / "Xem lịch sử" buttons on the main
@@ -254,15 +253,22 @@ class App:
         frm = ttk.Frame(self.root, padding=10)
         frm.pack(fill="both", expand=True)
 
-        # --- Ngày: luôn truy vấn trọn 00h–23h của ngày đó ---
-        date_row = ttk.Frame(frm)
-        date_row.pack(fill="x")
-        ttk.Label(date_row, text="Ngày (YYYY-MM-DD)").pack(side="left")
-        ttk.Entry(date_row, textvariable=self.v["date"], width=14).pack(side="left", padx=6)
+        # --- Nâng cao: ngày bắt đầu/kết thúc — ẩn theo mặc định, chỉ hiện khi tick
+        # checkbox "Truy vấn nâng cao" ở dưới cùng (thay cho ô Ngày cũ). Chế độ
+        # thường KHÔNG có ô ngày — luôn truy vấn "hôm nay" (thủ công hoặc tự động).
+        self.adv_frame = ttk.LabelFrame(frm, text="Nâng cao", padding=8)
+        ttk.Label(self.adv_frame, text="Ngày bắt đầu").pack(side="left")
+        ttk.Entry(self.adv_frame, textvariable=self.v["start_date"], width=12).pack(
+            side="left", padx=(4, 10))
+        ttk.Label(self.adv_frame, text="Ngày kết thúc").pack(side="left")
+        ttk.Entry(self.adv_frame, textvariable=self.v["end_date"], width=12).pack(
+            side="left", padx=(4, 10))
+        ttk.Button(self.adv_frame, text="Về hiện tại", command=self._on_now).pack(side="left")
 
         # --- Bottom row: read-only info panel (left) + action buttons stacked (right) ---
         top = ttk.Frame(frm)
         top.pack(fill="x", pady=(8, 0))
+        self.top_frame = top   # anchor: adv_frame is packed(before=self.top_frame) when shown
 
         # --- Thông tin --- (read-only status; recomputed by _refresh_info_panel)
         q_box = ttk.LabelFrame(top, text="Thông tin", padding=8)
@@ -286,8 +292,6 @@ class App:
         btn_col.pack(side="left", fill="y", padx=(8, 0))
         self.run_btn = ttk.Button(btn_col, text="Truy vấn", command=self._on_run)
         self.run_btn.pack(fill="x")
-        ttk.Button(btn_col, text="Về hiện tại",
-                   command=self._on_now).pack(fill="x", pady=(4, 0))
         ttk.Button(btn_col, text="Xem gần nhất",
                    command=lambda: self._open_csv_viewer("latest.csv", "latest.csv")
                    ).pack(fill="x", pady=(4, 0))
@@ -302,9 +306,14 @@ class App:
         self.bar = ttk.Progressbar(frm, mode="determinate")
         self.bar.pack(fill="x", pady=(10, 0))
 
-        # --- Status bar at the BOTTOM: indicator sits at bottom-right ---
+        # --- Status bar at the BOTTOM: "Truy vấn nâng cao" toggle at bottom-left,
+        # status indicator at bottom-right ---
         statusbar = ttk.Frame(frm)
         statusbar.pack(side="bottom", fill="x", pady=(6, 0))
+        self.adv_check = ttk.Checkbutton(statusbar, text="Truy vấn nâng cao",
+                                         variable=self.v["advanced_mode"],
+                                         command=self._on_toggle_advanced)
+        self.adv_check.pack(side="left")
         self.status = ttk.Label(statusbar, text="Sẵn sàng", anchor="e")
         self.status.pack(side="right")
 
@@ -479,25 +488,34 @@ class App:
         self._log("ACT", "Mở 'Cách sử dụng'")
         messagebox.showinfo(
             "Cách sử dụng",
-            "1. Chọn Ngày (YYYY-MM-DD) — luôn truy vấn trọn 00h–23h ngày đó.\n"
-            "   Bấm 'Về hiện tại' để tự điền ngày hệ thống.\n\n"
-            "2. Bấm 'Truy vấn' để tải bản tin từ FTP và giải mã.\n"
+            "1. Chế độ thường (mặc định): không cần chọn ngày — luôn truy\n"
+            "   vấn trọn 00h–23h của HÔM NAY. Bấm 'Truy vấn' để chạy thủ\n"
+            "   công, hoặc bật 'Tự động truy vấn' trong Thiết lập để tự\n"
+            "   chạy lại theo chu kỳ.\n\n"
+            "2. Truy vấn nâng cao: tick ô 'Truy vấn nâng cao' ở góc dưới\n"
+            "   bên trái để nhập Ngày bắt đầu / Ngày kết thúc (tải toàn bộ\n"
+            "   các ngày trong khoảng đó); bấm 'Về hiện tại' để đưa cả hai\n"
+            "   ngày về hôm nay. Bật chế độ này sẽ tạm dừng tự động truy\n"
+            "   vấn (khung Thông tin hiện 'Tạm dừng trong truy vấn nâng\n"
+            "   cao'); bỏ tick để quay lại chế độ thường và tự động truy\n"
+            "   vấn tiếp tục chạy theo thiết lập đã lưu.\n\n"
+            "3. Bấm 'Truy vấn' để tải bản tin từ FTP và giải mã.\n"
             "   Theo dõi tiến trình ở thanh trạng thái và Nhật ký bên dưới.\n\n"
-            "3. Menu Xem:\n"
+            "4. Menu Xem:\n"
             "   • 'Xem gần nhất' — bản tin mới nhất của TẤT CẢ các trạm.\n"
             "   • 'Xem lịch sử' — lịch sử theo giờ của TẤT CẢ các trạm;\n"
             "     dùng ô 'Trạm' trong cửa sổ xem để lọc riêng 1 trạm\n"
             "     (mặc định lọc theo station_code trong config.ini).\n"
             "     Trong cửa sổ xem, bấm 'Xem raw' để đối chiếu bản tin gốc.\n"
             "   • 'Hiển thị nhật ký' — bật/tắt khung Nhật ký (mặc định tắt).\n\n"
-            "4. Menu Tệp:\n"
+            "5. Menu Tệp:\n"
             "   • 'Thiết lập...' — mở hộp thoại gồm:\n"
             "     - Kết nối: host/user/mật khẩu FTP.\n"
             "     - Đường dẫn: thư mục server, thư mục xuất CSV,\n"
             "       bật/tắt xóa file tải về sau khi xong.\n"
             "     - Tự động truy vấn: tự chạy lại sau mỗi N phút/giờ\n"
-            "       (0 = tắt); mỗi lần tự chạy sẽ tự cập nhật Ngày\n"
-            "       theo giờ hệ thống rồi 'Truy vấn' như bình thường.\n"
+            "       (0 = tắt); chỉ hoạt động ở chế độ thường (mỗi lần\n"
+            "       tự chạy luôn dùng ngày hôm nay).\n"
             "     - 'Tạo/sửa config.ini' — tạo (nếu chưa có) rồi mở\n"
             "       file để sửa tay; cũng là nơi đổi trạm mặc định\n"
             "       cho bộ lọc lịch sử (station_code).\n"
@@ -773,10 +791,29 @@ class App:
             messagebox.showwarning("Không mở được", info)
 
     def _on_now(self):
-        """Reset the Query to now: date = today."""
+        """'Về hiện tại' (Nâng cao frame): force start_date/end_date to today."""
         now = datetime.datetime.now()
-        self.v["date"].set(now.strftime("%Y-%m-%d"))
+        self.v["start_date"].set(now.strftime("%Y-%m-%d"))
+        self.v["end_date"].set(now.strftime("%Y-%m-%d"))
         self._log("ACT", f"Về hiện tại: ngày {now:%Y-%m-%d}")
+
+    def _on_toggle_advanced(self):
+        """Toggle 'Truy vấn nâng cao': shows/hides the Nâng cao frame (start/end date +
+        'Về hiện tại') where the old date field used to sit, and pauses/resumes
+        auto-query — advanced mode and the auto-query timer are mutually exclusive."""
+        on = self.v["advanced_mode"].get()
+        if on:
+            self.adv_frame.pack(fill="x", before=self.top_frame)
+            if self.auto_job is not None:
+                self.root.after_cancel(self.auto_job)
+                self.auto_job = None
+            self.auto_next_run = None
+        else:
+            self.adv_frame.pack_forget()
+            self._schedule_auto_tick()   # resume per the settings already in config/mã nguồn
+        self._fit_window_to_content()
+        self._refresh_info_panel()
+        self._log("ACT", f"Truy vấn nâng cao: {'Bật' if on else 'Tắt'}")
 
     # ----- Info panel ("Thông tin truy vấn") --------------------------
     def _refresh_info_panel(self):
@@ -797,10 +834,17 @@ class App:
             self.info["missing"].set("—")
 
         if self.last_cfg and self.last_updated_at:
-            self.info["data_status"].set(
-                f"Ngày {self.last_cfg['date']:%Y-%m-%d} — cập nhật lúc {self.last_updated_at:%H:%M:%S}")
+            if "start_date" in self.last_cfg:
+                rng = f"{self.last_cfg['start_date']:%Y-%m-%d} → {self.last_cfg['end_date']:%Y-%m-%d}"
+            else:
+                rng = f"Ngày {self.last_cfg['date']:%Y-%m-%d}"
+            self.info["data_status"].set(f"{rng} — cập nhật lúc {self.last_updated_at:%H:%M:%S}")
         else:
             self.info["data_status"].set("Chưa có dữ liệu")
+
+        if self.v["advanced_mode"].get():
+            self.info["auto_status"].set("Tạm dừng trong truy vấn nâng cao")
+            return
 
         minutes = self._auto_effective_minutes()
         if minutes <= 0:
@@ -842,8 +886,7 @@ class App:
         if self.worker and self.worker.is_alive():
             self._log("SKIP", "Tự động truy vấn: bỏ qua vì đang có tác vụ chạy")
         else:
-            self._log("ACT", "Tự động truy vấn: về hiện tại rồi chạy")
-            self._on_now()
+            self._log("ACT", "Tự động truy vấn: chạy truy vấn")
             self._on_run()
         self._schedule_auto_tick()
 
@@ -902,7 +945,6 @@ class App:
             "remote_dir": self.v["remote_dir"].get().strip(),
             "output_dir": self.v["output_dir"].get().strip(),
             "station_code": core.CONFIG.get("station_code", ""),
-            "date": self.v["date"].get().strip(),
             "end_hour": 23,
             "delete_on_exit": self.v["delete_on_exit"].get(),
             "auto_query_value": self._auto_effective_value(),
@@ -947,14 +989,10 @@ class App:
     def _build_cfg(self) -> dict:
         """Read the form → cfg dict; local_dir/timeout/retry come from core's fixed constants.
 
-        end_hour is always 23 — a query always spans the whole day (00h–23h).
+        Normal mode: always queries "today", 00h-23h — no date field to read.
+        Advanced mode (self.v["advanced_mode"]): queries start_date..end_date instead.
         """
-        try:
-            date = datetime.datetime.strptime(self.v["date"].get().strip(), "%Y-%m-%d")
-        except ValueError:
-            raise ValueError("Ngày phải theo định dạng YYYY-MM-DD, vd 2026-08-10")
-
-        return {
+        cfg = {
             "ftp_host": self.v["ftp_host"].get().strip(),
             "ftp_user": self.v["ftp_user"].get().strip(),
             "ftp_pass": self.v["ftp_pass"].get(),
@@ -965,9 +1003,23 @@ class App:
             "local_dir":  core.TEMP_DL_DIR,
             "output_dir": self.v["output_dir"].get().strip() or core.DEFAULT_OUTPUT_DIR,
             "delete_on_exit": self.v["delete_on_exit"].get(),
-            "date": date,
-            "end_hour": 23,
         }
+
+        if self.v["advanced_mode"].get():
+            try:
+                start = datetime.datetime.strptime(self.v["start_date"].get().strip(), "%Y-%m-%d")
+                end = datetime.datetime.strptime(self.v["end_date"].get().strip(), "%Y-%m-%d")
+            except ValueError:
+                raise ValueError("Ngày bắt đầu/kết thúc phải theo định dạng YYYY-MM-DD, vd 2026-08-10")
+            if end < start:
+                raise ValueError("Ngày kết thúc phải sau hoặc bằng ngày bắt đầu")
+            cfg["start_date"] = start
+            cfg["end_date"] = end
+        else:
+            cfg["date"] = datetime.datetime.combine(datetime.date.today(), datetime.time())
+            cfg["end_hour"] = 23
+
+        return cfg
 
     # -----------------------------------------------------------------
     def _on_run(self):
@@ -987,12 +1039,20 @@ class App:
             return
 
         self._divider()
-        self._log("ACT", f"Bắt đầu: ngày {cfg['date']:%Y-%m-%d} (00h–23h)")
+        if "start_date" in cfg:
+            days = (cfg["end_date"].date() - cfg["start_date"].date()).days + 1
+            total = days * 24
+            self._log("ACT", f"Bắt đầu: {cfg['start_date']:%Y-%m-%d} → "
+                             f"{cfg['end_date']:%Y-%m-%d} ({days} ngày)")
+        else:
+            total = cfg["end_hour"] + 1
+            self._log("ACT", f"Bắt đầu: ngày {cfg['date']:%Y-%m-%d} (00h–23h)")
         self.last_cfg = cfg
         self.run_btn.config(state="disabled")
+        self.adv_check.config(state="disabled")
         self.file_menu.entryconfig("Mở thư mục CSV", state="disabled")
         self.status.config(text="Đang chạy...")
-        self.bar.config(value=0, maximum=cfg["end_hour"] + 1)
+        self.bar.config(value=0, maximum=total)
 
         self.worker = threading.Thread(target=self._work, args=(cfg,), daemon=True)
         self.worker.start()
@@ -1025,6 +1085,7 @@ class App:
                     self._log("ERR", item[1])
                     self.status.config(text="Lỗi")
                     self.run_btn.config(state="normal")
+                    self.adv_check.config(state="normal")
                     messagebox.showerror("Lỗi", item[1])
         except queue.Empty:
             pass
@@ -1032,6 +1093,7 @@ class App:
 
     def _on_done(self, result: dict):
         self.run_btn.config(state="normal")
+        self.adv_check.config(state="normal")
         self.last_output_dir = result.get("output_dir")
         if self.last_output_dir and os.path.isdir(self.last_output_dir):
             self.file_menu.entryconfig("Mở thư mục CSV", state="normal")

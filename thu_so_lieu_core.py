@@ -337,6 +337,78 @@ def download_files(ftp: FTP, cfg: dict, log=_console_log, progress=None) -> dict
             "skipped": skipped, "missing": missing}
 
 
+def download_files_range(ftp: FTP, cfg: dict, log=_console_log, progress=None) -> dict:
+    """
+    Advanced query: download every hourly file from 00:00 of start_date through
+    23:00 of end_date (inclusive) into cfg['local_dir'].
+
+    Builds ONE long ordered list of hourly timestamps up front and walks it —
+    unlike download_files() (single day, cwd once), the remote directory is
+    "Quantrac/YYYY/MM" per timestamp, so it cwd's again only when the year/month
+    actually changes (a range can span multiple months/years).
+
+    Returns the same shape as download_files(): {"files","downloaded","skipped","missing"}.
+    """
+    start_date = cfg["start_date"]
+    end_date   = cfg["end_date"]
+    remote_dir = cfg["remote_dir"].rstrip("/")
+    local_dir  = cfg["local_dir"]
+    retry_temp = cfg.get("retry_temp", 0)
+    retry_wait = cfg.get("retry_wait", 2)
+    os.makedirs(local_dir, exist_ok=True)
+
+    hours = []
+    day = start_date.replace(hour=0, minute=0, second=0, microsecond=0)
+    last_day = end_date.replace(hour=0, minute=0, second=0, microsecond=0)
+    while day <= last_day:
+        for hour in range(24):
+            hours.append(day.replace(hour=hour))
+        day += datetime.timedelta(days=1)
+    total = len(hours)
+
+    files, downloaded, skipped, missing = [], [], [], []
+    origin = ftp.pwd()
+    current_dir = None
+    try:
+        for i, ts in enumerate(hours):
+            target_dir = f"{remote_dir}/{ts:%Y}/{ts:%m}"
+            filename   = quantrac_filename_at(ts)
+
+            if target_dir != current_dir:
+                try:
+                    ftp.cwd(target_dir)
+                    current_dir = target_dir
+                except (error_perm, error_temp) as e:
+                    log("ERR", f"Không truy cập được thư mục {target_dir}: {e}")
+                    current_dir = target_dir   # avoid retrying cwd for every hour in this month
+                    missing.append(filename)
+                    if progress:
+                        progress(i + 1, total, 2)
+                    continue
+
+            local_path = os.path.join(local_dir, filename)
+            status = _download_one(ftp, filename, local_path,
+                                   retry_temp=retry_temp, retry_wait=retry_wait)
+
+            if status == 0:
+                log("OK", f"Tải về      {filename}")
+                files.append(local_path); downloaded.append(filename)
+            elif status == 1:
+                log("SKIP", f"Đã có sẵn   {filename}")
+                files.append(local_path); skipped.append(filename)
+            else:
+                log("MISS", f"Server chưa có  {filename}")
+                missing.append(filename)
+
+            if progress:
+                progress(i + 1, total, status)
+    finally:
+        ftp.cwd(origin)
+
+    return {"files": files, "downloaded": downloaded,
+            "skipped": skipped, "missing": missing}
+
+
 # =============================================================================
 # LOOKUP TABLES
 # =============================================================================
@@ -810,7 +882,10 @@ def run_pipeline(cfg: dict, log=_console_log, progress=None) -> dict:
 
     files = []
     try:
-        dl = download_files(ftp, cfg, log=log, progress=progress)
+        if "start_date" in cfg:
+            dl = download_files_range(ftp, cfg, log=log, progress=progress)
+        else:
+            dl = download_files(ftp, cfg, log=log, progress=progress)
         files = dl["files"]
         result["files"]   = files
         result["missing"] = dl["missing"]
