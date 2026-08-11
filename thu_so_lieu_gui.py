@@ -212,7 +212,7 @@ class App:
         # --- File --- (Thiết lập... opens the combined Kết nối / Đường dẫn / Tự động
         # truy vấn dialog, with config.ini actions at its bottom)
         file_menu = tk.Menu(menubar, tearoff=0)
-        file_menu.add_command(label="Thiết lập...", command=self._open_settings_dialog)
+        file_menu.add_command(label="Thiết lập", command=self._open_settings_dialog)
         file_menu.add_separator()
         file_menu.add_command(label="Mở thư mục CSV", command=self._on_open_folder)
         file_menu.add_command(label="Mở thư mục data", command=self._on_open_data)
@@ -225,7 +225,7 @@ class App:
 
         # --- Help ---
         help_menu = tk.Menu(menubar, tearoff=0)
-        help_menu.add_command(label="Cách sử dụng...", command=self._on_help_usage)
+        help_menu.add_command(label="Hướng dẫn", command=self._on_help_usage)
         help_menu.add_command(label="Tác giả", command=self._on_help_about)
         menubar.add_cascade(label="Trợ giúp", menu=help_menu)
 
@@ -470,9 +470,9 @@ class App:
 
     # ----- Help ---------------------------------------------------
     def _on_help_usage(self):
-        self._log("ACT", "Mở 'Cách sử dụng'")
+        self._log("ACT", "Mở 'Hướng dẫn'")
         messagebox.showinfo(
-            "Cách sử dụng",
+            "Hướng dẫn",
             "1. Chế độ thường (mặc định): không cần chọn ngày — luôn truy\n"
             "   vấn trọn 00h–23h của HÔM NAY. Bấm 'Truy vấn' để chạy thủ\n"
             "   công, hoặc bật 'Tự động truy vấn' trong Thiết lập để tự\n"
@@ -495,7 +495,7 @@ class App:
             "     (mặc định lọc theo station_code trong config.ini).\n"
             "     Trong cửa sổ xem, bấm 'Xem raw' để đối chiếu bản tin gốc.\n\n"
             "5. Menu Tệp:\n"
-            "   • 'Thiết lập...' — mở hộp thoại gồm:\n"
+            "   • 'Thiết lập' — mở hộp thoại gồm:\n"
             "     - Kết nối: host/user/mật khẩu FTP.\n"
             "     - Đường dẫn: thư mục server, thư mục xuất CSV,\n"
             "       bật/tắt xóa file tải về sau khi xong.\n"
