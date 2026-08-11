@@ -1,0 +1,7 @@
+__pycache__/
+*.pyc
+
+# Generated output (re-created by running the app)
+data/
+*.csv
+config.ini
