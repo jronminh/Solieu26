@@ -646,14 +646,6 @@ def decode_qt_file(file_path: str, tables: dict = TABLES) -> list:
     return results
 
 
-def get_record_by_station_code(records: list, code: str):
-    return next(
-        (r for r in records if r.get("location") and
-         r["location"].get("station_code") == code),
-        None
-    )
-
-
 def decode_latest_file(local_files: list):
     if not local_files:
         return None, []
@@ -661,13 +653,19 @@ def decode_latest_file(local_files: list):
     return latest_file, decode_qt_file(latest_file)
 
 
-def get_station_history(local_files: list, station_code: str) -> list:
+def get_full_history(local_files: list) -> list:
+    """
+    Decode every downloaded file and keep EVERY station's record (not just one) —
+    the full day's station × hour matrix. Station filtering happens later, in the
+    CSV viewer, not here: the FTP download is already not station-specific (each
+    hourly file bundles every station), so there is nothing to gain by filtering
+    before export.
+    """
     results = []
     for file_path in sorted(local_files):
-        decoded_records = decode_qt_file(file_path)
-        record = get_record_by_station_code(decoded_records, station_code)
-        if record:
-            results.append({"file": file_path, "data": record})
+        for record in decode_qt_file(file_path):
+            if record.get("location"):
+                results.append({"file": file_path, "data": record})
     return results
 
 
@@ -775,11 +773,11 @@ def export_latest_to_csv(latest_file: str, latest_data: list, out_dir: str) -> s
     return out_path
 
 
-def export_station_history_to_csv(history: list, out_dir: str) -> str:
+def export_history_to_csv(history: list, out_dir: str) -> str:
     # obs_time / date / hour / source_file are all derived by flatten_record from the filename.
     rows = [flatten_record(item["data"], source_file=item["file"])
             for item in history]
-    out_path = os.path.join(out_dir, "station_history.csv")
+    out_path = os.path.join(out_dir, "history.csv")
     write_csv(out_path, rows)
     return out_path
 
@@ -832,15 +830,13 @@ def run_pipeline(cfg: dict, log=_console_log, progress=None) -> dict:
             result["latest_records"] = len(latest_data)
             log("OK", f"Đã xuất snapshot: {csv_path}")
 
-        station_code = (cfg.get("station_code") or "").strip()
-        if station_code:
-            history = get_station_history(files, station_code)
-            log("INFO", f"Trạm {station_code}: tìm thấy {len(history)} record")
-            if history:
-                csv_path = export_station_history_to_csv(history, output_dir)
-                result["history_csv"] = csv_path
-                result["history_records"] = len(history)
-                log("OK", f"Đã xuất lịch sử: {csv_path}")
+        history = get_full_history(files)
+        log("INFO", f"Lịch sử đầy đủ: {len(history)} record (mọi trạm, mọi giờ)")
+        if history:
+            csv_path = export_history_to_csv(history, output_dir)
+            result["history_csv"] = csv_path
+            result["history_records"] = len(history)
+            log("OK", f"Đã xuất lịch sử: {csv_path}")
 
         result["ok"] = True
         return result

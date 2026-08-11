@@ -44,8 +44,9 @@ LOG_COLORS = {
 # =============================================================================
 # STATION LIST (code → name)
 # -----------------------------------------------------------------------------
-# Feeds the "Station name" dropdown in the GUI. GUI shows the NAME for easy lookup,
-# while the pipeline still filters by CODE. Add/remove a station by editing this table.
+# Feeds the station filter dropdown in the "Xem lịch sử" viewer (history.csv holds
+# every station already — the dropdown just filters rows client-side, it no longer
+# drives what gets downloaded/decoded). Add/remove a station by editing this table.
 # =============================================================================
 STATIONS = {
     "k31": "Yên Bái",    "k21": "Nội Bài",     "k27": "Kép",
@@ -61,6 +62,8 @@ STATIONS = {
 # above); also builds the reverse lookup name → code.
 STATION_NAMES = list(STATIONS.values())
 NAME_TO_CODE  = {name: code for code, name in STATIONS.items()}
+
+ALL_STATIONS = "Tất cả các trạm"   # station-filter dropdown option that disables filtering
 
 
 # Numeric columns in the CSV viewer — right-aligned + compared as NUMBERS when
@@ -156,19 +159,13 @@ class App:
         if isinstance(default_date, datetime.datetime):
             default_date = default_date.date()
 
-        # Dropdown shows the name; the default name is inferred from the station code in config.
-        default_name = STATIONS.get(d.get("station_code", "")) \
-            or (STATION_NAMES[0] if STATION_NAMES else "")
-
         self.v = {
             "ftp_host":    tk.StringVar(value=d.get("ftp_host", "")),
             "ftp_user":    tk.StringVar(value=d.get("ftp_user", "")),
             "ftp_pass":    tk.StringVar(value=d.get("ftp_pass", "")),
             "remote_dir":  tk.StringVar(value=d.get("remote_dir", "/Quantrac")),
             "output_dir":  tk.StringVar(value=d.get("output_dir") or core.DEFAULT_OUTPUT_DIR),
-            "station_name":tk.StringVar(value=default_name),
             "date":        tk.StringVar(value=(default_date or today).strftime("%Y-%m-%d")),
-            "end_hour":    tk.StringVar(value=str(d.get("end_hour", 23))),
             "delete_on_exit": tk.BooleanVar(value=bool(d.get("delete_on_exit", False))),
             "show_log":    tk.BooleanVar(value=False),   # log frame hidden by default
         }
@@ -226,19 +223,10 @@ class App:
         frm = ttk.Frame(self.root, padding=10)
         frm.pack(fill="both", expand=True)
 
-        # --- Query ---
+        # --- Query --- (chỉ còn Ngày — luôn truy vấn trọn 00h–23h của ngày đó)
         q_box = ttk.LabelFrame(frm, text="Truy vấn", padding=8)
         q_box.pack(fill="x")
         self._row(q_box, 0, "Ngày (YYYY-MM-DD)", self.v["date"], width=14)
-        ttk.Label(q_box, text="Giờ cuối (0–23)").grid(row=1, column=0, sticky="w",
-                                                       padx=6, pady=3)
-        ttk.Spinbox(q_box, from_=0, to=23, width=6,
-                    textvariable=self.v["end_hour"]).grid(row=1, column=1, sticky="w", padx=6)
-        ttk.Label(q_box, text="Tên trạm").grid(row=2, column=0, sticky="w",
-                                                padx=6, pady=3)
-        ttk.Combobox(q_box, textvariable=self.v["station_name"],
-                     values=STATION_NAMES, state="readonly", width=20).grid(
-                     row=2, column=1, sticky="w", padx=6, pady=3)
         q_box.columnconfigure(1, weight=1)
 
         # --- Run button + utilities ---
@@ -250,8 +238,8 @@ class App:
                    command=self._on_now).pack(side="left", padx=6)
         # Both CSV-view buttons pushed to the right ("Xem gần nhất" left of the two, "Xem lịch sử" outermost)
         ttk.Button(run_bar, text="Xem lịch sử",
-                   command=lambda: self._open_csv_viewer("station_history.csv",
-                                                         "station_history.csv")
+                   command=lambda: self._open_csv_viewer("history.csv", "history.csv",
+                                                         with_station_filter=True)
                    ).pack(side="right")
         ttk.Button(run_bar, text="Xem gần nhất",
                    command=lambda: self._open_csv_viewer("latest.csv", "latest.csv")
@@ -390,13 +378,15 @@ class App:
         self._log("ACT", "Mở 'Cách sử dụng'")
         messagebox.showinfo(
             "Cách sử dụng",
-            "1. Chọn Ngày (YYYY-MM-DD), Giờ cuối (0–23) và Tên trạm.\n"
-            "   Bấm 'Về hiện tại' để tự điền ngày/giờ hệ thống.\n\n"
+            "1. Chọn Ngày (YYYY-MM-DD) — luôn truy vấn trọn 00h–23h ngày đó.\n"
+            "   Bấm 'Về hiện tại' để tự điền ngày hệ thống.\n\n"
             "2. Bấm 'Chạy' để tải bản tin từ FTP và giải mã.\n"
             "   Theo dõi tiến trình ở thanh trạng thái và Nhật ký bên dưới.\n\n"
             "3. Xem kết quả:\n"
             "   • 'Xem gần nhất' — bản tin mới nhất của TẤT CẢ các trạm.\n"
-            "   • 'Xem lịch sử' — lịch sử theo giờ của riêng trạm đã chọn.\n"
+            "   • 'Xem lịch sử' — lịch sử theo giờ của TẤT CẢ các trạm;\n"
+            "     dùng ô 'Trạm' trong cửa sổ xem để lọc riêng 1 trạm\n"
+            "     (mặc định lọc theo station_code trong config.ini).\n"
             "   Trong cửa sổ xem, bấm 'Xem raw' để đối chiếu bản tin gốc.\n\n"
             "4. Menu Tùy chọn:\n"
             "   • 'Kết nối...' — sửa host/user/mật khẩu FTP.\n"
@@ -404,9 +394,10 @@ class App:
             "     bật/tắt xóa file tải về sau khi xong.\n"
             "   • 'Hiển thị nhật ký' — bật/tắt khung Nhật ký (mặc định tắt).\n"
             "   • 'Tạo/sửa config.ini' — lưu thiết lập hiện tại ra file\n"
-            "     để lần chạy sau tự nạp lại, khỏi nhập lại từ đầu.\n\n"
+            "     để lần chạy sau tự nạp lại, khỏi nhập lại từ đầu; cũng là\n"
+            "     nơi đổi trạm mặc định cho bộ lọc lịch sử (station_code).\n\n"
             "5. Menu Tệp:\n"
-            "   • 'Mở thư mục CSV' — xem file latest.csv / station_history.csv.\n"
+            "   • 'Mở thư mục CSV' — xem file latest.csv / history.csv.\n"
             "   • 'Mở thư mục data' — xem các bản tin gốc (.txt) đã tải về.")
 
     def _on_help_about(self):
@@ -430,7 +421,7 @@ class App:
             return self.last_output_dir
         return os.path.abspath(self.v["output_dir"].get().strip() or core.DEFAULT_OUTPUT_DIR)
 
-    def _open_csv_viewer(self, filename: str, title: str):
+    def _open_csv_viewer(self, filename: str, title: str, with_station_filter: bool = False):
         """Open a dedicated window to view a CSV file as a table (read-only)."""
         self._log("ACT", f"Xem {filename}")
         path = os.path.join(self._current_output_dir(), filename)
@@ -471,6 +462,21 @@ class App:
                    command=lambda: self._open_csv_external(path)).pack(side="left")
         ttk.Button(bar, text="Hiển thị",
                    command=lambda: self._open_column_picker(win)).pack(side="left", padx=6)
+
+        # Station filter — post-process filter over history.csv (which already holds
+        # every station); default to the station_code configured in config.ini.
+        if with_station_filter:
+            default_code = (core.CONFIG.get("station_code") or "").strip()
+            default_name = STATIONS.get(default_code, ALL_STATIONS)
+            win._station_filter = tk.StringVar(value=default_name)
+            ttk.Label(bar, text="Trạm:").pack(side="left", padx=(12, 2))
+            ttk.Combobox(bar, textvariable=win._station_filter,
+                        values=[ALL_STATIONS] + STATION_NAMES, state="readonly",
+                        width=16).pack(side="left")
+            win._station_filter.trace_add("write", lambda *_: self._on_station_filter_change(win))
+        else:
+            win._station_filter = None
+
         win._status = ttk.Label(bar, text="")
         win._status.pack(side="right")
 
@@ -517,6 +523,10 @@ class App:
         """Switch between Data mode (hides raw) and Raw mode (identity cols + raw)."""
         win._mode = "raw" if win._mode == "data" else "data"
         self._log("ACT", f"Xem CSV — chế độ {'Raw' if win._mode == 'raw' else 'Số liệu'}")
+        self._render_viewer(win)
+
+    def _on_station_filter_change(self, win):
+        self._log("ACT", f"Lọc trạm: {win._station_filter.get()}")
         self._render_viewer(win)
 
     # ----- Column sorting --------------------------------------------
@@ -606,6 +616,13 @@ class App:
         if not header:
             return
 
+        if win._station_filter is not None and "station_code" in header:
+            name = win._station_filter.get()
+            if name != ALL_STATIONS:
+                code = NAME_TO_CODE.get(name)
+                sc_idx = header.index("station_code")
+                data = [r for r in data if sc_idx < len(r) and r[sc_idx] == code]
+
         if mode == "raw":
             # Just a few identity columns + raw, to read the original bulletin per station.
             prefer = ["obs_time", "station", "station_code", "source_file",
@@ -649,16 +666,11 @@ class App:
             self._log("ERR", f"Không mở được: {info}")
             messagebox.showwarning("Không mở được", info)
 
-    def _selected_code(self) -> str:
-        """Station code matching the name currently selected in the dropdown (empty if no match)."""
-        return NAME_TO_CODE.get(self.v["station_name"].get().strip(), "")
-
     def _on_now(self):
-        """Reset the Query to now: date = today, end hour = the system's current hour."""
+        """Reset the Query to now: date = today."""
         now = datetime.datetime.now()
         self.v["date"].set(now.strftime("%Y-%m-%d"))
-        self.v["end_hour"].set(str(now.hour))
-        self._log("ACT", f"Về hiện tại: ngày {now:%Y-%m-%d}, giờ cuối {now.hour}")
+        self._log("ACT", f"Về hiện tại: ngày {now:%Y-%m-%d}")
 
     def _on_toggle_delete(self):
         state = "Bật" if self.v["delete_on_exit"].get() else "Tắt"
@@ -698,9 +710,9 @@ class App:
             "ftp_pass": self.v["ftp_pass"].get(),
             "remote_dir": self.v["remote_dir"].get().strip(),
             "output_dir": self.v["output_dir"].get().strip(),
-            "station_code": self._selected_code(),
+            "station_code": core.CONFIG.get("station_code", ""),
             "date": self.v["date"].get().strip(),
-            "end_hour": self.v["end_hour"].get().strip(),
+            "end_hour": 23,
             "delete_on_exit": self.v["delete_on_exit"].get(),
         }
 
@@ -740,18 +752,14 @@ class App:
             self._log("INFO", "Đã hủy chọn thư mục xuất")
 
     def _build_cfg(self) -> dict:
-        """Read the form → cfg dict; local_dir/timeout/retry come from core's fixed constants."""
+        """Read the form → cfg dict; local_dir/timeout/retry come from core's fixed constants.
+
+        end_hour is always 23 — a query always spans the whole day (00h–23h).
+        """
         try:
             date = datetime.datetime.strptime(self.v["date"].get().strip(), "%Y-%m-%d")
         except ValueError:
             raise ValueError("Ngày phải theo định dạng YYYY-MM-DD, vd 2026-08-10")
-
-        try:
-            end_hour = int(self.v["end_hour"].get())
-        except ValueError:
-            raise ValueError("Giờ cuối phải là số nguyên")
-        if not (0 <= end_hour <= 23):
-            raise ValueError("Giờ cuối phải trong khoảng 0–23")
 
         return {
             "ftp_host": self.v["ftp_host"].get().strip(),
@@ -764,9 +772,8 @@ class App:
             "local_dir":  core.TEMP_DL_DIR,
             "output_dir": self.v["output_dir"].get().strip() or core.DEFAULT_OUTPUT_DIR,
             "delete_on_exit": self.v["delete_on_exit"].get(),
-            "station_code": self._selected_code(),
             "date": date,
-            "end_hour": end_hour,
+            "end_hour": 23,
         }
 
     # -----------------------------------------------------------------
@@ -787,9 +794,7 @@ class App:
             return
 
         self._divider()
-        tram = STATIONS.get(cfg['station_code'], cfg['station_code']) or '(chưa chọn)'
-        self._log("ACT", f"Bắt đầu: ngày {cfg['date']:%Y-%m-%d}, giờ 0–{cfg['end_hour']}, "
-                         f"trạm '{tram}'")
+        self._log("ACT", f"Bắt đầu: ngày {cfg['date']:%Y-%m-%d} (00h–23h)")
         self.run_btn.config(state="disabled")
         self.file_menu.entryconfig("Mở thư mục CSV", state="disabled")
         self.status.config(text="Đang chạy...")
@@ -849,7 +854,7 @@ class App:
         if result.get("latest_csv"):
             parts.append(f"latest.csv ({result['latest_records']} trạm)")
         if result.get("history_csv"):
-            parts.append(f"station_history.csv ({result['history_records']} giờ)")
+            parts.append(f"history.csv ({result['history_records']} record)")
         self._log("OK", "Hoàn tất — đã xuất: " + (", ".join(parts) if parts else "(không có)"))
 
 
