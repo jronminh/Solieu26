@@ -797,6 +797,7 @@ def run_pipeline(cfg: dict, log=_console_log, progress=None) -> dict:
     it to show a dialog; a headless caller can just let it propagate).
     """
     result = {"ok": False, "files": [], "missing": [],
+              "latest_file": None,
               "latest_csv": None, "latest_records": 0,
               "history_csv": None, "history_records": 0,
               "output_dir": cfg.get("output_dir", DEFAULT_OUTPUT_DIR)}
@@ -827,6 +828,7 @@ def run_pipeline(cfg: dict, log=_console_log, progress=None) -> dict:
 
         latest_file, latest_data = decode_latest_file(files)
         if latest_file:
+            result["latest_file"] = os.path.basename(latest_file)
             log("INFO", f"File mới nhất: {os.path.basename(latest_file)} "
                         f"({len(latest_data)} record)")
             csv_path = export_latest_to_csv(latest_file, latest_data, output_dir)

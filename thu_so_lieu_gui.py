@@ -144,6 +144,10 @@ class App:
         self.worker = None
         self.last_output_dir = None
         self.auto_job = None        # root.after() id for the pending auto-query tick
+        self.auto_next_run = None   # datetime of the next scheduled auto-query tick (None = off)
+        self.last_result = None     # result dict from the last completed run (for the info panel)
+        self.last_cfg = None        # cfg dict from the last _on_run (carries the queried date)
+        self.last_updated_at = None # datetime the last run finished (success or not)
         self._dialogs = {}          # keeps references to open dialogs (avoids reopening duplicates)
 
         # Load the external config (if any) BEFORE prefilling the form
@@ -175,6 +179,16 @@ class App:
             "auto_unit":   tk.StringVar(value="Hours" if d.get("auto_query_unit", "minutes") == "hours" else "Minutes"),
         }
 
+        # Read-only labels in the "Thông tin truy vấn" panel — recomputed by
+        # _refresh_info_panel() whenever the underlying state changes.
+        self.info = {
+            "latest_file":   tk.StringVar(value="—"),
+            "csv_result":    tk.StringVar(value="—"),
+            "data_status":   tk.StringVar(value="Chưa có dữ liệu"),
+            "auto_status":   tk.StringVar(value="—"),
+            "missing":       tk.StringVar(value="—"),
+        }
+
         self._build_menu()
         self._build_ui()
         self._fit_window_to_content()
@@ -187,7 +201,7 @@ class App:
             self._log("OK", f"Đã nạp {len(self.cfg_overrides)} thiết lập từ config: {self.cfg_path}")
         else:
             self._log("INFO", f"Không thấy config ({self.cfg_path}) — dùng mặc định trong mã.")
-        self._schedule_auto_tick()
+        self._schedule_auto_tick()   # also refreshes the info panel's auto-query status
 
     # -----------------------------------------------------------------
     def _build_menu(self):
@@ -240,14 +254,31 @@ class App:
         frm = ttk.Frame(self.root, padding=10)
         frm.pack(fill="both", expand=True)
 
-        # --- Top row: Query form (left) + action buttons stacked (right) ---
-        top = ttk.Frame(frm)
-        top.pack(fill="x")
+        # --- Ngày: luôn truy vấn trọn 00h–23h của ngày đó ---
+        date_row = ttk.Frame(frm)
+        date_row.pack(fill="x")
+        ttk.Label(date_row, text="Ngày (YYYY-MM-DD)").pack(side="left")
+        ttk.Entry(date_row, textvariable=self.v["date"], width=14).pack(side="left", padx=6)
 
-        # --- Query --- (chỉ còn Ngày — luôn truy vấn trọn 00h–23h của ngày đó)
-        q_box = ttk.LabelFrame(top, text="Truy vấn", padding=8)
+        # --- Bottom row: read-only info panel (left) + action buttons stacked (right) ---
+        top = ttk.Frame(frm)
+        top.pack(fill="x", pady=(8, 0))
+
+        # --- Thông tin truy vấn --- (read-only status; recomputed by _refresh_info_panel)
+        q_box = ttk.LabelFrame(top, text="Thông tin truy vấn", padding=8)
         q_box.pack(side="left", fill="both", expand=True)
-        self._row(q_box, 0, "Ngày (YYYY-MM-DD)", self.v["date"], width=14)
+        ttk.Label(q_box, text="Máy chủ:").grid(row=0, column=0, sticky="w", padx=6, pady=2)
+        ttk.Label(q_box, textvariable=self.v["ftp_host"]).grid(row=0, column=1, sticky="w", padx=6, pady=2)
+        ttk.Label(q_box, text="File gần nhất:").grid(row=1, column=0, sticky="w", padx=6, pady=2)
+        ttk.Label(q_box, textvariable=self.info["latest_file"]).grid(row=1, column=1, sticky="w", padx=6, pady=2)
+        ttk.Label(q_box, text="Kết quả xuất CSV:").grid(row=2, column=0, sticky="w", padx=6, pady=2)
+        ttk.Label(q_box, textvariable=self.info["csv_result"]).grid(row=2, column=1, sticky="w", padx=6, pady=2)
+        ttk.Label(q_box, text="Dữ liệu:").grid(row=3, column=0, sticky="w", padx=6, pady=2)
+        ttk.Label(q_box, textvariable=self.info["data_status"]).grid(row=3, column=1, sticky="w", padx=6, pady=2)
+        ttk.Label(q_box, text="Tự động truy vấn:").grid(row=4, column=0, sticky="w", padx=6, pady=2)
+        ttk.Label(q_box, textvariable=self.info["auto_status"]).grid(row=4, column=1, sticky="w", padx=6, pady=2)
+        ttk.Label(q_box, text="File thiếu trên server:").grid(row=5, column=0, sticky="w", padx=6, pady=2)
+        ttk.Label(q_box, textvariable=self.info["missing"]).grid(row=5, column=1, sticky="w", padx=6, pady=2)
         q_box.columnconfigure(1, weight=1)
 
         # --- Actions: stacked vertically so they line up as one column ---
@@ -745,6 +776,41 @@ class App:
         self.v["date"].set(now.strftime("%Y-%m-%d"))
         self._log("ACT", f"Về hiện tại: ngày {now:%Y-%m-%d}")
 
+    # ----- Info panel ("Thông tin truy vấn") --------------------------
+    def _refresh_info_panel(self):
+        """Recompute every label in the info panel from current state (last run result,
+        auto-query schedule). Cheap — just StringVar.set() calls — safe to call often."""
+        result = self.last_result or {}
+
+        self.info["latest_file"].set(result.get("latest_file") or "—")
+
+        if self.last_result is not None:
+            lr = result.get("latest_records", 0)
+            hr = result.get("history_records", 0)
+            self.info["csv_result"].set(f"{lr} trạm (latest.csv) · {hr} record (history.csv)")
+            missing = len(result.get("missing") or [])
+            self.info["missing"].set("Không thiếu" if missing == 0 else f"{missing} file")
+        else:
+            self.info["csv_result"].set("—")
+            self.info["missing"].set("—")
+
+        if self.last_cfg and self.last_updated_at:
+            self.info["data_status"].set(
+                f"Ngày {self.last_cfg['date']:%Y-%m-%d} — cập nhật lúc {self.last_updated_at:%H:%M:%S}")
+        else:
+            self.info["data_status"].set("Chưa có dữ liệu")
+
+        minutes = self._auto_effective_minutes()
+        if minutes <= 0:
+            self.info["auto_status"].set("Tắt")
+        elif self.auto_next_run:
+            v, unit = self.v["auto_value"].get(), self.v["auto_unit"].get()
+            self.info["auto_status"].set(
+                f"Bật — mỗi {v} {unit} (tiếp theo: {self.auto_next_run:%H:%M:%S})")
+        else:
+            v, unit = self.v["auto_value"].get(), self.v["auto_unit"].get()
+            self.info["auto_status"].set(f"Bật — mỗi {v} {unit}")
+
     # ----- Auto-query (timer) ----------------------------------------
     def _auto_effective_minutes(self) -> int:
         """Current interval in minutes; 0 means auto-query is off."""
@@ -756,14 +822,18 @@ class App:
         return v * 60 if self.v["auto_unit"].get() == "Hours" else v
 
     def _schedule_auto_tick(self):
-        """(Re)schedule the next auto-query tick from the current value/unit; cancels any pending one first."""
+        """(Re)schedule the next auto-query tick from the current value/unit; cancels any pending
+        one first. Also tracks auto_next_run and refreshes the info panel's auto-query status."""
         if self.auto_job is not None:
             self.root.after_cancel(self.auto_job)
             self.auto_job = None
         minutes = self._auto_effective_minutes()
         if minutes <= 0:
-            return
-        self.auto_job = self.root.after(minutes * 60 * 1000, self._on_auto_tick)
+            self.auto_next_run = None
+        else:
+            self.auto_next_run = datetime.datetime.now() + datetime.timedelta(minutes=minutes)
+            self.auto_job = self.root.after(minutes * 60 * 1000, self._on_auto_tick)
+        self._refresh_info_panel()
 
     def _on_auto_tick(self):
         self.auto_job = None
@@ -916,6 +986,7 @@ class App:
 
         self._divider()
         self._log("ACT", f"Bắt đầu: ngày {cfg['date']:%Y-%m-%d} (00h–23h)")
+        self.last_cfg = cfg
         self.run_btn.config(state="disabled")
         self.file_menu.entryconfig("Mở thư mục CSV", state="disabled")
         self.status.config(text="Đang chạy...")
@@ -962,6 +1033,10 @@ class App:
         self.last_output_dir = result.get("output_dir")
         if self.last_output_dir and os.path.isdir(self.last_output_dir):
             self.file_menu.entryconfig("Mở thư mục CSV", state="normal")
+
+        self.last_result = result
+        self.last_updated_at = datetime.datetime.now()
+        self._refresh_info_panel()
 
         if not result.get("ok"):
             self.status.config(text="Không có dữ liệu")
