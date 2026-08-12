@@ -107,6 +107,7 @@ CONFIG = {
 
     "auto_query_value": 15,              # GUI-only: auto-query interval (0 = disabled)
     "auto_query_unit":  "minutes",       # GUI-only: "minutes" or "hours" — unit for auto_query_value
+    "auto_query_on_startup": False,      # GUI-only: run once automatically right after launch
 }
 
 
@@ -126,6 +127,7 @@ _STR_KEYS  = ("ftp_host", "ftp_user", "ftp_pass",
               "remote_dir", "output_dir", "station_code", "auto_query_unit")
 _INT_KEYS  = ("end_hour", "ftp_timeout", "retry_temp", "retry_wait",
               "auto_query_value")
+_BOOL_KEYS = ("delete_on_exit", "auto_query_on_startup")
 
 
 def _to_bool(v: str):
@@ -164,11 +166,12 @@ def load_config_file(path: str) -> dict:
                 out[k] = int(raw[k])
             except ValueError:
                 _console_log("WARN", f"config '{k}' không phải số nguyên → bỏ qua")
-    if "delete_on_exit" in raw:
-        try:
-            out["delete_on_exit"] = _to_bool(raw["delete_on_exit"])
-        except ValueError:
-            _console_log("WARN", "config 'delete_on_exit' không phải true/false → bỏ qua")
+    for k in _BOOL_KEYS:
+        if k in raw:
+            try:
+                out[k] = _to_bool(raw[k])
+            except ValueError:
+                _console_log("WARN", f"config '{k}' không phải true/false → bỏ qua")
     for k in ("start_date", "end_date"):
         if k in raw:
             try:

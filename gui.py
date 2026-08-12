@@ -145,6 +145,7 @@ def write_minimal_config(path: str, values: dict):
         f"delete_on_exit = {'true' if values['delete_on_exit'] else 'false'}",
         f"auto_query_value = {values['auto_query_value']}",
         f"auto_query_unit = {values['auto_query_unit']}",
+        f"auto_query_on_startup = {'true' if values['auto_query_on_startup'] else 'false'}",
     ]
     with open(path, "w", encoding="utf-8") as f:
         f.write("\n".join(lines) + "\n")
@@ -155,6 +156,7 @@ class App:
         self.root = root
         self.q = queue.Queue()
         self.worker = None
+        self._run_in_progress = False  # mirrors _set_actions_enabled — feeds _refresh_advanced_controls_state
         self.last_output_dir = None
         self.auto_job = None        # root.after() id for the pending auto-query tick
         self.auto_next_run = None   # datetime of the next scheduled auto-query tick (None = off)
@@ -199,6 +201,7 @@ class App:
             "advanced_display": tk.BooleanVar(value=False),
             "auto_value":  tk.StringVar(value=str(d.get("auto_query_value", 15))),
             "auto_unit":   tk.StringVar(value="Hours" if d.get("auto_query_unit", "minutes") == "hours" else "Minutes"),
+            "auto_on_startup": tk.BooleanVar(value=bool(d.get("auto_query_on_startup", False))),
         }
 
         # Read-only labels in the "Thông tin truy vấn" panel — recomputed by
@@ -225,23 +228,21 @@ class App:
             self._log("INFO", f"Không thấy config ({self.cfg_path}) — dùng mặc định trong mã.")
         self._schedule_auto_tick()   # also refreshes the info panel's auto-query status
 
+        if self.v["auto_on_startup"].get():
+            self._log("ACT", "Tự động truy vấn khi khởi động")
+            self.root.after(300, self._on_run)   # small delay so the window renders first
+
     # -----------------------------------------------------------------
     def _build_menu(self):
-        """Single menu bar entry, 'Tùy chọn' — every action (run / view / toggles /
-        settings / file ops) lives here."""
+        """Single menu bar entry, 'Tùy chọn' — every action (run / toggles /
+        settings / file ops) lives here. Xem gần nhất/Xem lịch sử are buttons on
+        the main screen now, not menu items — see _build_ui."""
         menubar = tk.Menu(self.root)
 
-        # --- Tùy chọn --- grouped: run → view CSVs → toggles/settings → file ops
+        # --- Tùy chọn --- grouped: run → toggles/settings → file ops
         opt_menu = tk.Menu(menubar, tearoff=0)
 
         opt_menu.add_command(label="Làm mới", command=self._on_run)
-        opt_menu.add_separator()
-
-        opt_menu.add_command(label="Xem gần nhất",
-                             command=lambda: self._open_csv_viewer("latest.csv", "latest.csv"))
-        opt_menu.add_command(label="Xem lịch sử",
-                             command=lambda: self._open_csv_viewer(
-                                 "history.csv", "history.csv", with_station_filter=True))
         opt_menu.add_separator()
 
         # Hiển thị nâng cao/cơ bản toggles BOTH the extra info-panel fields and the
@@ -310,18 +311,22 @@ class App:
             if advanced_only:
                 self._info_advanced_rows.extend((cap, value_widget))
 
-        start_entry = ttk.Entry(top, textvariable=self.v["start_date"], width=12)
-        info_row_widget(0, "Ngày bắt đầu:", start_entry, advanced_only=True)
+        # Ngày bắt đầu/kết thúc + 2 nút điều khiển chỉ THẬT SỰ dùng được khi
+        # "Truy vấn nâng cao" được tick — _refresh_advanced_controls_state() giữ
+        # chúng ở trạng thái disabled khi chưa tick, dù đang hiển thị hay không.
+        self.start_date_entry = ttk.Entry(top, textvariable=self.v["start_date"], width=12)
+        info_row_widget(0, "Ngày bắt đầu:", self.start_date_entry, advanced_only=True)
 
-        end_entry = ttk.Entry(top, textvariable=self.v["end_date"], width=12)
-        info_row_widget(1, "Ngày kết thúc:", end_entry, advanced_only=True)
+        self.end_date_entry = ttk.Entry(top, textvariable=self.v["end_date"], width=12)
+        info_row_widget(1, "Ngày kết thúc:", self.end_date_entry, advanced_only=True)
 
         # "Bắt đầu" chạy truy vấn nâng cao ngay tại chỗ; "Về hiện tại" nằm cạnh —
         # cả hai căn giữa trên dòng riêng ngay dưới Ngày kết thúc.
         btn_row = ttk.Frame(top)
         self.start_btn = ttk.Button(btn_row, text="Bắt đầu", command=self._on_run)
         self.start_btn.pack(side="left", padx=(0, 6))
-        ttk.Button(btn_row, text="Về hiện tại", command=self._on_now).pack(side="left")
+        self.now_btn = ttk.Button(btn_row, text="Về hiện tại", command=self._on_now)
+        self.now_btn.pack(side="left")
         btn_row.grid(row=2, column=0, columnspan=2, pady=(2, 4))
         self._info_advanced_rows.append(btn_row)
 
@@ -332,6 +337,19 @@ class App:
         info_row(7, "Tự động truy vấn:", self.info["auto_status"])
         info_row(8, "File thiếu trên server:", self.info["missing"], advanced_only=True)
         top.columnconfigure(1, weight=1)
+
+        # --- Xem gần nhất / Xem lịch sử — luôn hiển thị (cả Cơ bản lẫn Nâng cao),
+        # ngay dưới trường dữ liệu, xếp ngang và căn giữa. pack() không fill/expand
+        # → tự căn giữa theo chiều ngang trong frm.
+        view_row = ttk.Frame(frm)
+        view_row.pack(pady=(8, 0))
+        ttk.Button(view_row, text="Xem gần nhất",
+                  command=lambda: self._open_csv_viewer("latest.csv", "latest.csv")
+                  ).pack(side="left", padx=(0, 6))
+        ttk.Button(view_row, text="Xem lịch sử",
+                  command=lambda: self._open_csv_viewer(
+                      "history.csv", "history.csv", with_station_filter=True)
+                  ).pack(side="left")
 
         # --- Status bar at the BOTTOM: status indicator at bottom-right ---
         statusbar = ttk.Frame(frm)
@@ -352,6 +370,7 @@ class App:
             self.log.tag_config("lvl_" + lvl, foreground=color)
 
         self._apply_display_mode()
+        self._refresh_advanced_controls_state()
 
     def _row(self, parent, r, label, var, width=None, show=None):
         ttk.Label(parent, text=label).grid(row=r, column=0, sticky="w", padx=6, pady=3)
@@ -459,6 +478,9 @@ class App:
         auto_unit.grid(row=0, column=1)
         auto_unit.bind("<<ComboboxSelected>>", self._on_auto_change)
         ttk.Label(auto_box, text="(0 = tắt)").grid(row=0, column=2, padx=(8, 0))
+        ttk.Checkbutton(auto_box, text="Tự động truy vấn khi khởi động",
+                        variable=self.v["auto_on_startup"]).grid(
+                        row=1, column=0, columnspan=3, sticky="w", pady=(6, 0))
 
         btn_bar = ttk.Frame(frm)
         btn_bar.pack(fill="x", pady=(12, 0))
@@ -485,6 +507,7 @@ class App:
             "delete_on_exit":     "true" if self.v["delete_on_exit"].get() else "false",
             "auto_query_value":   str(v),
             "auto_query_unit":    unit_key,
+            "auto_query_on_startup": "true" if self.v["auto_on_startup"].get() else "false",
         }
         try:
             for key, value in values.items():
@@ -495,6 +518,7 @@ class App:
                 "output_dir": values["output_dir"],
                 "delete_on_exit": self.v["delete_on_exit"].get(),
                 "auto_query_value": v, "auto_query_unit": unit_key,
+                "auto_query_on_startup": self.v["auto_on_startup"].get(),
             })
             self._log("OK", f"Đã lưu thiết lập vào config: {self.cfg_path}")
         except OSError as e:
@@ -782,10 +806,10 @@ class App:
         self._log("ACT", f"Về hiện tại: ngày {now:%Y-%m-%d}")
 
     def _on_toggle_advanced(self):
-        """Toggle 'Truy vấn nâng cao': switches query mode (ngày đơn ↔ khoảng ngày)
-        and pauses/resumes auto-query — advanced mode and the auto-query timer are
-        mutually exclusive. Doesn't touch what's shown; that's 'Hiển thị nâng cao'
-        (the Ngày bắt đầu/kết thúc fields are always visible there, ticked or not)."""
+        """Toggle 'Truy vấn nâng cao': switches query mode (ngày đơn ↔ khoảng ngày),
+        pauses/resumes auto-query (mutually exclusive with advanced mode), and
+        enables/disables the date-range fields + 'Bắt đầu'/'Về hiện tại' (visible
+        or not — that's 'Hiển thị nâng cao', a separate concern)."""
         on = self.v["advanced_mode"].get()
         if on:
             if self.auto_job is not None:
@@ -794,8 +818,20 @@ class App:
             self.auto_next_run = None
         else:
             self._schedule_auto_tick()   # resume per the settings already in config/mã nguồn
+        self._refresh_advanced_controls_state()
         self._refresh_info_panel()
         self._log("ACT", f"Truy vấn nâng cao: {'Bật' if on else 'Tắt'}")
+
+    def _refresh_advanced_controls_state(self):
+        """Ngày bắt đầu/kết thúc + 'Về hiện tại' theo đúng trạng thái tick của
+        'Truy vấn nâng cao' (bất kể đang hiển thị Cơ bản hay Nâng cao); 'Bắt đầu'
+        còn bị khóa thêm khi đang có tác vụ chạy."""
+        on = self.v["advanced_mode"].get()
+        field_state = "normal" if on else "disabled"
+        self.start_date_entry.config(state=field_state)
+        self.end_date_entry.config(state=field_state)
+        self.now_btn.config(state=field_state)
+        self.start_btn.config(state="normal" if (on and not self._run_in_progress) else "disabled")
 
     # ----- Info panel ("Thông tin truy vấn") --------------------------
     def _refresh_info_panel(self):
@@ -958,6 +994,7 @@ class App:
             "delete_on_exit": self.v["delete_on_exit"].get(),
             "auto_query_value": self._auto_effective_value(),
             "auto_query_unit": "hours" if self.v["auto_unit"].get() == "Hours" else "minutes",
+            "auto_query_on_startup": self.v["auto_on_startup"].get(),
         }
 
     def _on_edit_config(self):
@@ -1033,13 +1070,15 @@ class App:
         return cfg
 
     def _set_actions_enabled(self, enabled: bool):
-        """Toggle 'Làm mới' (menu + 'Bắt đầu' button) and 'Truy vấn nâng cao' together
-        — all locked while a run is in progress (advanced mode can't change the
-        query mid-run)."""
+        """Toggle 'Làm mới' and 'Truy vấn nâng cao' — locked while a run is in
+        progress (advanced mode can't change the query mid-run). 'Bắt đầu' follows
+        via _refresh_advanced_controls_state, which also re-applies the checkbox's
+        own on/off state to the date fields."""
+        self._run_in_progress = not enabled
         state = "normal" if enabled else "disabled"
         self.opt_menu.entryconfig("Làm mới", state=state)
-        self.start_btn.config(state=state)
         self.adv_check.config(state=state)
+        self._refresh_advanced_controls_state()
 
     # -----------------------------------------------------------------
     def _on_run(self):
