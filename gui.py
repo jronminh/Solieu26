@@ -291,29 +291,24 @@ class App:
         # flat list in _apply_display_mode().
         self._info_advanced_rows = []
 
-        def info_row(r, caption, var, advanced_only=False):
+        def info_row(r, caption, var=None, widget=None, advanced_only=False):
+            """One grid row: caption label + either a read-only value (var, as a
+            Label) or an editable/composite widget passed in directly."""
             cap = ttk.Label(top, text=caption)
-            val = ttk.Label(top, textvariable=var)
+            val = widget if widget is not None else ttk.Label(top, textvariable=var)
             cap.grid(row=r, column=0, sticky="w", padx=6, pady=2)
-            val.grid(row=r, column=1, sticky="w", padx=6, pady=2)
+            val.grid(row=r, column=1, sticky="ew" if widget is not None else "w", padx=6, pady=2)
             if advanced_only:
                 self._info_advanced_rows.extend((cap, val))
-
-        def info_row_widget(r, caption, value_widget, advanced_only=False):
-            cap = ttk.Label(top, text=caption)
-            cap.grid(row=r, column=0, sticky="w", padx=6, pady=2)
-            value_widget.grid(row=r, column=1, sticky="ew", padx=6, pady=2)
-            if advanced_only:
-                self._info_advanced_rows.extend((cap, value_widget))
 
         # Ngày bắt đầu/kết thúc + 2 nút điều khiển chỉ THẬT SỰ dùng được khi
         # "Truy vấn nâng cao" được tick — _refresh_advanced_controls_state() giữ
         # chúng ở trạng thái disabled khi chưa tick, dù đang hiển thị hay không.
         self.start_date_entry = ttk.Entry(top, textvariable=self.v["start_date"], width=12)
-        info_row_widget(0, "Ngày bắt đầu:", self.start_date_entry, advanced_only=True)
+        info_row(0, "Ngày bắt đầu:", widget=self.start_date_entry, advanced_only=True)
 
         self.end_date_entry = ttk.Entry(top, textvariable=self.v["end_date"], width=12)
-        info_row_widget(1, "Ngày kết thúc:", self.end_date_entry, advanced_only=True)
+        info_row(1, "Ngày kết thúc:", widget=self.end_date_entry, advanced_only=True)
 
         # "Bắt đầu" chạy truy vấn nâng cao ngay tại chỗ; "Về hiện tại" nằm cạnh —
         # cả hai căn giữa trên dòng riêng ngay dưới Ngày kết thúc.
@@ -791,12 +786,7 @@ class App:
     def _open_csv_external(self, path: str):
         """Open the CSV file with its default application (usually Excel on Windows)."""
         self._log("ACT", f"Mở bằng Excel: {os.path.basename(path)}")
-        ok, info = open_in_editor(path)
-        if ok:
-            self._log("OK", f"Đã mở: {info}")
-        else:
-            self._log("ERR", f"Không mở được: {info}")
-            messagebox.showwarning("Không mở được", info)
+        self._report_open(*open_in_editor(path), warn=True)
 
     def _on_now(self):
         """'Về hiện tại' (Nâng cao frame): force start_date/end_date to today."""
@@ -865,16 +855,12 @@ class App:
             self.info["auto_status"].set("Tạm dừng trong truy vấn nâng cao")
             return
 
-        minutes = self._auto_effective_minutes()
-        if minutes <= 0:
+        if self._auto_effective_minutes() <= 0:
             self.info["auto_status"].set("Tắt")
-        elif self.auto_next_run:
-            v, unit = self.v["auto_value"].get(), self.v["auto_unit"].get()
-            self.info["auto_status"].set(
-                f"Bật — mỗi {v} {unit} (tiếp theo: {self.auto_next_run:%H:%M:%S})")
         else:
             v, unit = self.v["auto_value"].get(), self.v["auto_unit"].get()
-            self.info["auto_status"].set(f"Bật — mỗi {v} {unit}")
+            next_run = f" (tiếp theo: {self.auto_next_run:%H:%M:%S})" if self.auto_next_run else ""
+            self.info["auto_status"].set(f"Bật — mỗi {v} {unit}{next_run}")
 
     # ----- Auto-query (timer) ----------------------------------------
     def _auto_effective_minutes(self) -> int:
@@ -945,10 +931,7 @@ class App:
                 self._on_toggle_advanced()
 
         for w in self._info_advanced_rows:
-            if advanced:
-                w.grid()
-            else:
-                w.grid_remove()
+            (w.grid if advanced else w.grid_remove)()
 
         if advanced:
             self.log.pack(side="top", fill="both", expand=True, pady=(8, 0))
@@ -962,22 +945,26 @@ class App:
         self._fit_window_to_content()
         self._log("ACT", f"Chế độ hiển thị: {'Nâng cao' if advanced else 'Cơ bản'}")
 
+    def _report_open(self, ok: bool, info: str, what: str = None, warn: bool = False):
+        """Log the result of an open_folder()/open_in_editor() call in the standard
+        'Đã mở <what>: ...' / 'Không mở được <what>: ...' shape; optionally also
+        pop a warning dialog on failure."""
+        suffix = f" {what}" if what else ""
+        if ok:
+            self._log("OK", f"Đã mở{suffix}: {info}")
+        else:
+            self._log("ERR", f"Không mở được{suffix}: {info}")
+            if warn:
+                messagebox.showwarning("Không mở được", info)
+
     def _on_open_folder(self):
         self._log("ACT", "Mở thư mục CSV")
-        ok, info = open_folder(self.last_output_dir)
-        if ok:
-            self._log("OK", f"Đã mở thư mục CSV: {info}")
-        else:
-            self._log("ERR", f"Không mở được thư mục CSV: {info}")
+        self._report_open(*open_folder(self.last_output_dir), "thư mục CSV")
 
     def _on_open_data(self):
         self._log("ACT", "Mở thư mục data")
         os.makedirs(core.TEMP_DL_DIR, exist_ok=True)   # create it upfront if never run before
-        ok, info = open_folder(core.TEMP_DL_DIR)
-        if ok:
-            self._log("OK", f"Đã mở thư mục data: {info}")
-        else:
-            self._log("ERR", f"Không mở được thư mục data: {info}")
+        self._report_open(*open_folder(core.TEMP_DL_DIR), "thư mục data")
 
     def _read_form_values(self) -> dict:
         """Current form values (as strings/bools) for writing out to config.ini."""
@@ -1086,13 +1073,11 @@ class App:
             return
         try:
             cfg = self._build_cfg()
+            if not cfg["ftp_host"]:
+                raise ValueError("Chưa nhập FTP host")
         except ValueError as e:
             self._log("ERR", f"Nhập sai: {e}")
             messagebox.showerror("Nhập sai", str(e))
-            return
-        if not cfg["ftp_host"]:
-            self._log("ERR", "Nhập sai: chưa nhập FTP host")
-            messagebox.showerror("Nhập sai", "Chưa nhập FTP host")
             return
 
         self._divider()
