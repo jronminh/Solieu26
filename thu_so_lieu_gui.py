@@ -76,6 +76,14 @@ NUMERIC_VIEWER_COLUMNS = {
     "cloud_layers", "hour",
 }
 
+# Columns permanently kept out of the CSV viewer table — unlike self.hidden_cols
+# (user-toggled via "Hiển thị", persisted to config), these never appear as a
+# checkbox option either, so there's no way to bring them back short of opening
+# the CSV file itself. The data still goes into latest.csv/history.csv as normal.
+ALWAYS_HIDDEN_VIEWER_COLUMNS = {
+    "obs_time", "date", "source_file", "station_code", "lat", "lon", "cloud_layers",
+}
+
 
 def open_folder(path: str):
     """Open a folder with the OS's file manager. Returns (ok: bool, reason/path)."""
@@ -158,6 +166,12 @@ class App:
 
         root.title("Thu số liệu quan trắc")
         root.minsize(200, 150)   # temporary low floor, replaced below once real content is laid out
+
+        # CSV viewer Treeview look — taller rows + bold headings read better than
+        # the ttk defaults across the many columns flatten_record() produces.
+        style = ttk.Style(root)
+        style.configure("Treeview", rowheight=22)
+        style.configure("Treeview.Heading", font=("Segoe UI", 9, "bold"))
 
         d = core.CONFIG
         today = datetime.date.today()
@@ -567,7 +581,7 @@ class App:
         win = tk.Toplevel(self.root)
         win.title(title)
         win.transient(self.root)
-        win.geometry("900x420")
+        win.geometry("1040x480")
         win.minsize(480, 240)
         self._dialogs[key] = win
         win._path = path
@@ -618,6 +632,9 @@ class App:
         tf.rowconfigure(0, weight=1)
         tf.columnconfigure(0, weight=1)
         win._tree = tree
+        # Zebra striping — tags live on the widget, so this only needs setting once.
+        tree.tag_configure("odd", background="#f3f4f6")
+        tree.tag_configure("even", background="#ffffff")
 
         self._center_over_root(win)
         self._load_csv_into_viewer(win, path)
@@ -696,7 +713,9 @@ class App:
         frm = ttk.Frame(dlg, padding=12)
         frm.pack(fill="both", expand=True)
 
-        header = win._header or []
+        # ALWAYS_HIDDEN_VIEWER_COLUMNS don't get a checkbox at all — they're not
+        # meant to be toggleable back on from the GUI.
+        header = [c for c in (win._header or []) if c not in ALWAYS_HIDDEN_VIEWER_COLUMNS]
         col_vars = {}
         ncols = 3
         for i, c in enumerate(header):
@@ -755,25 +774,31 @@ class App:
             cols = [c for c in prefer if c in header]
         else:
             cols = [c for c in header if c != "raw"]   # data mode: all columns, minus raw
-        cols = [c for c in cols if c not in self.hidden_cols]   # apply the column selection
+        cols = [c for c in cols
+                if c not in self.hidden_cols and c not in ALWAYS_HIDDEN_VIEWER_COLUMNS]
 
         idx = {c: header.index(c) for c in cols}
 
         tree.delete(*tree.get_children())
         tree["columns"] = cols
+        # Width comes from the DATA only (not the header/title) — a header like
+        # "temperature_c" is much longer than any value it holds, so sizing off
+        # it would waste space. Data is right-aligned in every cell.
+        sample_rows = data[:300]
         for c in cols:
             is_sorted = (c == win._sort_col)
             arrow = "" if not is_sorted else (" ▼" if win._sort_reverse else " ▲")
             tree.heading(c, text=c + arrow, command=lambda c=c: self._sort_viewer(win, c))
             if c == "raw":
-                tree.column(c, width=560, stretch=True, anchor="w")
+                tree.column(c, width=560, stretch=True, anchor="e")
             else:
-                w = max(60, min(240, (len(c) + 2) * 8))
-                anchor = "e" if (c in NUMERIC_VIEWER_COLUMNS or c.endswith("_hshs")) else "w"
-                tree.column(c, width=w, stretch=False, anchor=anchor)
+                i = idx[c]
+                longest = max([1] + [len(r[i]) for r in sample_rows if i < len(r) and r[i]])
+                w = max(50, min(220, (longest + 2) * 7))
+                tree.column(c, width=w, stretch=False, anchor="e")
 
-        for r in data:
-            tree.insert("", "end",
+        for i, r in enumerate(data):
+            tree.insert("", "end", tags=("odd" if i % 2 else "even",),
                         values=[r[idx[c]] if idx[c] < len(r) else "" for c in cols])
 
         tree.xview_moveto(0)
