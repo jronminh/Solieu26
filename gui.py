@@ -245,15 +245,10 @@ class App:
         opt_menu.add_command(label="Làm mới", command=self._on_run)
         opt_menu.add_separator()
 
-        # Hiển thị nâng cao/cơ bản toggles BOTH the extra info-panel fields and the
-        # log frame together (see _apply_display_mode) — its own label flips between
-        # the two names instead of a checkbutton, since it's a mode switch, not a
-        # single on/off setting. ("Truy vấn nâng cao" is a checkbox on the main
-        # screen, not here — it drives what gets queried, not what's displayed.)
-        # Thiết lập... opens the combined Kết nối / Đường dẫn / Tự động truy vấn
-        # dialog, with config.ini actions at its bottom.
-        opt_menu.add_command(label="Hiển thị nâng cao", command=self._on_toggle_display_mode)
-        self._display_toggle_idx = opt_menu.index("end")
+        # "Hiển thị nâng cao/cơ bản" is a button at the bottom-left of the main
+        # screen now, not here — see _build_ui. Thiết lập... opens the combined
+        # Kết nối / Đường dẫn / Tự động truy vấn dialog, with config.ini actions
+        # at its bottom.
         opt_menu.add_command(label="Thiết lập...", command=self._open_settings_dialog)
         opt_menu.add_separator()
 
@@ -277,7 +272,7 @@ class App:
         # --- Truy vấn nâng cao: checkbox chỉ đổi CHẾ ĐỘ truy vấn (ngày đơn ↔
         # khoảng ngày) và tạm dừng/tiếp tục tự động truy vấn — KHÔNG điều khiển
         # hiển thị gì cả. Chế độ thường (bỏ tick, mặc định) luôn truy vấn "hôm nay".
-        self.adv_check = ttk.Checkbutton(frm, text="Truy vấn nâng cao",
+        self.adv_check = ttk.Checkbutton(frm, text="Nâng cao",
                                          variable=self.v["advanced_mode"],
                                          command=self._on_toggle_advanced)
         self.adv_check.pack(anchor="w")
@@ -331,11 +326,11 @@ class App:
         self._info_advanced_rows.append(btn_row)
 
         info_row(3, "Máy chủ:", self.v["ftp_host"], advanced_only=True)
-        info_row(4, "File gần nhất:", self.info["latest_file"], advanced_only=True)
-        info_row(5, "Kết quả xuất CSV:", self.info["csv_result"], advanced_only=True)
+        info_row(4, "File mới:", self.info["latest_file"], advanced_only=True)
+        info_row(5, "Xuất CSV:", self.info["csv_result"], advanced_only=True)
         info_row(6, "Dữ liệu:", self.info["data_status"])
-        info_row(7, "Tự động truy vấn:", self.info["auto_status"])
-        info_row(8, "File thiếu trên server:", self.info["missing"], advanced_only=True)
+        info_row(7, "Tự động:", self.info["auto_status"])
+        info_row(8, "File thiếu:", self.info["missing"], advanced_only=True)
         top.columnconfigure(1, weight=1)
 
         # --- Xem gần nhất / Xem lịch sử — luôn hiển thị (cả Cơ bản lẫn Nâng cao),
@@ -351,9 +346,14 @@ class App:
                       "history.csv", "history.csv", with_station_filter=True)
                   ).pack(side="left")
 
-        # --- Status bar at the BOTTOM: status indicator at bottom-right ---
+        # --- Status bar at the BOTTOM: display-mode toggle at bottom-left, status
+        # indicator at bottom-right ---
         statusbar = ttk.Frame(frm)
         statusbar.pack(side="bottom", fill="x", pady=(6, 0))
+        self.display_toggle_chk = ttk.Checkbutton(statusbar, text="Hiển thị nâng cao",
+                                                  variable=self.v["advanced_display"],
+                                                  command=self._on_toggle_display_mode)
+        self.display_toggle_chk.pack(side="left")
         self.status = ttk.Label(statusbar, text="Sẵn sàng", anchor="e")
         self.status.pack(side="right")
 
@@ -956,10 +956,8 @@ class App:
             self.log.pack_forget()
 
     def _on_toggle_display_mode(self):
-        advanced = not self.v["advanced_display"].get()
-        self.v["advanced_display"].set(advanced)
-        self.opt_menu.entryconfig(self._display_toggle_idx,
-                                  label="Hiển thị cơ bản" if advanced else "Hiển thị nâng cao")
+        # Checkbutton already flipped self.v["advanced_display"] before calling this.
+        advanced = self.v["advanced_display"].get()
         self._apply_display_mode()
         self._fit_window_to_content()
         self._log("ACT", f"Chế độ hiển thị: {'Nâng cao' if advanced else 'Cơ bản'}")
