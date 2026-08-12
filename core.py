@@ -99,8 +99,9 @@ CONFIG = {
 
     "station_code": "k15",
 
-    "date":     datetime.datetime(2026, 8, 10),
-    "end_hour": 23,
+    "start_date": datetime.datetime(2026, 8, 10),
+    "end_date":   datetime.datetime(2026, 8, 10),
+    "end_hour":   23,        # last hour to fetch, ONLY when start_date == end_date
 
     "viewer_hidden_columns": [],         # GUI-only: columns hidden in the CSV viewer
 
@@ -168,11 +169,12 @@ def load_config_file(path: str) -> dict:
             out["delete_on_exit"] = _to_bool(raw["delete_on_exit"])
         except ValueError:
             _console_log("WARN", "config 'delete_on_exit' không phải true/false → bỏ qua")
-    if "date" in raw:
-        try:
-            out["date"] = datetime.datetime.strptime(raw["date"].strip(), "%Y-%m-%d")
-        except ValueError:
-            _console_log("WARN", "config 'date' sai định dạng YYYY-MM-DD → bỏ qua")
+    for k in ("start_date", "end_date"):
+        if k in raw:
+            try:
+                out[k] = datetime.datetime.strptime(raw[k].strip(), "%Y-%m-%d")
+            except ValueError:
+                _console_log("WARN", f"config '{k}' sai định dạng YYYY-MM-DD → bỏ qua")
     if "viewer_hidden_columns" in raw:
         val = raw["viewer_hidden_columns"].strip()
         out["viewer_hidden_columns"] = [c.strip() for c in val.split(",") if c.strip()]
@@ -315,53 +317,20 @@ def parse_obs_dt(filename: str):
 
 def download_files(ftp: FTP, cfg: dict, log=_console_log, progress=None) -> dict:
     """
-    Download every file in [00:00 → end_hour] of the chosen date into cfg['local_dir'].
-    cwd ONCE into the date's directory; if that directory is unreachable, bail out early.
+    Download hourly bulletin files into cfg['local_dir'], from cfg['start_date']
+    through cfg['end_date'] (inclusive).
+
+    Same day (start_date == end_date): fast path — cwd ONCE into that date's
+    remote directory and download [00:00 → cfg.get('end_hour', 23)]; if the
+    directory is unreachable, bail out early.
+
+    Different days: walks every hour from 00:00 of start_date through 23:00 of
+    end_date. The remote directory is "<remote_dir>/YYYY/MM" per timestamp, so
+    it cwd's again only when the year/month actually changes (a range can span
+    multiple months/years); end_hour is ignored — every day in a range is downloaded
+    in full.
 
     Returns a dict: {"files","downloaded","skipped","missing"}.
-    """
-    base_date  = cfg["date"]
-    end_hour   = cfg["end_hour"]
-    remote_dir = cfg["remote_dir"].rstrip("/")
-    local_dir  = cfg["local_dir"]
-    retry_temp = cfg.get("retry_temp", 0)
-    retry_wait = cfg.get("retry_wait", 2)
-    os.makedirs(local_dir, exist_ok=True)
-
-    target_dir = f"{remote_dir}/{base_date:%Y}/{base_date:%m}"
-    total = end_hour + 1
-
-    origin = ftp.pwd()
-    try:
-        ftp.cwd(target_dir)
-    except (error_perm, error_temp) as e:
-        log("ERR", f"Không truy cập được thư mục {target_dir}: {e}")
-        return {"files": [], "downloaded": [], "skipped": [], "missing": []}
-
-    buckets = {"files": [], "downloaded": [], "skipped": [], "missing": []}
-    try:
-        for hour in range(total):
-            filename = quantrac_filename_at(base_date.replace(hour=hour))
-            status = _fetch_and_bucket(ftp, filename, local_dir, retry_temp, retry_wait, log, buckets)
-            if progress:
-                progress(hour + 1, total, status)
-    finally:
-        ftp.cwd(origin)
-
-    return buckets
-
-
-def download_files_range(ftp: FTP, cfg: dict, log=_console_log, progress=None) -> dict:
-    """
-    Advanced query: download every hourly file from 00:00 of start_date through
-    23:00 of end_date (inclusive) into cfg['local_dir'].
-
-    Builds ONE long ordered list of hourly timestamps up front and walks it —
-    unlike download_files() (single day, cwd once), the remote directory is
-    "Quantrac/YYYY/MM" per timestamp, so it cwd's again only when the year/month
-    actually changes (a range can span multiple months/years).
-
-    Returns the same shape as download_files(): {"files","downloaded","skipped","missing"}.
     """
     start_date = cfg["start_date"]
     end_date   = cfg["end_date"]
@@ -370,6 +339,31 @@ def download_files_range(ftp: FTP, cfg: dict, log=_console_log, progress=None) -
     retry_temp = cfg.get("retry_temp", 0)
     retry_wait = cfg.get("retry_wait", 2)
     os.makedirs(local_dir, exist_ok=True)
+
+    buckets = {"files": [], "downloaded": [], "skipped": [], "missing": []}
+    origin = ftp.pwd()
+
+    if start_date.date() == end_date.date():
+        end_hour = cfg.get("end_hour", 23)
+        hours = [start_date.replace(hour=h) for h in range(end_hour + 1)]
+        total = len(hours)
+
+        target_dir = f"{remote_dir}/{start_date:%Y}/{start_date:%m}"
+        try:
+            ftp.cwd(target_dir)
+        except (error_perm, error_temp) as e:
+            log("ERR", f"Không truy cập được thư mục {target_dir}: {e}")
+            return buckets
+
+        try:
+            for i, ts in enumerate(hours):
+                filename = quantrac_filename_at(ts)
+                status = _fetch_and_bucket(ftp, filename, local_dir, retry_temp, retry_wait, log, buckets)
+                if progress:
+                    progress(i + 1, total, status)
+        finally:
+            ftp.cwd(origin)
+        return buckets
 
     hours = []
     day = start_date.replace(hour=0, minute=0, second=0, microsecond=0)
@@ -380,8 +374,6 @@ def download_files_range(ftp: FTP, cfg: dict, log=_console_log, progress=None) -
         day += datetime.timedelta(days=1)
     total = len(hours)
 
-    buckets = {"files": [], "downloaded": [], "skipped": [], "missing": []}
-    origin = ftp.pwd()
     current_dir = None
     try:
         for i, ts in enumerate(hours):
@@ -895,10 +887,7 @@ def run_pipeline(cfg: dict, log=_console_log, progress=None) -> dict:
 
     files = []
     try:
-        if "start_date" in cfg:
-            dl = download_files_range(ftp, cfg, log=log, progress=progress)
-        else:
-            dl = download_files(ftp, cfg, log=log, progress=progress)
+        dl = download_files(ftp, cfg, log=log, progress=progress)
         files = dl["files"]
         result["files"]   = files
         result["missing"] = dl["missing"]

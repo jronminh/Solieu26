@@ -852,10 +852,11 @@ class App:
             self.info["missing"].set("—")
 
         if self.last_cfg and self.last_updated_at:
-            if "start_date" in self.last_cfg:
-                rng = f"{self.last_cfg['start_date']:%Y-%m-%d} → {self.last_cfg['end_date']:%Y-%m-%d}"
+            start, end = self.last_cfg["start_date"], self.last_cfg["end_date"]
+            if start.date() == end.date():
+                rng = f"Ngày {start:%Y-%m-%d}"
             else:
-                rng = f"Ngày {self.last_cfg['date']:%Y-%m-%d}"
+                rng = f"{start:%Y-%m-%d} → {end:%Y-%m-%d}"
             self.info["data_status"].set(f"{rng} — cập nhật lúc {self.last_updated_at:%H:%M:%S}")
         else:
             self.info["data_status"].set("Chưa có dữ liệu")
@@ -1007,8 +1008,10 @@ class App:
     def _build_cfg(self) -> dict:
         """Read the form → cfg dict; local_dir/timeout/retry come from core's fixed constants.
 
-        Normal mode: always queries "today", 00h-23h — no date field to read.
-        Advanced mode (self.v["advanced_mode"]): queries start_date..end_date instead.
+        Always sets start_date/end_date — core.download_files() takes the fast
+        single-day path when they're equal. Normal mode: always "today", no date
+        field to read. Advanced mode (self.v["advanced_mode"]): reads them from
+        the Nâng cao form instead.
         """
         cfg = {
             "ftp_host": self.v["ftp_host"].get().strip(),
@@ -1034,8 +1037,8 @@ class App:
             cfg["start_date"] = start
             cfg["end_date"] = end
         else:
-            cfg["date"] = datetime.datetime.combine(datetime.date.today(), datetime.time())
-            cfg["end_hour"] = 23
+            today = datetime.datetime.combine(datetime.date.today(), datetime.time())
+            cfg["start_date"] = cfg["end_date"] = today
 
         return cfg
 
@@ -1064,12 +1067,12 @@ class App:
             return
 
         self._divider()
-        if "start_date" in cfg:
+        if cfg["start_date"].date() == cfg["end_date"].date():
+            self._log("ACT", f"Bắt đầu: ngày {cfg['start_date']:%Y-%m-%d} (00h–23h)")
+        else:
             days = (cfg["end_date"].date() - cfg["start_date"].date()).days + 1
             self._log("ACT", f"Bắt đầu: {cfg['start_date']:%Y-%m-%d} → "
                              f"{cfg['end_date']:%Y-%m-%d} ({days} ngày)")
-        else:
-            self._log("ACT", f"Bắt đầu: ngày {cfg['date']:%Y-%m-%d} (00h–23h)")
         self.last_cfg = cfg
         self._set_actions_enabled(False)
         self.file_menu.entryconfig("Mở thư mục CSV", state="disabled")
