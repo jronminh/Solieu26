@@ -223,49 +223,44 @@ class App:
 
     # -----------------------------------------------------------------
     def _build_menu(self):
-        """Menu bar: File / Actions / View / Options / Help. Every action lives here —
-        the main screen only shows the read-only info panel, progress bar and status."""
+        """Menu bar: everything (run / view / toggles / settings / file ops) lives
+        in one 'Tùy chọn' menu; only Trợ giúp stays separate."""
         menubar = tk.Menu(self.root)
 
-        # --- File ---
-        file_menu = tk.Menu(menubar, tearoff=0)
-        file_menu.add_command(label="Mở thư mục CSV", command=self._on_open_folder)
-        file_menu.add_command(label="Mở thư mục data", command=self._on_open_data)
-        file_menu.add_separator()
-        file_menu.add_command(label="Thoát", command=self._on_exit)
-        menubar.add_cascade(label="Tệp", menu=file_menu)
-        self.file_menu = file_menu               # lets us enable/disable "Open CSV folder" by state
-        # Not run yet → no CSV folder to open
-        self.file_menu.entryconfig("Mở thư mục CSV", state="disabled")
-
-        # --- Actions --- ("Về hiện tại" lives in the Nâng cao frame below, since
-        # normal mode has no date field of its own)
-        action_menu = tk.Menu(menubar, tearoff=0)
-        action_menu.add_command(label="Chạy", command=self._on_run)
-        menubar.add_cascade(label="Thao tác", menu=action_menu)
-        self.action_menu = action_menu            # lets us enable/disable "Chạy" while a run is in progress
-
-        # --- View ---
-        view_menu = tk.Menu(menubar, tearoff=0)
-        view_menu.add_command(label="Xem gần nhất",
-                              command=lambda: self._open_csv_viewer("latest.csv", "latest.csv"))
-        view_menu.add_command(label="Xem lịch sử",
-                              command=lambda: self._open_csv_viewer(
-                                  "history.csv", "history.csv", with_station_filter=True))
-        menubar.add_cascade(label="Xem", menu=view_menu)
-
-        # --- Options --- (Hiển thị nhật ký toggles the log frame; Truy vấn nâng cao
-        # toggles the Nâng cao date-range frame; Thiết lập... opens the combined
-        # Kết nối / Đường dẫn / Tự động truy vấn dialog, with config.ini actions
-        # at its bottom)
+        # --- Tùy chọn --- grouped: run → view CSVs → toggles/settings → file ops
         opt_menu = tk.Menu(menubar, tearoff=0)
+
+        opt_menu.add_command(label="Chạy", command=self._on_run)
+        opt_menu.add_separator()
+
+        opt_menu.add_command(label="Xem gần nhất",
+                             command=lambda: self._open_csv_viewer("latest.csv", "latest.csv"))
+        opt_menu.add_command(label="Xem lịch sử",
+                             command=lambda: self._open_csv_viewer(
+                                 "history.csv", "history.csv", with_station_filter=True))
+        opt_menu.add_separator()
+
+        # Hiển thị nhật ký toggles the log frame; Truy vấn nâng cao toggles the
+        # Nâng cao date-range frame ("Về hiện tại" lives there, since normal mode
+        # has no date field of its own); Thiết lập... opens the combined Kết nối /
+        # Đường dẫn / Tự động truy vấn dialog, with config.ini actions at its bottom.
         opt_menu.add_checkbutton(label="Hiển thị nhật ký", variable=self.v["show_log"],
                                  command=self._on_toggle_log)
         opt_menu.add_checkbutton(label="Truy vấn nâng cao", variable=self.v["advanced_mode"],
                                  command=self._on_toggle_advanced)
         opt_menu.add_command(label="Thiết lập...", command=self._open_settings_dialog)
+        opt_menu.add_separator()
+
+        opt_menu.add_command(label="Mở thư mục CSV", command=self._on_open_folder)
+        opt_menu.add_command(label="Mở thư mục data", command=self._on_open_data)
+        opt_menu.add_separator()
+        opt_menu.add_command(label="Thoát", command=self._on_exit)
+
         menubar.add_cascade(label="Tùy chọn", menu=opt_menu)
-        self.opt_menu = opt_menu                  # lets us enable/disable "Truy vấn nâng cao" while a run is in progress
+        self.opt_menu = opt_menu   # lets us enable/disable entries by state ("Chạy" while
+                                    # running, "Truy vấn nâng cao" likewise, "Mở thư mục CSV"
+                                    # until there's something to open)
+        self.opt_menu.entryconfig("Mở thư mục CSV", state="disabled")   # nothing to open yet
 
         # --- Help ---
         help_menu = tk.Menu(menubar, tearoff=0)
@@ -502,13 +497,13 @@ class App:
             "   vấn tiếp tục chạy theo thiết lập đã lưu.\n\n"
             "3. Bấm 'Chạy' để tải bản tin từ FTP và giải mã.\n"
             "   Theo dõi tiến trình ở thanh trạng thái và Nhật ký bên dưới.\n\n"
-            "4. Menu Xem:\n"
+            "4. Menu Tùy chọn — mọi thao tác đều gom về đây:\n"
+            "   • 'Chạy' — xem mục 3 ở trên.\n"
             "   • 'Xem gần nhất' — bản tin mới nhất của TẤT CẢ các trạm.\n"
             "   • 'Xem lịch sử' — lịch sử theo giờ của TẤT CẢ các trạm;\n"
             "     dùng ô 'Trạm' trong cửa sổ xem để lọc riêng 1 trạm\n"
             "     (mặc định lọc theo station_code trong config.ini).\n"
-            "     Trong cửa sổ xem, bấm 'Xem raw' để đối chiếu bản tin gốc.\n\n"
-            "5. Menu Tùy chọn:\n"
+            "     Trong cửa sổ xem, bấm 'Xem raw' để đối chiếu bản tin gốc.\n"
             "   • 'Hiển thị nhật ký' — bật/tắt khung Nhật ký (mặc định tắt).\n"
             "   • 'Truy vấn nâng cao' — xem mục 2 ở trên.\n"
             "   • 'Thiết lập...' — mở hộp thoại gồm:\n"
@@ -522,10 +517,10 @@ class App:
             "       file để sửa tay; cũng là nơi đổi trạm mặc định\n"
             "       cho bộ lọc lịch sử (station_code).\n"
             "     - 'Lưu thiết lập' — lưu ngay các mục trên vào\n"
-            "       config.ini để lần chạy sau tự nạp lại.\n\n"
-            "6. Menu Tệp:\n"
+            "       config.ini để lần chạy sau tự nạp lại.\n"
             "   • 'Mở thư mục CSV' — xem file latest.csv / history.csv.\n"
-            "   • 'Mở thư mục data' — xem các bản tin gốc (.txt) đã tải về.")
+            "   • 'Mở thư mục data' — xem các bản tin gốc (.txt) đã tải về.\n"
+            "   • 'Thoát' — đóng chương trình.")
 
     def _on_help_about(self):
         self._log("ACT", "Mở 'Tác giả'")
@@ -1046,7 +1041,7 @@ class App:
         """Toggle 'Chạy' and 'Truy vấn nâng cao' together — both are locked while a
         run is in progress (advanced mode can't change the query mid-run)."""
         state = "normal" if enabled else "disabled"
-        self.action_menu.entryconfig("Chạy", state=state)
+        self.opt_menu.entryconfig("Chạy", state=state)
         self.opt_menu.entryconfig("Truy vấn nâng cao", state=state)
 
     # -----------------------------------------------------------------
@@ -1075,7 +1070,7 @@ class App:
                              f"{cfg['end_date']:%Y-%m-%d} ({days} ngày)")
         self.last_cfg = cfg
         self._set_actions_enabled(False)
-        self.file_menu.entryconfig("Mở thư mục CSV", state="disabled")
+        self.opt_menu.entryconfig("Mở thư mục CSV", state="disabled")
         self.status.config(text="Đang chạy...")
 
         self.worker = threading.Thread(target=self._work, args=(cfg,), daemon=True)
@@ -1117,7 +1112,7 @@ class App:
         self._set_actions_enabled(True)
         self.last_output_dir = result.get("output_dir")
         if self.last_output_dir and os.path.isdir(self.last_output_dir):
-            self.file_menu.entryconfig("Mở thư mục CSV", state="normal")
+            self.opt_menu.entryconfig("Mở thư mục CSV", state="normal")
 
         self.last_result = result
         self.last_updated_at = datetime.datetime.now()
