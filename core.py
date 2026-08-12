@@ -7,8 +7,8 @@ Runs standalone:
     python core.py [config.ini path]
 
 Uses the CONFIG dict defined below as defaults. If a config.ini file exists
-(next to this script, or the path given on the command line), its keys
-override CONFIG — see "LOADING THE EXTERNAL CONFIG" below for the exact keys.
+(next to the downloaded-data folder, or the path given on the command line),
+its keys override CONFIG — see "LOADING THE EXTERNAL CONFIG" below for the exact keys.
 Logs go through the callback log(level, msg); the default _console_log prints
 them to stdout as "HH:MM:SS  LEVEL  message".
 
@@ -112,13 +112,13 @@ CONFIG = {
 # =============================================================================
 # LOADING THE EXTERNAL CONFIG (config.ini)
 # -----------------------------------------------------------------------------
-# If a config.ini file exists (next to the script, or passed on the command line),
+# If a config.ini file exists (in TEMP_DL_DIR, or passed on the command line),
 # read it and OVERRIDE the defaults in CONFIG. Missing file → keep code defaults.
 # Only the keys you want to change need to be present; absent keys keep their default.
 # 'local_dir' is never read from config — downloads always go into the temp dir.
 # =============================================================================
 
-CONFIG_FILENAME = "config.ini"          # default name, looked up next to the script
+CONFIG_FILENAME = "config.ini"          # default name, looked up in TEMP_DL_DIR
 CONFIG_SECTION  = "Solieu26"
 
 _STR_KEYS  = ("ftp_host", "ftp_user", "ftp_pass",
@@ -181,10 +181,15 @@ def load_config_file(path: str) -> dict:
 
 def apply_config_file(path: str = None):
     """
-    Resolve the config path (argument > default next to the script), load it,
-    and override CONFIG. Returns (path_used, dict_of_overridden_keys).
+    Resolve the config path (argument > default alongside the data folder), load
+    it, and override CONFIG. Returns (path_used, dict_of_overridden_keys).
+
+    Default location is TEMP_DL_DIR (same place downloaded bulletins land), not
+    next to the script/exe — that folder is always writable, unlike an exe that
+    might sit under Program Files.
     """
-    path = path or os.path.join(SCRIPT_DIR, CONFIG_FILENAME)
+    path = path or os.path.join(TEMP_DL_DIR, CONFIG_FILENAME)
+    os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
     overrides = load_config_file(path)
     CONFIG.update(overrides)
     return path, overrides
