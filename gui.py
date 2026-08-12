@@ -85,13 +85,16 @@ ALWAYS_HIDDEN_VIEWER_COLUMNS = {
 }
 
 
-def open_folder(path: str):
-    """Open a folder with the OS's file manager. Returns (ok: bool, reason/path)."""
-    if not path:
-        return False, "chưa có thư mục xuất (cần chạy thành công ít nhất một lần)"
-    path = os.path.abspath(path)                      # './x' → absolute (Windows dislikes relative paths)
-    if not os.path.isdir(path):
-        return False, f"thư mục không tồn tại: {path}"
+def _is_numeric_viewer_column(col: str) -> bool:
+    """*_hshs columns are numeric too, but their names aren't fixed
+    (cloud_1_hshs, cloud_2_hshs...), so they're matched by suffix instead of
+    being listed in NUMERIC_VIEWER_COLUMNS."""
+    return col in NUMERIC_VIEWER_COLUMNS or col.endswith("_hshs")
+
+
+def _os_open(path: str):
+    """Hand `path` to the OS's default handler — file manager for a folder, the
+    associated app for a file. Returns (ok: bool, reason/path)."""
     try:
         if os.name == "nt":
             os.startfile(path)                       # Windows
@@ -104,6 +107,16 @@ def open_folder(path: str):
         return False, str(e)
 
 
+def open_folder(path: str):
+    """Open a folder with the OS's file manager. Returns (ok: bool, reason/path)."""
+    if not path:
+        return False, "chưa có thư mục xuất (cần chạy thành công ít nhất một lần)"
+    path = os.path.abspath(path)                      # './x' → absolute (Windows dislikes relative paths)
+    if not os.path.isdir(path):
+        return False, f"thư mục không tồn tại: {path}"
+    return _os_open(path)
+
+
 def open_in_editor(path: str):
     """Open a FILE with its default application (for editing). Returns (ok, reason/path)."""
     if not path:
@@ -111,16 +124,7 @@ def open_in_editor(path: str):
     path = os.path.abspath(path)
     if not os.path.isfile(path):
         return False, f"file không tồn tại: {path}"
-    try:
-        if os.name == "nt":
-            os.startfile(path)                       # Windows: opens with the app associated to .ini
-        elif sys.platform == "darwin":
-            subprocess.Popen(["open", path])         # macOS
-        else:
-            subprocess.Popen(["xdg-open", path])     # Linux
-        return True, path
-    except Exception as e:
-        return False, str(e)
+    return _os_open(path)
 
 
 def write_minimal_config(path: str, values: dict):
@@ -662,7 +666,7 @@ class App:
         if not col or col not in win._header:
             return
         idx = win._header.index(col)
-        numeric = col in NUMERIC_VIEWER_COLUMNS or col.endswith("_hshs")
+        numeric = _is_numeric_viewer_column(col)
 
         def key(row):
             v = row[idx] if idx < len(row) else ""
@@ -782,7 +786,7 @@ class App:
                 vals = [len(r[i]) for r in sample_rows if i < len(r) and r[i]]
                 longest = max(vals) if vals else len(c)
                 w = max(50, min(200, (longest + 2) * 7))
-                anchor = "e" if (c in NUMERIC_VIEWER_COLUMNS or c.endswith("_hshs")) else "w"
+                anchor = "e" if _is_numeric_viewer_column(c) else "w"
                 tree.column(c, width=w, stretch=False, anchor=anchor)
 
         for i, r in enumerate(data):
@@ -1035,6 +1039,13 @@ class App:
 
         return cfg
 
+    def _set_actions_enabled(self, enabled: bool):
+        """Toggle 'Chạy' and 'Truy vấn nâng cao' together — both are locked while a
+        run is in progress (advanced mode can't change the query mid-run)."""
+        state = "normal" if enabled else "disabled"
+        self.action_menu.entryconfig("Chạy", state=state)
+        self.opt_menu.entryconfig("Truy vấn nâng cao", state=state)
+
     # -----------------------------------------------------------------
     def _on_run(self):
         self._log("ACT", "Bấm 'Chạy'")
@@ -1060,8 +1071,7 @@ class App:
         else:
             self._log("ACT", f"Bắt đầu: ngày {cfg['date']:%Y-%m-%d} (00h–23h)")
         self.last_cfg = cfg
-        self.action_menu.entryconfig("Chạy", state="disabled")
-        self.opt_menu.entryconfig("Truy vấn nâng cao", state="disabled")
+        self._set_actions_enabled(False)
         self.file_menu.entryconfig("Mở thư mục CSV", state="disabled")
         self.status.config(text="Đang chạy...")
 
@@ -1094,16 +1104,14 @@ class App:
                 elif kind == "error":
                     self._log("ERR", item[1])
                     self.status.config(text="Lỗi")
-                    self.action_menu.entryconfig("Chạy", state="normal")
-                    self.opt_menu.entryconfig("Truy vấn nâng cao", state="normal")
+                    self._set_actions_enabled(True)
                     messagebox.showerror("Lỗi", item[1])
         except queue.Empty:
             pass
         self.root.after(100, self._poll)
 
     def _on_done(self, result: dict):
-        self.action_menu.entryconfig("Chạy", state="normal")
-        self.opt_menu.entryconfig("Truy vấn nâng cao", state="normal")
+        self._set_actions_enabled(True)
         self.last_output_dir = result.get("output_dir")
         if self.last_output_dir and os.path.isdir(self.last_output_dir):
             self.file_menu.entryconfig("Mở thư mục CSV", state="normal")

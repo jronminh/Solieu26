@@ -274,6 +274,25 @@ def _download_one(ftp: FTP, filename: str, local_path: str,
     return 2
 
 
+def _fetch_and_bucket(ftp: FTP, filename: str, local_dir: str, retry_temp: int, retry_wait: int,
+                      log, buckets: dict) -> int:
+    """Download one file, log the outcome, and sort it into the right bucket
+    (buckets = {"files","downloaded","skipped","missing"}, each a list — shared
+    across the whole batch). Returns the raw status for the progress callback."""
+    local_path = os.path.join(local_dir, filename)
+    status = _download_one(ftp, filename, local_path, retry_temp=retry_temp, retry_wait=retry_wait)
+    if status == 0:
+        log("OK", f"Tải về      {filename}")
+        buckets["files"].append(local_path); buckets["downloaded"].append(filename)
+    elif status == 1:
+        log("SKIP", f"Đã có sẵn   {filename}")
+        buckets["files"].append(local_path); buckets["skipped"].append(filename)
+    else:
+        log("MISS", f"Server chưa có  {filename}")
+        buckets["missing"].append(filename)
+    return status
+
+
 def quantrac_filename_at(dt: datetime.datetime) -> str:
     """Qt<YY><MM><DD><HH>.txt — e.g. datetime(2026,4,1,13) → 'Qt26040113.txt'."""
     return f"Qt{dt.strftime('%y%m%d')}{dt.hour:02}.txt"
@@ -319,32 +338,17 @@ def download_files(ftp: FTP, cfg: dict, log=_console_log, progress=None) -> dict
         log("ERR", f"Không truy cập được thư mục {target_dir}: {e}")
         return {"files": [], "downloaded": [], "skipped": [], "missing": []}
 
-    files, downloaded, skipped, missing = [], [], [], []
+    buckets = {"files": [], "downloaded": [], "skipped": [], "missing": []}
     try:
         for hour in range(total):
-            filename   = quantrac_filename_at(base_date.replace(hour=hour))
-            local_path = os.path.join(local_dir, filename)
-
-            status = _download_one(ftp, filename, local_path,
-                                   retry_temp=retry_temp, retry_wait=retry_wait)
-
-            if status == 0:
-                log("OK", f"Tải về      {filename}")
-                files.append(local_path); downloaded.append(filename)
-            elif status == 1:
-                log("SKIP", f"Đã có sẵn   {filename}")
-                files.append(local_path); skipped.append(filename)
-            else:
-                log("MISS", f"Server chưa có  {filename}")
-                missing.append(filename)
-
+            filename = quantrac_filename_at(base_date.replace(hour=hour))
+            status = _fetch_and_bucket(ftp, filename, local_dir, retry_temp, retry_wait, log, buckets)
             if progress:
                 progress(hour + 1, total, status)
     finally:
         ftp.cwd(origin)
 
-    return {"files": files, "downloaded": downloaded,
-            "skipped": skipped, "missing": missing}
+    return buckets
 
 
 def download_files_range(ftp: FTP, cfg: dict, log=_console_log, progress=None) -> dict:
@@ -376,7 +380,7 @@ def download_files_range(ftp: FTP, cfg: dict, log=_console_log, progress=None) -
         day += datetime.timedelta(days=1)
     total = len(hours)
 
-    files, downloaded, skipped, missing = [], [], [], []
+    buckets = {"files": [], "downloaded": [], "skipped": [], "missing": []}
     origin = ftp.pwd()
     current_dir = None
     try:
@@ -391,32 +395,18 @@ def download_files_range(ftp: FTP, cfg: dict, log=_console_log, progress=None) -
                 except (error_perm, error_temp) as e:
                     log("ERR", f"Không truy cập được thư mục {target_dir}: {e}")
                     current_dir = target_dir   # avoid retrying cwd for every hour in this month
-                    missing.append(filename)
+                    buckets["missing"].append(filename)
                     if progress:
                         progress(i + 1, total, 2)
                     continue
 
-            local_path = os.path.join(local_dir, filename)
-            status = _download_one(ftp, filename, local_path,
-                                   retry_temp=retry_temp, retry_wait=retry_wait)
-
-            if status == 0:
-                log("OK", f"Tải về      {filename}")
-                files.append(local_path); downloaded.append(filename)
-            elif status == 1:
-                log("SKIP", f"Đã có sẵn   {filename}")
-                files.append(local_path); skipped.append(filename)
-            else:
-                log("MISS", f"Server chưa có  {filename}")
-                missing.append(filename)
-
+            status = _fetch_and_bucket(ftp, filename, local_dir, retry_temp, retry_wait, log, buckets)
             if progress:
                 progress(i + 1, total, status)
     finally:
         ftp.cwd(origin)
 
-    return {"files": files, "downloaded": downloaded,
-            "skipped": skipped, "missing": missing}
+    return buckets
 
 
 # =============================================================================
