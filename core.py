@@ -1,10 +1,10 @@
 """
-thu_so_lieu_core.py
+core.py
 ====================
 Core: fetch + decode surface weather observation bulletins (no UI, no tkinter).
 
 Runs standalone:
-    python thu_so_lieu_core.py [config.ini path]
+    python core.py [config.ini path]
 
 Uses the CONFIG dict defined below as defaults. If a config.ini file exists
 (next to this script, or the path given on the command line), its keys
@@ -12,9 +12,9 @@ override CONFIG — see "LOADING THE EXTERNAL CONFIG" below for the exact keys.
 Logs go through the callback log(level, msg); the default _console_log prints
 them to stdout as "HH:MM:SS  LEVEL  message".
 
-thu_so_lieu_gui.py is a thin Tkinter wrapper around this module (`import
-thu_so_lieu_core as core`) — it calls core.apply_config_file()/core.run_pipeline()
-and never touches the FTP/decode internals directly.
+gui.py is a thin Tkinter wrapper around this module (`import core`) — it
+calls core.apply_config_file()/core.run_pipeline() and never touches the
+FTP/decode internals directly.
 """
 
 import csv
@@ -40,14 +40,19 @@ for _stream in (sys.stdout, sys.stderr):
 # PATH & FTP CONSTANTS
 # =============================================================================
 
-try:
-    SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-except NameError:                       # frozen/packaged run has no __file__
-    SCRIPT_DIR = os.path.abspath(".")
+if getattr(sys, "frozen", False):
+    # Running as a PyInstaller-built exe: __file__ would point into the
+    # temporary extraction folder, so anchor to the exe's own location instead.
+    SCRIPT_DIR = os.path.dirname(os.path.abspath(sys.executable))
+else:
+    try:
+        SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+    except NameError:
+        SCRIPT_DIR = os.path.abspath(".")
 
 # Downloaded files go into the OS temp dir; use a fixed subfolder (NOT random)
 # so a later run still recognizes old files and can SKIP instead of re-downloading.
-TEMP_DL_DIR = os.path.join(tempfile.gettempdir(), "thu_so_lieu_qt")
+TEMP_DL_DIR = os.path.join(tempfile.gettempdir(), "solieu26_dl")
 
 DEFAULT_OUTPUT_DIR = SCRIPT_DIR          # default CSV location, next to the script (absolute)
 
@@ -79,15 +84,15 @@ def _console_log(level: str, msg: str):
 # =============================================================================
 
 CONFIG = {
-    "ftp_host": "khituongpkkq.com.vn",
-    "ftp_user": "khituong",
-    "ftp_pass": "Ktkq22@#",
+    "ftp_host": "",
+    "ftp_user": "",
+    "ftp_pass": "",
     "ftp_timeout": FTP_TIMEOUT,
 
     "retry_temp": RETRY_TEMP,
     "retry_wait": RETRY_WAIT,
 
-    "remote_dir": "/Quantrac",
+    "remote_dir": "Quantrac",
     "local_dir":  TEMP_DL_DIR,           # downloads go into temp
     "output_dir": DEFAULT_OUTPUT_DIR,
     "delete_on_exit": False,
@@ -114,7 +119,7 @@ CONFIG = {
 # =============================================================================
 
 CONFIG_FILENAME = "config.ini"          # default name, looked up next to the script
-CONFIG_SECTION  = "thu_so_lieu"
+CONFIG_SECTION  = "Solieu26"
 
 _STR_KEYS  = ("ftp_host", "ftp_user", "ftp_pass",
               "remote_dir", "output_dir", "station_code", "auto_query_unit")
@@ -953,7 +958,7 @@ def run_pipeline(cfg: dict, log=_console_log, progress=None) -> dict:
 # =============================================================================
 
 def main():
-    # Allows: python thu_so_lieu_core.py [config_ini_path]
+    # Allows: python core.py [config_ini_path]
     config_path = sys.argv[1] if len(sys.argv) > 1 else None
     path_used, overrides = apply_config_file(config_path)
     if overrides:
