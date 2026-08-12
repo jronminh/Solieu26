@@ -188,7 +188,6 @@ class App:
             "start_date":  tk.StringVar(value=today.strftime("%Y-%m-%d")),
             "end_date":    tk.StringVar(value=today.strftime("%Y-%m-%d")),
             "delete_on_exit": tk.BooleanVar(value=bool(d.get("delete_on_exit", False))),
-            "show_log":    tk.BooleanVar(value=False),   # log frame hidden by default
             "auto_value":  tk.StringVar(value=str(d.get("auto_query_value", 15))),
             "auto_unit":   tk.StringVar(value="Giờ" if d.get("auto_query_unit", "minutes") == "hours" else "Phút"),
         }
@@ -203,14 +202,14 @@ class App:
             "missing":       tk.StringVar(value="—"),
         }
 
-        self._build_menu()
         self._build_ui()
         self._fit_window_to_content()
         # Floor = the natural size with the log hidden (its default state) — small
-        # enough to fit just the info box + the 5 buttons, but never smaller.
-        self.root.minsize(self.root.winfo_width(), self.root.winfo_height())
+        # enough to fit just the info box + the 5 buttons, but never smaller. Width
+        # floor is halved so the window can be shrunk narrower than its natural layout.
+        self.root.minsize(self.root.winfo_width() // 2, self.root.winfo_height())
         self.root.after(100, self._poll)
-        self._log("INFO", "Khởi động xong — sẵn sàng. Điền thông tin rồi bấm 'Truy vấn'.")
+        self._log("INFO", "Khởi động xong — sẵn sàng. Điền thông tin rồi bấm 'Làm mới'.")
         if self.cfg_overrides:
             self._log("OK", f"Đã nạp {len(self.cfg_overrides)} thiết lập từ config: {self.cfg_path}")
         else:
@@ -218,42 +217,91 @@ class App:
         self._schedule_auto_tick()   # also refreshes the info panel's auto-query status
 
     # -----------------------------------------------------------------
-    def _build_menu(self):
-        """Menu bar: File / Help only — Actions and View were removed (every command they
-        held mirrors a button/checkbox already on the main screen)."""
-        menubar = tk.Menu(self.root)
-
-        # --- File --- (Thiết lập... opens the combined Kết nối / Đường dẫn / Tự động
-        # truy vấn dialog, with config.ini actions at its bottom)
-        file_menu = tk.Menu(menubar, tearoff=0)
-        file_menu.add_command(label="Thiết lập", command=self._open_settings_dialog)
-        file_menu.add_separator()
-        file_menu.add_command(label="Mở thư mục CSV", command=self._on_open_folder)
-        file_menu.add_command(label="Mở thư mục tải về", command=self._on_open_data)
-        file_menu.add_separator()
-        file_menu.add_command(label="Thoát", command=self._on_exit)
-        menubar.add_cascade(label="Tệp", menu=file_menu)
-        self.file_menu = file_menu               # lets us enable/disable "Open CSV folder" by state
-        # Not run yet → no CSV folder to open
-        self.file_menu.entryconfig("Mở thư mục CSV", state="disabled")
-
-        # --- Help ---
-        help_menu = tk.Menu(menubar, tearoff=0)
-        help_menu.add_command(label="Hướng dẫn", command=self._on_help_usage)
-        help_menu.add_command(label="Tác giả", command=self._on_help_about)
-        menubar.add_cascade(label="Trợ giúp", menu=help_menu)
-
-        self.root.config(menu=menubar)
-
-    # -----------------------------------------------------------------
     def _build_ui(self):
-        frm = ttk.Frame(self.root, padding=10)
-        frm.pack(fill="both", expand=True)
+        self.notebook = ttk.Notebook(self.root)
+        self.notebook.pack(fill="both", expand=True, padx=10, pady=(10, 0))
 
-        # --- Nâng cao: ngày bắt đầu/kết thúc — ẩn theo mặc định, chỉ hiện khi tick
-        # checkbox "Truy vấn nâng cao" ở dưới cùng (thay cho ô Ngày cũ). Chế độ
+        self.tab_data = ttk.Frame(self.notebook, padding=10)
+        self.tab_latest = ttk.Frame(self.notebook, padding=10)
+        self.tab_history = ttk.Frame(self.notebook, padding=10)
+        self.tab_settings = ttk.Frame(self.notebook, padding=12)
+        self.tab_log = ttk.Frame(self.notebook, padding=10)
+        self.tab_help = ttk.Frame(self.notebook, padding=16)
+        self.notebook.add(self.tab_data, text="Thông tin")
+        self.notebook.add(self.tab_latest, text="Xem gần nhất")
+        self.notebook.add(self.tab_history, text="Xem lịch sử")
+        self.notebook.add(self.tab_settings, text="Thiết lập")
+        self.notebook.add(self.tab_log, text="Nhật ký")
+        self.notebook.add(self.tab_help, text="Trợ giúp")
+        # Viewer tabs (as opposed to Thiết lập/Nhật ký/Trợ giúp) — used to know which
+        # tabs to refresh-on-select and to redraw when the column picker changes.
+        self._viewer_frames = [self.tab_latest, self.tab_history]
+
+        # Nhật ký built first — _build_tab_viewer() loads CSVs right away and logs
+        # the result, which needs self.log to already exist.
+        self._build_tab_log(self.tab_log)
+        self._build_tab_data(self.tab_data)
+        self._build_tab_viewer(self.tab_latest, "latest.csv", with_station_filter=False)
+        self._build_tab_viewer(self.tab_history, "history.csv", with_station_filter=True)
+        self._build_tab_settings(self.tab_settings)
+        self._build_tab_help(self.tab_help)
+        self.notebook.bind("<<NotebookTabChanged>>", self._on_tab_changed)
+
+        # --- Status bar at the BOTTOM (outside the notebook, always visible
+        # regardless of which tab is active): [progress bar: stretches] [status] ---
+        statusbar = ttk.Frame(self.root, padding=(10, 6, 10, 10))
+        statusbar.pack(side="bottom", fill="x")
+
+        status_frame = ttk.Frame(statusbar)
+        status_frame.pack(side="right")
+        self.status = ttk.Label(status_frame, text="Sẵn sàng", anchor="e")
+        self.status.pack(side="right")
+
+        # Packed LAST (after the fixed-width right side is already claimed) so it
+        # fills exactly the remaining space, growing/shrinking with the window.
+        bar_frame = ttk.Frame(statusbar)
+        bar_frame.pack(side="left", fill="x", expand=True, padx=(0, 10))
+        self.bar = ttk.Progressbar(bar_frame, mode="determinate")
+        self.bar.pack(fill="x", expand=True)
+
+    def _on_tab_changed(self, event=None):
+        selected = self.notebook.select()
+        tab_text = self.notebook.tab(selected, "text")
+        self._log("ACT", f"Chuyển sang tab '{tab_text}'")
+        widget = self.notebook.nametowidget(selected)
+        if widget in self._viewer_frames:
+            self._refresh_viewer_tab(widget)
+
+    # ----- Tab: Thông tin ------------------------------------------------
+    def _build_tab_data(self, frm):
+        self.run_btn = ttk.Button(frm, text="Làm mới", command=self._on_run)
+        self.run_btn.pack(anchor="w", pady=(0, 8))
+
+        # --- Thông tin --- (read-only status; recomputed by _refresh_info_panel).
+        # Plain frame, no LabelFrame/border — the fields sit directly in the tab.
+        info = ttk.Frame(frm)
+        info.pack(fill="both", expand=True)
+        ttk.Label(info, text="Máy chủ:").grid(row=0, column=0, sticky="w", padx=6, pady=2)
+        ttk.Label(info, textvariable=self.v["ftp_host"]).grid(row=0, column=1, sticky="w", padx=6, pady=2)
+        ttk.Label(info, text="Tệp gần nhất:").grid(row=1, column=0, sticky="w", padx=6, pady=2)
+        ttk.Label(info, textvariable=self.info["latest_file"]).grid(row=1, column=1, sticky="w", padx=6, pady=2)
+        ttk.Label(info, text="Kết quả xuất CSV:").grid(row=2, column=0, sticky="w", padx=6, pady=2)
+        ttk.Label(info, textvariable=self.info["csv_result"]).grid(row=2, column=1, sticky="w", padx=6, pady=2)
+        ttk.Label(info, text="Dữ liệu:").grid(row=3, column=0, sticky="w", padx=6, pady=2)
+        ttk.Label(info, textvariable=self.info["data_status"]).grid(row=3, column=1, sticky="w", padx=6, pady=2)
+        ttk.Label(info, text="Tự động truy vấn:").grid(row=4, column=0, sticky="w", padx=6, pady=2)
+        ttk.Label(info, textvariable=self.info["auto_status"]).grid(row=4, column=1, sticky="w", padx=6, pady=2)
+        ttk.Label(info, text="Tệp thiếu trên máy chủ:").grid(row=5, column=0, sticky="w", padx=6, pady=2)
+        ttk.Label(info, textvariable=self.info["missing"]).grid(row=5, column=1, sticky="w", padx=6, pady=2)
+        self.adv_check = ttk.Checkbutton(info, text="Truy vấn nâng cao",
+                                         variable=self.v["advanced_mode"],
+                                         command=self._on_toggle_advanced)
+        self.adv_check.grid(row=6, column=0, columnspan=2, sticky="w", padx=6, pady=(8, 2))
+
+        # --- Nâng cao: ngày bắt đầu/kết thúc — không còn khung viền riêng, nằm ngay
+        # dưới checkbox "Truy vấn nâng cao" và chỉ hiện khi checkbox được tick. Chế độ
         # thường KHÔNG có ô ngày — luôn truy vấn "hôm nay" (thủ công hoặc tự động).
-        self.adv_frame = ttk.LabelFrame(frm, text="Nâng cao", padding=8)
+        self.adv_frame = ttk.Frame(info)
         ttk.Label(self.adv_frame, text="Ngày bắt đầu").pack(side="left")
         ttk.Entry(self.adv_frame, textvariable=self.v["start_date"], width=12).pack(
             side="left", padx=(4, 10))
@@ -261,67 +309,68 @@ class App:
         ttk.Entry(self.adv_frame, textvariable=self.v["end_date"], width=12).pack(
             side="left", padx=(4, 10))
         ttk.Button(self.adv_frame, text="Về hiện tại", command=self._on_now).pack(side="left")
+        # Not gridded here — _on_toggle_advanced() grids/removes it based on the checkbox.
 
-        # --- Bottom row: read-only info panel (left) + action buttons stacked (right) ---
-        top = ttk.Frame(frm)
-        top.pack(fill="x", pady=(8, 0))
-        self.top_frame = top   # anchor: adv_frame is packed(before=self.top_frame) when shown
+        info.columnconfigure(1, weight=1)
 
-        # --- Thông tin --- (read-only status; recomputed by _refresh_info_panel)
-        q_box = ttk.LabelFrame(top, text="Thông tin", padding=8)
-        q_box.pack(side="left", fill="both", expand=True)
-        ttk.Label(q_box, text="Máy chủ:").grid(row=0, column=0, sticky="w", padx=6, pady=2)
-        ttk.Label(q_box, textvariable=self.v["ftp_host"]).grid(row=0, column=1, sticky="w", padx=6, pady=2)
-        ttk.Label(q_box, text="Tệp gần nhất:").grid(row=1, column=0, sticky="w", padx=6, pady=2)
-        ttk.Label(q_box, textvariable=self.info["latest_file"]).grid(row=1, column=1, sticky="w", padx=6, pady=2)
-        ttk.Label(q_box, text="Kết quả xuất CSV:").grid(row=2, column=0, sticky="w", padx=6, pady=2)
-        ttk.Label(q_box, textvariable=self.info["csv_result"]).grid(row=2, column=1, sticky="w", padx=6, pady=2)
-        ttk.Label(q_box, text="Dữ liệu:").grid(row=3, column=0, sticky="w", padx=6, pady=2)
-        ttk.Label(q_box, textvariable=self.info["data_status"]).grid(row=3, column=1, sticky="w", padx=6, pady=2)
-        ttk.Label(q_box, text="Tự động truy vấn:").grid(row=4, column=0, sticky="w", padx=6, pady=2)
-        ttk.Label(q_box, textvariable=self.info["auto_status"]).grid(row=4, column=1, sticky="w", padx=6, pady=2)
-        ttk.Label(q_box, text="Tệp thiếu trên máy chủ:").grid(row=5, column=0, sticky="w", padx=6, pady=2)
-        ttk.Label(q_box, textvariable=self.info["missing"]).grid(row=5, column=1, sticky="w", padx=6, pady=2)
-        q_box.columnconfigure(1, weight=1)
+    # ----- Tab: Thiết lập -----------------------------------------------
+    def _build_tab_settings(self, frm):
+        conn_box = ttk.LabelFrame(frm, text="Kết nối", padding=8)
+        conn_box.pack(fill="x")
+        self._row(conn_box, 0, "Máy chủ",  self.v["ftp_host"])
+        self._row(conn_box, 1, "Tài khoản", self.v["ftp_user"])
+        self._row(conn_box, 2, "Mật khẩu", self.v["ftp_pass"], show="*")
+        conn_box.columnconfigure(1, weight=1)
 
-        # --- Actions: stacked vertically so they line up as one column ---
-        btn_col = ttk.Frame(top)
-        btn_col.pack(side="left", fill="y", padx=(8, 0))
-        self.run_btn = ttk.Button(btn_col, text="Truy vấn", command=self._on_run)
-        self.run_btn.pack(fill="x")
-        ttk.Button(btn_col, text="Xem gần nhất",
-                   command=lambda: self._open_csv_viewer("latest.csv", "latest.csv")
-                   ).pack(fill="x", pady=(4, 0))
-        ttk.Button(btn_col, text="Xem lịch sử",
-                   command=lambda: self._open_csv_viewer("history.csv", "history.csv",
-                                                         with_station_filter=True)
-                   ).pack(fill="x", pady=(4, 0))
-        ttk.Button(btn_col, text="Thiết lập",
-                   command=self._open_settings_dialog).pack(fill="x", pady=(4, 0))
+        path_box = ttk.LabelFrame(frm, text="Đường dẫn", padding=8)
+        path_box.pack(fill="x", pady=(8, 0))
+        self._row(path_box, 0, "Thư mục máy chủ", self.v["remote_dir"])
 
-        # --- Progress bar (spans the window's full width) ---
-        self.bar = ttk.Progressbar(frm, mode="determinate")
-        self.bar.pack(fill="x", pady=(10, 0))
+        self._row(path_box, 1, "Thư mục CSV", self.v["output_dir"])
+        ttk.Button(path_box, text="Chọn",
+                   command=lambda: self._browse_output()).grid(row=1, column=2, padx=(0, 4))
+        ttk.Button(path_box, text="Mở",
+                   command=self._on_open_csv_folder).grid(row=1, column=3)
 
-        # --- Status bar at the BOTTOM: "Truy vấn nâng cao" toggle at bottom-left,
-        # status indicator at bottom-right ---
-        statusbar = ttk.Frame(frm)
-        statusbar.pack(side="bottom", fill="x", pady=(6, 0))
-        self.adv_check = ttk.Checkbutton(statusbar, text="Truy vấn nâng cao",
-                                         variable=self.v["advanced_mode"],
-                                         command=self._on_toggle_advanced)
-        self.adv_check.pack(side="left")
-        ttk.Checkbutton(statusbar, text="Hiển thị nhật ký", variable=self.v["show_log"],
-                        command=self._on_toggle_log).pack(side="left", padx=(10, 0))
-        self.status = ttk.Label(statusbar, text="Sẵn sàng", anchor="e")
-        self.status.pack(side="right")
+        # Thư mục Data: cố định (nơi tải bản tin gốc về VÀ nơi lưu config.ini) —
+        # không cho sửa, chỉ xem/mở.
+        data_dir_var = tk.StringVar(value=core.TEMP_DL_DIR)
+        ttk.Label(path_box, text="Thư mục Data").grid(row=2, column=0, sticky="w", padx=6, pady=3)
+        ttk.Entry(path_box, textvariable=data_dir_var, state="readonly").grid(
+            row=2, column=1, sticky="ew", padx=6, pady=3)
+        ttk.Button(path_box, text="Mở",
+                   command=self._on_open_data).grid(row=2, column=3)
 
-        # --- Log (fills the middle, sits above the status bar) ---
-        # Frame built regardless, only packed/shown if "Hiển thị nhật ký" is on
-        # (default off) — the Text widget itself still receives every log line,
-        # so nothing is lost while hidden.
-        self.log_box = ttk.LabelFrame(frm, text="Nhật ký", padding=6)
-        self.log = scrolledtext.ScrolledText(self.log_box, height=12, state="disabled",
+        ttk.Checkbutton(path_box, text="Xóa tệp tải về sau khi xong",
+                        variable=self.v["delete_on_exit"],
+                        command=self._on_toggle_delete).grid(
+                        row=3, column=0, columnspan=4, sticky="w", pady=(6, 0))
+        path_box.columnconfigure(1, weight=1)
+
+        # Auto-query: re-runs the pipeline on a timer (system time → "Về hiện tại" →
+        # "Truy vấn"). 0 = tắt tự động truy vấn.
+        auto_box = ttk.LabelFrame(frm, text="Tự động truy vấn", padding=8)
+        auto_box.pack(fill="x", pady=(8, 0))
+        auto_entry = ttk.Entry(auto_box, textvariable=self.v["auto_value"], width=6)
+        auto_entry.grid(row=0, column=0, padx=(0, 4))
+        auto_entry.bind("<FocusOut>", self._on_auto_change)
+        auto_entry.bind("<Return>", self._on_auto_change)
+        auto_unit = ttk.Combobox(auto_box, textvariable=self.v["auto_unit"],
+                                 values=["Phút", "Giờ"], state="readonly", width=8)
+        auto_unit.grid(row=0, column=1)
+        auto_unit.bind("<<ComboboxSelected>>", self._on_auto_change)
+        ttk.Label(auto_box, text="(0 = tắt)").grid(row=0, column=2, padx=(8, 0))
+
+        btn_bar = ttk.Frame(frm)
+        btn_bar.pack(fill="x", pady=(12, 0))
+        ttk.Button(btn_bar, text="config.ini",
+                   command=self._on_edit_config).pack(side="left")
+        ttk.Button(btn_bar, text="Lưu thiết lập",
+                   command=self._on_save_settings).pack(side="right")
+
+    # ----- Tab: Nhật ký --------------------------------------------------
+    def _build_tab_log(self, frm):
+        self.log = scrolledtext.ScrolledText(frm, state="disabled",
                                              wrap="word", font=("Consolas", 9))
         self.log.pack(fill="both", expand=True)
 
@@ -330,8 +379,17 @@ class App:
         for lvl, color in LOG_COLORS.items():                    # level
             self.log.tag_config("lvl_" + lvl, foreground=color)
 
-        if self.v["show_log"].get():
-            self.log_box.pack(side="top", fill="both", expand=True, pady=(8, 0))
+    # ----- Tab: Trợ giúp --------------------------------------------------
+    def _build_tab_help(self, frm):
+        text = (
+            "Làm mới — tải và giải mã số liệu của HÔM NAY.\n"
+            "Xem gần nhất/Xem lịch sử — xem dữ liệu đã tải.\n"
+            "Thiết lập — máy chủ, thư mục, truy vấn tự động.\n"
+            "Truy vấn nâng cao — chọn khoảng ngày.\n"
+            "\n"
+            "Contact: def666demon@yahoo.com"
+        )
+        ttk.Label(frm, text=text, justify="left").pack(anchor="w")
 
     def _row(self, parent, r, label, var, width=None, show=None):
         ttk.Label(parent, text=label).grid(row=r, column=0, sticky="w", padx=6, pady=3)
@@ -397,59 +455,6 @@ class App:
         ww, wh = win.winfo_width(), win.winfo_height()
         win.geometry(f"+{max(rx + (rw - ww)//2, 0)}+{max(ry + (rh - wh)//3, 0)}")
 
-    def _open_settings_dialog(self):
-        """Combined settings dialog: Kết nối / Đường dẫn / Tự động truy vấn, plus
-        config.ini actions (create-or-edit at bottom-left, explicit save at bottom-right)."""
-        self._log("ACT", "Mở hộp thoại Thiết lập")
-        win = self._make_dialog("settings", "Thiết lập")
-        if win is None:
-            return
-        frm = ttk.Frame(win, padding=12)
-        frm.pack(fill="both", expand=True)
-
-        conn_box = ttk.LabelFrame(frm, text="Kết nối", padding=8)
-        conn_box.pack(fill="x")
-        self._row(conn_box, 0, "Máy chủ",  self.v["ftp_host"])
-        self._row(conn_box, 1, "Tài khoản", self.v["ftp_user"])
-        self._row(conn_box, 2, "Mật khẩu", self.v["ftp_pass"], show="*")
-        conn_box.columnconfigure(1, weight=1)
-
-        path_box = ttk.LabelFrame(frm, text="Đường dẫn", padding=8)
-        path_box.pack(fill="x", pady=(8, 0))
-        self._row(path_box, 0, "Thư mục máy chủ",  self.v["remote_dir"])
-        self._row(path_box, 1, "Thư mục xuất CSV", self.v["output_dir"])
-        ttk.Button(path_box, text="Chọn",
-                   command=lambda: self._browse_output(parent=win)).grid(row=1, column=2, padx=4)
-        ttk.Checkbutton(path_box, text="Xóa tệp tải về sau khi xong",
-                        variable=self.v["delete_on_exit"],
-                        command=self._on_toggle_delete).grid(
-                        row=2, column=0, columnspan=3, sticky="w", pady=(6, 0))
-        path_box.columnconfigure(1, weight=1)
-
-        # Auto-query: re-runs the pipeline on a timer (system time → "Về hiện tại" →
-        # "Truy vấn"). 0 = tắt tự động truy vấn.
-        auto_box = ttk.LabelFrame(frm, text="Tự động truy vấn", padding=8)
-        auto_box.pack(fill="x", pady=(8, 0))
-        auto_entry = ttk.Entry(auto_box, textvariable=self.v["auto_value"], width=6)
-        auto_entry.grid(row=0, column=0, padx=(0, 4))
-        auto_entry.bind("<FocusOut>", self._on_auto_change)
-        auto_entry.bind("<Return>", self._on_auto_change)
-        auto_unit = ttk.Combobox(auto_box, textvariable=self.v["auto_unit"],
-                                 values=["Phút", "Giờ"], state="readonly", width=8)
-        auto_unit.grid(row=0, column=1)
-        auto_unit.bind("<<ComboboxSelected>>", self._on_auto_change)
-        ttk.Label(auto_box, text="(0 = tắt)").grid(row=0, column=2, padx=(8, 0))
-
-        btn_bar = ttk.Frame(frm)
-        btn_bar.pack(fill="x", pady=(12, 0))
-        ttk.Button(btn_bar, text="Tạo/sửa config.ini",
-                   command=self._on_edit_config).pack(side="left")
-        ttk.Button(btn_bar, text="Lưu thiết lập",
-                   command=self._on_save_settings).pack(side="right")
-
-        win.minsize(420, 0)
-        self._center_over_root(win)
-
     def _on_save_settings(self):
         """Persist every field in the Thiết lập dialog to config.ini in one shot."""
         self._log("ACT", "Lưu thiết lập")
@@ -482,62 +487,6 @@ class App:
             messagebox.showerror("Lỗi", f"Không lưu được thiết lập:\n{e}")
         self._schedule_auto_tick()
 
-    # ----- Help ---------------------------------------------------
-    def _on_help_usage(self):
-        self._log("ACT", "Mở 'Hướng dẫn'")
-        messagebox.showinfo(
-            "Hướng dẫn",
-            "1. Chế độ thường (mặc định): không cần chọn ngày — luôn truy\n"
-            "   vấn trọn 00h–23h của HÔM NAY. Bấm 'Truy vấn' để chạy thủ\n"
-            "   công, hoặc bật 'Tự động truy vấn' trong Thiết lập để tự\n"
-            "   chạy lại theo chu kỳ.\n\n"
-            "2. Truy vấn nâng cao: tick ô 'Truy vấn nâng cao' ở góc dưới\n"
-            "   bên trái để nhập Ngày bắt đầu / Ngày kết thúc (tải toàn bộ\n"
-            "   các ngày trong khoảng đó); bấm 'Về hiện tại' để đưa cả hai\n"
-            "   ngày về hôm nay. Bật chế độ này sẽ tạm dừng tự động truy\n"
-            "   vấn (khung Thông tin hiện 'Tạm dừng trong truy vấn nâng\n"
-            "   cao'); bỏ tick để quay lại chế độ thường và tự động truy\n"
-            "   vấn tiếp tục chạy theo thiết lập đã lưu.\n\n"
-            "3. Bấm 'Truy vấn' để tải bản tin từ FTP và giải mã.\n"
-            "   Theo dõi tiến trình ở thanh trạng thái; tick 'Hiển thị\n"
-            "   nhật ký' (góc dưới bên trái) để xem/ẩn khung Nhật ký\n"
-            "   (mặc định tắt).\n\n"
-            "4. Nút 'Xem gần nhất' / 'Xem lịch sử' trên màn hình chính:\n"
-            "   • 'Xem gần nhất' — bản tin mới nhất của TẤT CẢ các trạm.\n"
-            "   • 'Xem lịch sử' — lịch sử theo giờ của TẤT CẢ các trạm;\n"
-            "     dùng ô 'Trạm' trong cửa sổ xem để lọc riêng 1 trạm\n"
-            "     (mặc định lọc theo station_code trong config.ini).\n"
-            "     Trong cửa sổ xem, bấm 'Xem bản gốc' để đối chiếu bản tin gốc.\n\n"
-            "5. Menu Tệp:\n"
-            "   • 'Thiết lập' — mở hộp thoại gồm:\n"
-            "     - Kết nối: máy chủ/tài khoản/mật khẩu FTP.\n"
-            "     - Đường dẫn: thư mục máy chủ, thư mục xuất CSV,\n"
-            "       bật/tắt xóa tệp tải về sau khi xong.\n"
-            "     - Tự động truy vấn: tự chạy lại sau mỗi N phút/giờ\n"
-            "       (0 = tắt); chỉ hoạt động ở chế độ thường (mỗi lần\n"
-            "       tự chạy luôn dùng ngày hôm nay).\n"
-            "     - 'Tạo/sửa config.ini' — tạo (nếu chưa có) rồi mở\n"
-            "       tệp để sửa tay; cũng là nơi đổi trạm mặc định\n"
-            "       cho bộ lọc lịch sử (station_code).\n"
-            "     - 'Lưu thiết lập' — lưu ngay các mục trên vào\n"
-            "       config.ini để lần chạy sau tự nạp lại.\n"
-            "   • 'Mở thư mục CSV' — xem tệp latest.csv / history.csv.\n"
-            "   • 'Mở thư mục tải về' — xem các bản tin gốc (.txt) đã tải về.")
-
-    def _on_help_about(self):
-        self._log("ACT", "Mở 'Tác giả'")
-        messagebox.showinfo(
-            "Tác giả",
-            "Solieu26\n\n"
-            "Tác giả:\n"
-            "  congminh9981 — congminh9981@gmail.com\n"
-            "  Claude (Anthropic) — đồng tác giả")
-
-    # ----- Exit ------------------------------------------------------
-    def _on_exit(self):
-        self._log("ACT", "Thoát chương trình")
-        self.root.destroy()
-
     # ----- CSV viewing ----------------------------------------------------
     def _current_output_dir(self) -> str:
         """Directory holding the CSVs: prefers where the last run wrote to, else the form."""
@@ -545,67 +494,56 @@ class App:
             return self.last_output_dir
         return os.path.abspath(self.v["output_dir"].get().strip() or core.DEFAULT_OUTPUT_DIR)
 
-    def _open_csv_viewer(self, filename: str, title: str, with_station_filter: bool = False):
-        """Open a dedicated window to view a CSV file as a table (read-only)."""
-        self._log("ACT", f"Xem {filename}")
-        path = os.path.join(self._current_output_dir(), filename)
-        if not os.path.isfile(path):
-            self._log("ERR", f"Chưa có {filename} trong {self._current_output_dir()} — hãy Truy vấn trước")
-            messagebox.showwarning(
-                "Chưa có tệp",
-                f"Không tìm thấy:\n{path}\n\nHãy bấm 'Truy vấn' để tạo tệp trước.")
-            return
+    def _viewer_path(self, frm) -> str:
+        return os.path.join(self._current_output_dir(), frm._filename)
 
-        key = "view_" + filename
-        existing = self._dialogs.get(key)
-        if existing is not None and existing.winfo_exists():
-            existing.deiconify(); existing.lift(); existing.focus_set()
-            self._load_csv_into_viewer(existing, path)   # refresh the content
-            return
+    def _build_tab_viewer(self, frm, filename: str, with_station_filter: bool = False):
+        """Build a CSV table viewer (toolbar + Treeview) directly inside a notebook
+        tab — same widget layout the old Toplevel dialog used, just embedded."""
+        # ttk.Notebook sizes itself to fit its LARGEST pane, even ones not currently
+        # shown — so a wide Treeview (many CSV columns) would silently blow up the
+        # whole window. Pin this tab to a fixed size (like the old popup's fixed
+        # "1040x480" geometry) and let the tree's own scrollbars handle overflow.
+        frm.configure(width=1000, height=440)
+        frm.pack_propagate(False)
 
-        win = tk.Toplevel(self.root)
-        win.title(title)
-        win.transient(self.root)
-        win.geometry("1040x480")
-        win.minsize(480, 240)
-        self._dialogs[key] = win
-        win._path = path
-        win._mode = "data"          # "data" (hides raw) | "raw" (identity cols + raw only)
-        win._header, win._data = [], []
-        win._sort_col, win._sort_reverse = None, False   # column currently sorted & direction
+        frm._filename = filename
+        frm._mode = "data"          # "data" (hides raw) | "raw" (identity cols + raw only)
+        frm._header, frm._data = [], []
+        frm._sort_col, frm._sort_reverse = None, False   # column currently sorted & direction
 
         # Toolbar
-        bar = ttk.Frame(win, padding=(8, 6))
-        bar.pack(fill="x")
-        win._toggle_btn = ttk.Button(bar, text="Xem bản gốc",
-                                     command=lambda: self._toggle_viewer_mode(win))
-        win._toggle_btn.pack(side="left")
+        bar = ttk.Frame(frm)
+        bar.pack(fill="x", pady=(0, 6))
+        frm._toggle_btn = ttk.Button(bar, text="Xem bản gốc",
+                                     command=lambda: self._toggle_viewer_mode(frm))
+        frm._toggle_btn.pack(side="left")
         ttk.Button(bar, text="Làm mới",
-                   command=lambda: self._load_csv_into_viewer(win, path)).pack(side="left", padx=6)
+                   command=lambda: self._refresh_viewer_tab(frm)).pack(side="left", padx=6)
         ttk.Button(bar, text="Mở bằng Excel",
-                   command=lambda: self._open_csv_external(path)).pack(side="left")
+                   command=lambda: self._open_csv_external(self._viewer_path(frm))).pack(side="left")
         ttk.Button(bar, text="Hiển thị",
-                   command=lambda: self._open_column_picker(win)).pack(side="left", padx=6)
+                   command=lambda: self._open_column_picker(frm)).pack(side="left", padx=6)
 
         # Station filter — post-process filter over history.csv (which already holds
         # every station); default to the station_code configured in config.ini.
         if with_station_filter:
             default_code = (core.CONFIG.get("station_code") or "").strip()
             default_name = STATIONS.get(default_code, ALL_STATIONS)
-            win._station_filter = tk.StringVar(value=default_name)
+            frm._station_filter = tk.StringVar(value=default_name)
             ttk.Label(bar, text="Trạm:").pack(side="left", padx=(12, 2))
-            ttk.Combobox(bar, textvariable=win._station_filter,
+            ttk.Combobox(bar, textvariable=frm._station_filter,
                         values=[ALL_STATIONS] + STATION_NAMES, state="readonly",
                         width=16).pack(side="left")
-            win._station_filter.trace_add("write", lambda *_: self._on_station_filter_change(win))
+            frm._station_filter.trace_add("write", lambda *_: self._on_station_filter_change(frm))
         else:
-            win._station_filter = None
+            frm._station_filter = None
 
-        win._status = ttk.Label(bar, text="")
-        win._status.pack(side="right")
+        frm._status = ttk.Label(bar, text="")
+        frm._status.pack(side="right")
 
         # Table + two scrollbars
-        tf = ttk.Frame(win, padding=(8, 0, 8, 8))
+        tf = ttk.Frame(frm)
         tf.pack(fill="both", expand=True)
         tree = ttk.Treeview(tf, show="headings")
         vsb = ttk.Scrollbar(tf, orient="vertical", command=tree.yview)
@@ -616,13 +554,29 @@ class App:
         hsb.grid(row=1, column=0, sticky="ew")
         tf.rowconfigure(0, weight=1)
         tf.columnconfigure(0, weight=1)
-        win._tree = tree
+        frm._tree = tree
         # Zebra striping — tags live on the widget, so this only needs setting once.
         tree.tag_configure("odd", background="#f3f4f6")
         tree.tag_configure("even", background="#ffffff")
 
-        self._center_over_root(win)
-        self._load_csv_into_viewer(win, path)
+        self._refresh_viewer_tab(frm, silent=True)
+
+    def _refresh_viewer_tab(self, frm, silent: bool = False):
+        """(Re)load the CSV backing this viewer tab from disk. silent=True skips the
+        log lines — used on initial build and on tab-select, where a log line for
+        every switch would be noisy."""
+        path = self._viewer_path(frm)
+        if not os.path.isfile(path):
+            frm._header, frm._data = [], []
+            frm._tree.delete(*frm._tree.get_children())
+            frm._tree["columns"] = ()
+            frm._status.config(text="Chưa có tệp — hãy 'Làm mới' ở tab Thông tin trước")
+            if not silent:
+                self._log("WARN", f"Chưa có {frm._filename} trong {self._current_output_dir()}")
+            return
+        if not silent:
+            self._log("ACT", f"Làm mới {frm._filename}")
+        self._load_csv_into_viewer(frm, path)
 
     def _load_csv_into_viewer(self, win, path: str):
         """Read the CSV into the viewer window's memory, then draw it in the current mode."""
@@ -723,9 +677,8 @@ class App:
         """Read checkbox states → update self.hidden_cols, redraw every open viewer, save to config."""
         self.hidden_cols = {c for c, v in col_vars.items() if not v.get()}
         self._log("ACT", f"Áp dụng hiển thị cột — ẩn {len(self.hidden_cols)} cột")
-        for key, w in self._dialogs.items():
-            if key.startswith("view_") and w.winfo_exists():
-                self._render_viewer(w)
+        for frm in self._viewer_frames:
+            self._render_viewer(frm)
         self._save_hidden_columns_to_config()
 
     def _save_hidden_columns_to_config(self):
@@ -813,18 +766,18 @@ class App:
         self._log("ACT", f"Về hiện tại: ngày {now:%Y-%m-%d}")
 
     def _on_toggle_advanced(self):
-        """Toggle 'Truy vấn nâng cao': shows/hides the Nâng cao frame (start/end date +
-        'Về hiện tại') where the old date field used to sit, and pauses/resumes
-        auto-query — advanced mode and the auto-query timer are mutually exclusive."""
+        """Toggle 'Truy vấn nâng cao': shows/hides the date-range fields (start/end date +
+        'Về hiện tại') directly below the checkbox, and pauses/resumes auto-query —
+        advanced mode and the auto-query timer are mutually exclusive."""
         on = self.v["advanced_mode"].get()
         if on:
-            self.adv_frame.pack(fill="x", before=self.top_frame)
+            self.adv_frame.grid(row=7, column=0, columnspan=2, sticky="w", padx=6, pady=(0, 2))
             if self.auto_job is not None:
                 self.root.after_cancel(self.auto_job)
                 self.auto_job = None
             self.auto_next_run = None
         else:
-            self.adv_frame.pack_forget()
+            self.adv_frame.grid_remove()
             self._schedule_auto_tick()   # resume per the settings already in config/mã nguồn
         self._fit_window_to_content()
         self._refresh_info_panel()
@@ -925,22 +878,14 @@ class App:
         state = "Bật" if self.v["delete_on_exit"].get() else "Tắt"
         self._log("ACT", f"Tùy chọn 'Xóa tệp tải về sau khi xong': {state}")
 
-    def _on_toggle_log(self):
-        show = self.v["show_log"].get()
-        if show:
-            self.log_box.pack(side="top", fill="both", expand=True, pady=(8, 0))
-        else:
-            self.log_box.pack_forget()
-        self._fit_window_to_content()
-        self._log("ACT", f"Tùy chọn 'Hiển thị nhật ký': {'Bật' if show else 'Tắt'}")
-
-    def _on_open_folder(self):
+    def _on_open_csv_folder(self):
         self._log("ACT", "Mở thư mục CSV")
-        ok, info = open_folder(self.last_output_dir)
+        ok, info = open_folder(self._current_output_dir())
         if ok:
             self._log("OK", f"Đã mở thư mục CSV: {info}")
         else:
             self._log("ERR", f"Không mở được thư mục CSV: {info}")
+            messagebox.showwarning("Không mở được", info)
 
     def _on_open_data(self):
         self._log("ACT", "Mở thư mục data")
@@ -950,6 +895,7 @@ class App:
             self._log("OK", f"Đã mở thư mục data: {info}")
         else:
             self._log("ERR", f"Không mở được thư mục data: {info}")
+            messagebox.showwarning("Không mở được", info)
 
     def _read_form_values(self) -> dict:
         """Current form values (as strings/bools) for writing out to config.ini."""
@@ -1038,7 +984,7 @@ class App:
 
     # -----------------------------------------------------------------
     def _on_run(self):
-        self._log("ACT", "Bấm 'Truy vấn'")
+        self._log("ACT", "Bấm 'Làm mới'")
         if self.worker and self.worker.is_alive():
             self._log("WARN", "Bỏ qua: một tác vụ đang chạy")
             return
@@ -1065,7 +1011,6 @@ class App:
         self.last_cfg = cfg
         self.run_btn.config(state="disabled")
         self.adv_check.config(state="disabled")
-        self.file_menu.entryconfig("Mở thư mục CSV", state="disabled")
         self.status.config(text="Đang chạy...")
         self.bar.config(value=0, maximum=total)
 
@@ -1110,8 +1055,6 @@ class App:
         self.run_btn.config(state="normal")
         self.adv_check.config(state="normal")
         self.last_output_dir = result.get("output_dir")
-        if self.last_output_dir and os.path.isdir(self.last_output_dir):
-            self.file_menu.entryconfig("Mở thư mục CSV", state="normal")
 
         self.last_result = result
         self.last_updated_at = datetime.datetime.now()
