@@ -60,3 +60,7 @@ Xem [tags](../../tags) `v1.0`–`v4.0` cho các mốc lớn của dự án (đ�
 ## Tác giả
 
 congminh9981 (congminh9981@gmail.com) — Claude (Anthropic), đồng tác giả.
+
+## License
+
+[MIT](LICENSE)
