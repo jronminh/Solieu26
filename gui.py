@@ -162,8 +162,14 @@ class App:
         self.now_btn = None
         self.start_btn = None
 
-        # Load the external config (if any) BEFORE prefilling the form
-        self.cfg_path, self.cfg_overrides = core.apply_config_file(config_path)
+        # Load the external config (if any) BEFORE prefilling the form. The log
+        # widget doesn't exist yet at this point, so buffer any per-key WARNs
+        # (bad config.ini values) and flush them into it once _build_ui() runs
+        # below — otherwise they'd only reach core._console_log's stdout, which
+        # a windowed build (console=False) has no visible console for at all.
+        config_log_buffer = []
+        self.cfg_path, self.cfg_overrides = core.apply_config_file(
+            config_path, log=lambda level, msg: config_log_buffer.append((level, msg)))
 
         # Columns hidden in the CSV viewer — shared across all viewer windows
         # (every history_*.csv has the same schema); loaded from config, saved back on change.
@@ -218,6 +224,8 @@ class App:
         # Floor = the natural size with every field + the log shown.
         self.root.minsize(self.root.winfo_width(), self.root.winfo_height())
         self.root.after(100, self._poll)
+        for level, msg in config_log_buffer:
+            self._log(level, msg)
         self._log("INFO", "Khởi động xong — sẵn sàng. Điền thông tin rồi bấm 'Làm mới'.")
         if self.cfg_overrides:
             self._log("OK", f"Đã nạp {len(self.cfg_overrides)} thiết lập từ config: {self.cfg_path}")

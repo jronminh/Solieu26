@@ -150,8 +150,13 @@ def _to_bool(v: str):
     raise ValueError(v)
 
 
-def load_config_file(path: str) -> dict:
-    """Read INI → override dict. Missing/broken file → {} (with a warning)."""
+def load_config_file(path: str, log=_console_log) -> dict:
+    """Read INI → override dict. Missing/broken file → {} (with a warning).
+
+    Every warning goes through `log`, same as the rest of the module — so a
+    caller with its own log sink (e.g. the GUI) sees WHICH key was skipped and
+    why, instead of the message only ever reaching stdout.
+    """
     if not path or not os.path.isfile(path):
         return {}
 
@@ -159,7 +164,7 @@ def load_config_file(path: str) -> dict:
     try:
         parser.read(path, encoding="utf-8")
     except Exception as e:
-        _console_log("WARN", f"Không đọc được config '{path}': {e}")
+        log("WARN", f"Không đọc được config '{path}': {e}")
         return {}
 
     if parser.has_section(CONFIG_SECTION):
@@ -176,19 +181,19 @@ def load_config_file(path: str) -> dict:
             try:
                 out[k] = int(raw[k])
             except ValueError:
-                _console_log("WARN", f"config '{k}' không phải số nguyên → bỏ qua")
+                log("WARN", f"config '{k}' không phải số nguyên → bỏ qua")
     for k in _BOOL_KEYS:
         if k in raw:
             try:
                 out[k] = _to_bool(raw[k])
             except ValueError:
-                _console_log("WARN", f"config '{k}' không phải true/false → bỏ qua")
+                log("WARN", f"config '{k}' không phải true/false → bỏ qua")
     for k in ("start_date", "end_date"):
         if k in raw:
             try:
                 out[k] = datetime.datetime.strptime(raw[k].strip(), "%Y-%m-%d")
             except ValueError:
-                _console_log("WARN", f"config '{k}' sai định dạng YYYY-MM-DD → bỏ qua")
+                log("WARN", f"config '{k}' sai định dạng YYYY-MM-DD → bỏ qua")
     if "viewer_hidden_columns" in raw:
         val = raw["viewer_hidden_columns"].strip()
         out["viewer_hidden_columns"] = [c.strip() for c in val.split(",") if c.strip()]
@@ -227,7 +232,7 @@ def write_default_config(path: str = None) -> str:
     return path
 
 
-def apply_config_file(path: str = None):
+def apply_config_file(path: str = None, log=_console_log):
     """
     Resolve the config path (argument > default alongside the data folder),
     auto-creating it from DEFAULT_CONFIG if it doesn't exist yet, then load it
@@ -236,12 +241,15 @@ def apply_config_file(path: str = None):
     Default location is TEMP_DL_DIR (same place downloaded bulletins land), not
     next to the script/exe — that folder is always writable, unlike an exe that
     might sit under Program Files.
+
+    `log` is forwarded to load_config_file() for its per-key WARNs — pass the
+    GUI's own log sink if one exists yet, otherwise it falls back to console.
     """
     path = path or os.path.join(TEMP_DL_DIR, CONFIG_FILENAME)
     os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
     if not os.path.isfile(path):
         write_default_config(path)
-    overrides = load_config_file(path)
+    overrides = load_config_file(path, log=log)
     CONFIG.update(overrides)
     return path, overrides
 
