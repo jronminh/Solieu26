@@ -1,12 +1,16 @@
 """
-pipeline.py
+csv_pipeline.py
 ====================
-Pipeline layer: FTP download + CSV export + the run_pipeline() orchestrator.
+CSV-export pipeline: FTP download + CSV export + the run_pipeline()
+orchestrator. Named "csv_pipeline" (not just "pipeline") to stay distinct from
+the forecast-scoring pipeline planned in buckets.py — this module produces the
+display-oriented CSV export only, unaffected by the type coercion decode.py
+does for buckets.py's benefit.
 
 Built on config.py (settings/paths) and decode.py (bulletin → dict decoding).
 GUI-only — not runnable standalone. gui.py calls config.apply_config_file() at
 startup, builds a cfg dict from its own form fields for every run, and calls
-pipeline.run_pipeline() — never touching the FTP/decode internals directly.
+csv_pipeline.run_pipeline() — never touching the FTP/decode internals directly.
 
 Every function that does work takes a required `log(level, msg)` callback —
 gui.py always passes its own (routing into the on-screen log widget); there is
@@ -228,6 +232,7 @@ def flatten_record(record: dict, source_file: str = None,
     head     = record.get("head") or {}
     wind     = record.get("wind") or {}
     weather  = record.get("weather") or {}
+    storm    = record.get("storm") or {}
     pressure = record.get("pressure") or {}
 
     obs_dt   = parse_obs_dt(source_file)
@@ -259,6 +264,11 @@ def flatten_record(record: dict, source_file: str = None,
         "weather_ww":   weather.get("ww"),
         "weather_W1":   weather.get("W1"),
         "weather_W2":   weather.get("W2"),
+
+        # --- Storm (mây dông Cb quan sát quanh trạm, nhóm A) ---
+        "storm_dd_deg":  storm.get("storm_dd"),
+        "storm_distance": storm.get("storm_L"),
+        "storm_trend":    storm.get("storm_Cg"),
 
         # --- Pressure ---
         "pressure_hpa": pressure.get("pressure_hpa"),

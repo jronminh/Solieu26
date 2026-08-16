@@ -95,4 +95,18 @@ TABLES = {
         '90': '0.0', '91': '0.1', '92': '0.2', '93': '0.5', '94': '1',
         '95': '2',   '96': '4',   '97': '10',  '98': '20',  '99': '50'
     },
+    # Nhóm bổ sung "A" + dd + L + Cg: hướng/khoảng cách/xu thế mây dông (Cb)
+    # quan sát quanh trạm — không phải hiện tượng tại trạm. 2 mã dùng chung
+    # 1 nhãn khoảng cách (0/5, 1/6, 2/7, 3/8, 4/9).
+    "storm_distance": {
+        '0': '<10km',    '5': '<10km',
+        '1': '10-20km',  '6': '10-20km',
+        '2': '20-50km',  '7': '20-50km',
+        '3': '50-100km', '8': '50-100km',
+        '4': '>100km',   '9': '>100km',
+    },
+    "storm_trend": {
+        '0': 'Đang tan',            '1': 'Phát triển chậm',
+        '2': 'Phát triển rõ rệt',   '3': 'Phát triển dữ dội',
+    },
 }

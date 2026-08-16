@@ -2,7 +2,7 @@
 bulletin_generator.py
 ====================
 Standalone Tkinter tool that generates synthetic raw "Qt..." bulletin records
-— the reverse of decode.py — for testing decode.py/pipeline.py without
+— the reverse of decode.py — for testing decode.py/csv_pipeline.py without
 needing a real FTP download.
 
 The backbone is a table of Thời gian / Trường dữ liệu / Giá trị: each row
@@ -29,7 +29,7 @@ point gui.py's output folder at it, or feed it straight into
 decode.decode_qt_file, to sanity-check the whole pipeline against a
 hand-built time series.
 
-Standalone — does not import gui.py/pipeline.py/config.py, does not touch FTP
+Standalone — does not import gui.py/csv_pipeline.py/config.py, does not touch FTP
 or the app's config. Run:  python bulletin_generator.py
 """
 

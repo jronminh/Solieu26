@@ -15,7 +15,7 @@ python gui.py [đường dẫn config.ini]
 ```
 
 ### `bulletin_generator.py` — Sinh điện báo mẫu
-Công cụ độc lập, không đụng tới FTP hay cấu hình của `gui.py`. Nhập bảng "Thời gian / Trường dữ liệu / Giá trị" cho từng trạm, công cụ tự merge theo giờ và sinh ra các bản ghi `Qt...` hợp lệ — dùng để kiểm thử `decode.py`/`pipeline.py` mà không cần tải thật từ FTP.
+Công cụ độc lập, không đụng tới FTP hay cấu hình của `gui.py`. Nhập bảng "Thời gian / Trường dữ liệu / Giá trị" cho từng trạm, công cụ tự merge theo giờ và sinh ra các bản ghi `Qt...` hợp lệ — dùng để kiểm thử `decode.py`/`csv_pipeline.py` mà không cần tải thật từ FTP.
 
 Chạy:
 ```bash
@@ -31,7 +31,7 @@ python bulletin_generator.py
 | `history_viewer.py` | Cửa sổ "Xem số liệu" |
 | `gui_common.py` | Hằng số/tiện ích dùng chung cho UI |
 | `config.py` | Đường dẫn, hằng số FTP, đọc/ghi `config.ini` |
-| `pipeline.py` | Tải FTP + xuất CSV + điều phối `run_pipeline()` |
+| `csv_pipeline.py` | Tải FTP + xuất CSV + điều phối `run_pipeline()` |
 | `decode.py` | Giải mã một bản ghi `Qt...` thành dict (thuần, không I/O ngoài đọc file) |
 | `encode.py` | Chiều ngược lại của `decode.py` — dựng bản ghi `Qt...` từ giá trị |
 | `tables.py` | Bảng tra cứu mã → giá trị, dùng chung bởi `decode.py`/`encode.py` |
@@ -51,7 +51,7 @@ pip install pytest
 pytest
 ```
 
-74 test trong `tests/` phủ `decode.py`, `encode.py`, `pipeline.py`, `bulletin_generator.py`, dùng file `Qt...` mẫu thật trong `tests/fixtures/`.
+78 test trong `tests/` phủ `decode.py`, `encode.py`, `csv_pipeline.py`, `bulletin_generator.py`, dùng file `Qt...` mẫu thật trong `tests/fixtures/`.
 
 ## Phiên bản
 

@@ -13,6 +13,7 @@ from decode import (
     decode_pressure,
     decode_qt_file,
     decode_record,
+    decode_storm,
     decode_tail,
     decode_wind,
     decode_weather,
@@ -94,20 +95,40 @@ def test_hshs_value_ranges():
 # =============================================================================
 
 def test_decode_head():
-    assert decode_head("k3158", TABLES) == {"iii": "k31", "VV": "8"}
+    """'VV_km' is VV coerced to a float km — added for buckets.py's tam_nhin
+    field, alongside (not replacing) the existing display string 'VV'."""
+    assert decode_head("k3158", TABLES) == {"iii": "k31", "VV": "8", "VV_km": 8.0}
     assert decode_head(None, TABLES) is None
     assert decode_head("60000", TABLES) is None  # doesn't start with 'k'
 
 
 def test_decode_wind():
-    assert decode_wind("60000", TABLES) == {"wind_N": "8", "wind_dd": 0, "wind_ff": 0}
-    assert decode_wind("21211", TABLES) == {"wind_N": "3", "wind_dd": 120, "wind_ff": 11}
+    """'wind_N_num' is the N_oktas value coerced to an int — added for
+    buckets.py's tong_luong_may field, alongside the existing display string
+    'wind_N'."""
+    assert decode_wind("60000", TABLES) == {
+        "wind_N": "8", "wind_N_num": 8, "wind_dd": 0, "wind_ff": 0,
+    }
+    assert decode_wind("21211", TABLES) == {
+        "wind_N": "3", "wind_N_num": 3, "wind_dd": 120, "wind_ff": 11,
+    }
     assert decode_wind(None, TABLES) is None
     assert decode_wind("abc", TABLES) is None  # too short
 
 
 def test_decode_wind_bad_digits_keeps_N():
-    assert decode_wind("6abcd", TABLES) == {"wind_N": "8", "wind_dd": None, "wind_ff": None}
+    assert decode_wind("6abcd", TABLES) == {
+        "wind_N": "8", "wind_N_num": 8, "wind_dd": None, "wind_ff": None,
+    }
+
+
+def test_decode_wind_obscured_sky_keeps_slash_sentinel():
+    """N_oktas code '9' maps to '/' (obscured sky) — wind_N_num must pass it
+    through unchanged (not None), since buckets.py's tong_luong_may treats
+    '/' as its own distinct na-sentinel, not "missing data"."""
+    decoded = decode_wind("90000", TABLES)
+    assert decoded["wind_N"] == "/"
+    assert decoded["wind_N_num"] == "/"
 
 
 def test_decode_weather():
@@ -118,6 +139,21 @@ def test_decode_weather():
 def test_decode_cloud():
     assert decode_cloud("86647", TABLES) == {"cloud_Ns": "8", "cloud_C": "Sc", "cloud_hshs": 1400}
     assert decode_cloud("864", TABLES) is None
+
+
+def test_decode_storm():
+    """A + dd + L + Cg — hướng/khoảng cách/xu thế mây dông quanh trạm.
+    'A1411': dd=14 -> 140 deg, L='1' -> 10-20km, Cg='1' -> phát triển chậm."""
+    assert decode_storm("A1411", TABLES) == {
+        "storm_dd": 140, "storm_L": "10-20km", "storm_Cg": "Phát triển chậm",
+    }
+    assert decode_storm("A140", TABLES) is None  # too short
+
+
+def test_decode_storm_bad_digits_keeps_table_lookups():
+    assert decode_storm("Aabcd", TABLES) == {
+        "storm_dd": None, "storm_L": None, "storm_Cg": None,
+    }
 
 
 def test_decode_pressure():
@@ -148,8 +184,8 @@ def test_decode_record_yenbai():
               "tYên Bái  k31214410453")
     decoded = decode_record(record)
 
-    assert decoded["head"] == {"iii": "k31", "VV": "8"}
-    assert decoded["wind"] == {"wind_N": "8", "wind_dd": 0, "wind_ff": 0}
+    assert decoded["head"] == {"iii": "k31", "VV": "8", "VV_km": 8.0}
+    assert decoded["wind"] == {"wind_N": "8", "wind_N_num": 8, "wind_dd": 0, "wind_ff": 0}
     assert decoded["temperature"] == 29.6
     assert decoded["dewpoint"] == 27.0
     assert decoded["weather"] == {"ww": "Mù", "W1": "Nhiều mây", "W2": "Nhiều mây"}
@@ -175,11 +211,22 @@ def test_decode_record_name_only_station():
 
 
 def test_decode_indicators_ignores_unknown_groups():
-    """Group codes other than 1/2/7/8 (e.g. '9' supplementary data) must be
+    """Group codes other than 1/2/7/8/A (e.g. '9' supplementary data) must be
     silently ignored, not raise — see the TODO note in decode.py."""
     record = "k3158 60000 90000 7453 tYên Bái  k31214410453"
     decoded = decode_record(record)
     assert decoded["temperature"] is None
+    assert decoded["pressure"] == {"pressure_raw": 745.3, "pressure_hpa": 993.7}
+
+
+def test_decode_record_dispatches_storm_group():
+    """'A' groups (storm direction/distance/trend) route through decode_record
+    just like the other indicator groups."""
+    record = "k3158 60000 7453 A1411 tYên Bái  k31214410453"
+    decoded = decode_record(record)
+    assert decoded["storm"] == {
+        "storm_dd": 140, "storm_L": "10-20km", "storm_Cg": "Phát triển chậm",
+    }
     assert decoded["pressure"] == {"pressure_raw": 745.3, "pressure_hpa": 993.7}
 
 

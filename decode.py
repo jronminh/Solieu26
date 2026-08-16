@@ -5,8 +5,8 @@ Pure decoding layer: turn one raw "Qt..." bulletin record (a string) into a
 nested dict, and one downloaded bulletin file into a list of such dicts.
 
 No file I/O beyond reading the bulletin files themselves, no FTP, no config —
-pipeline.py's export step (flatten_record) is what turns this module's output
-into CSV rows.
+csv_pipeline.py's export step (flatten_record) is what turns this module's
+output into CSV rows.
 
 Lookup tables (code -> human-readable value) live in tables.py, not here —
 that lets encode.py (the reverse, used by bulletin_generator.py) share the
@@ -103,22 +103,55 @@ def vv_value(vv_code: str, tables: dict):
     return tables["VV_special"].get(vv_code)
 
 
+def _vv_km(vv: str):
+    """Coerce vv_value()'s display string (e.g. '3.0', '8') into a float km —
+    buckets.py's tam_nhin field needs a number, not a string. Kept separate
+    from vv_value() itself (rather than changing its return type) since
+    vv_value() is also used by bulletin_generator.py for a live text preview;
+    changing its type there would be a behavior change on unrelated UI."""
+    if vv is None:
+        return None
+    try:
+        return float(vv)
+    except (ValueError, TypeError):
+        return None
+
+
+def _oktas_number(coded: str):
+    """Coerce an N_oktas-table value (e.g. '10', '8', or the obscured-sky
+    sentinel '/') into an int 0-10 — buckets.py's tong_luong_may field needs a
+    number, not a string. '/' is passed through unchanged: it's already the
+    exact sentinel buckets.py's "na" list checks for, so bucket_of()/
+    is_hit_window() can bỏ cặp on it same as before. Kept separate from
+    decode_wind()/decode_cloud()'s existing 'wind_N'/'cloud_Ns' string (rather
+    than changing their type) since those feed bulletin_generator.py's live
+    preview text too."""
+    if coded is None or coded == "/":
+        return coded
+    try:
+        return int(coded)
+    except (ValueError, TypeError):
+        return None
+
+
 def decode_head(token: str, tables: dict):
     if not token or not token.startswith('k'):
         return None
-    return {"iii": token[:3], "VV": vv_value(token[3:], tables)}
+    vv = vv_value(token[3:], tables)
+    return {"iii": token[:3], "VV": vv, "VV_km": _vv_km(vv)}
 
 
 def decode_wind(token: str, tables: dict):
     if not token or len(token) < 5:
         return None
     N = tables["N_oktas"].get(token[0])
+    N_num = _oktas_number(N)
     try:
         dd = int(token[1:3]) * 10
         ff = int(token[3:5])
     except ValueError:
-        return {"wind_N": N, "wind_dd": None, "wind_ff": None}
-    return {"wind_N": N, "wind_dd": dd, "wind_ff": ff}
+        return {"wind_N": N, "wind_N_num": N_num, "wind_dd": None, "wind_ff": None}
+    return {"wind_N": N, "wind_N_num": N_num, "wind_dd": dd, "wind_ff": ff}
 
 
 def decode_weather(token: str, tables: dict):
@@ -135,6 +168,21 @@ def decode_cloud(token: str, tables: dict):
     return {"cloud_Ns": tables["N_oktas"].get(token[1]),
             "cloud_C":  tables["cloud_type"].get(token[2]),
             "cloud_hshs": hshs_value(token[3:5], tables)}
+
+
+def decode_storm(token: str, tables: dict):
+    """A + dd + L + Cg: hướng/khoảng cách/xu thế mây dông (Cb) quan sát quanh
+    trạm (không phải hiện tượng tại trạm) — vd 'A1411' -> hướng 140°, cách
+    10-20km, đang phát triển chậm."""
+    if len(token) < 5:
+        return None
+    try:
+        dd = int(token[1:3]) * 10
+    except ValueError:
+        dd = None
+    return {"storm_dd": dd,
+            "storm_L":  tables["storm_distance"].get(token[3]),
+            "storm_Cg": tables["storm_trend"].get(token[4])}
 
 
 def decode_pressure(token: str):
@@ -176,6 +224,7 @@ def decode_tail(token: str):
 def h_temp(t, out, tb):    out["temperature"] = _temp_value(t)
 def h_dew(t, out, tb):     out["dewpoint"]    = _temp_value(t)
 def h_weather(t, out, tb): out["weather"]     = decode_weather(t, tb)
+def h_storm(t, out, tb):   out["storm"]       = decode_storm(t, tb)
 
 
 def h_cloud(t, out, tb):
@@ -185,15 +234,15 @@ def h_cloud(t, out, tb):
         out["cloud"].append(layer)
 
 
-DISPATCH = {'1': h_temp, '2': h_dew, '7': h_weather, '8': h_cloud}
+DISPATCH = {'1': h_temp, '2': h_dew, '7': h_weather, '8': h_cloud, 'A': h_storm}
 
 
 def decode_indicators(indicators: list, tables: dict) -> dict:
-    """Only dispatches indicator groups flatten_record() (pipeline.py) actually
-    turns into CSV columns (temperature/dewpoint/weather/cloud) — any other
-    group code (e.g. '9'/'5'/'A' supplementary/pressure-tendency/regional
-    sections) is ignored, since nothing downstream reads it."""
-    out = {"temperature": None, "dewpoint": None, "weather": None}
+    """Only dispatches indicator groups flatten_record() (csv_pipeline.py) actually
+    turns into CSV columns (temperature/dewpoint/weather/cloud/storm) — any
+    other group code (e.g. '9'/'5' supplementary/pressure-tendency sections)
+    is ignored, since nothing downstream reads it."""
+    out = {"temperature": None, "dewpoint": None, "weather": None, "storm": None}
     for t in indicators:
         if not t:
             continue

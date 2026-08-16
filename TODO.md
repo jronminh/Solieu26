@@ -34,16 +34,46 @@ gió, tầm nhìn. Đây là chương trình con tách biệt với phần decod
 pipeline hiện có của Solieu26 — `buckets.py` chưa được import ở đâu khác trong
 repo. Việc cần làm trước khi dùng thật:
 
-- [ ] Gán bảng `hien_tuong["groups"]` (mã ww → mega-nhóm) trong `buckets.py` —
-      hiện đang để trống `{}`, chặn cứng `score_phenomenon()`.
+- [x] Gán bảng `hien_tuong["groups"]` (mã ww → mega-nhóm) trong `buckets.py`.
+      Phân loại theo nhãn + xác nhận với anh Minh 2026-08-16 (13/18/19 gộp
+      dong_mua_rao; 04/06 gộp mu_mu_kho; 66-69/83-86 → N_0; 20-29 "giờ trước"
+      tính như hiện tượng hiện tại). Khớp đủ 100/100 mã ww, không trùng/thiếu
+      (kiểm bằng script đối chiếu `tables.py["ww"]`).
+- [ ] **Phát hiện khi gán groups**: `decode_weather()` (`decode.py:127`) chỉ
+      trả NHÃN tiếng Việt của ww, không giữ mã gốc. Mã `64`/`65` ("Mưa to" =
+      mưa thường to → mega `mua_mua_phun`) và mã `82` ("Mưa to" = mưa rào dữ
+      dội → mega `dong_mua_rao`) có CÙNG NHÃN nhưng KHÁC mega-bucket — nếu bên
+      gọi chỉ có nhãn thì không phân biệt được. `mega_of()` trong `buckets.py`
+      dùng mã làm khóa nên tự nó đúng; cần sửa `decode_weather()` giữ lại mã
+      gốc (vd trả thêm `"ww_code": token[1:3]`) trước khi nối `buckets.py` vào
+      pipeline thật.
 - [ ] Xác nhận các mốc còn đánh dấu `KIỂM:` trong `buckets.py`: mép 6000m
       (trần), mép 10km (tầm nhìn), đơn vị tốc độ gió/tầm nhìn, cơ sở ngưỡng
       lặng gió (tính theo tốc độ quan trắc hay dự báo).
 - [ ] Viết adapter đổi tên key mây cho `solve_ceiling()`: `decode_cloud()`
       trả `{"cloud_C","cloud_Ns","cloud_hshs"}`, còn `solve_ceiling` cần
       `{"type","amount","height"}` — chưa có lớp chuyển đổi nào nối 2 bên.
-- [ ] Ép `VV` (tầm nhìn, `vv_value()` trả chuỗi) thành số km trước khi đưa
-      vào `bucket_of` — hàm này hiện cần số, không nhận chuỗi.
+- [x] Ép `VV` (tầm nhìn) và `wind_N` (tổng lượng mây) thành số cho
+      `buckets.py`. Thêm 2 hàm riêng trong `decode.py` — `_vv_km()` và
+      `_oktas_number()` — KHÔNG sửa `vv_value()`/`hshs_value()` dùng chung với
+      `bulletin_generator.py` (né đúng rủi ro nêu ở mục trước: đổi kiểu trả về
+      của 2 hàm đó sẽ đổi chữ hiện trong preview Tkinter). Kết quả: `VV_km`
+      (float, mới) nằm CẠNH `VV` (chuỗi, giữ nguyên) trong `decode_head()`;
+      `wind_N_num` (int, hoặc `'/'` giữ nguyên nếu trời bị che khuất — đúng
+      sentinel `na` mà `buckets.py["tong_luong_may"]` đã khai) nằm CẠNH
+      `wind_N` trong `decode_wind()`. `csv_pipeline.flatten_record()` vẫn chỉ
+      đọc `VV`/`wind_N` (chuỗi) như cũ nên CSV xuất ra Y HỆT trước — đã kiểm
+      lại bằng tay giá trị `visibility_km`/`total_cloud_N` không đổi. Còn
+      thiếu: `bucket_of`/`buckets.py` chưa THỰC SỰ dùng `VV_km`/`wind_N_num`
+      (chưa nối, xem mục "Nối buckets.py vào pipeline" cuối danh sách).
+- [x] Đổi tên `pipeline.py` → `csv_pipeline.py` để phân biệt với 1 pipeline
+      CHẤM ĐIỂM sẽ thêm sau (dùng dữ liệu đã ép kiểu ở trên) — cùng lúc với
+      việc ép kiểu ở mục ngay trên, theo yêu cầu giữ CSV cũ nguyên vẹn mà vẫn
+      rõ ràng đây là 2 việc khác nhau. Đã sửa import ở `gui.py`
+      (`import csv_pipeline`), đổi tên `tests/test_pipeline.py` →
+      `tests/test_csv_pipeline.py`, và mọi docstring/comment tham chiếu tên
+      file cũ (`config.py`, `gui_common.py`, `history_viewer.py`, `decode.py`,
+      `bulletin_generator.py`, `tests/conftest.py`, `README.md`).
 - [ ] Viết hàm quy đổi hướng gió từ độ (`decode_wind()` trả 0–360°) sang chỉ
       số 1 trong 16 hướng (0–15) mà `huong_gio` trong `buckets.py` cần —
       chưa có hàm này ở đâu trong repo.
@@ -66,17 +96,27 @@ repo. Việc cần làm trước khi dùng thật:
 - [x] Chưa có test nào trong repo. `decode.py` giờ đã tách thuần (không I/O
       ngoài đọc file), viết unit test cho các hàm `decode_*`/`flatten_record`
       sẽ rẻ và có giá trị ngay. — Đã thêm `tests/` (pytest, 73 test):
-      `test_decode.py`, `test_pipeline.py`, `test_encode.py`,
+      `test_decode.py`, `test_pipeline.py` (nay là `test_csv_pipeline.py`,
+      xem mục đổi tên bên dưới), `test_encode.py`,
       `test_bulletin_generator.py`, cộng `tests/fixtures/qt_files/` (file
       "Qt..." THẬT lấy từ `~/solieu26_dl/data` — 4 file lẻ chọn để phủ ca
       biên: dấu phân cách `=` thay vì `;`, 4 lớp mây, nhiều ngày khác nhau;
       cộng `full_day_20260810/` — trọn 1 ngày 24 file liên tục cho test
       ghép nhiều giờ). Chưa test tầng FTP (`download_files`/`run_pipeline`
-      trong pipeline.py) — cần mock `ftplib`, để sau nếu cần.
-- [ ] Nhóm chỉ báo `9`/`5`/`A` (dữ liệu bổ sung / xu hướng khí áp 3 giờ /
-      mục vùng) đang bị bỏ qua hoàn toàn khi giải mã (xem
-      `decode.decode_indicators`) — cần viết lại phần decode nếu có tính
-      năng sau này cần đến dữ liệu này.
+      trong `csv_pipeline.py`) — cần mock `ftplib`, để sau nếu cần.
+- [x] Nhóm `A` (hướng/khoảng cách/xu thế mây dông Cb quanh trạm) — đã thêm
+      `decode_storm()` trong `decode.py` (dispatch qua `DISPATCH['A']`), bảng
+      `storm_distance`/`storm_trend` trong `tables.py`, và 3 cột CSV mới
+      (`storm_dd_deg`/`storm_distance`/`storm_trend`) trong
+      `flatten_record()` (nay ở `csv_pipeline.py`, xem mục đổi tên bên dưới).
+      Phát hiện nhờ đối chiếu với `jupyter/decode_universal.ipynb`
+      (`decoded_BATHK`, nhóm `A_dd_L_Cg`) ở `E:\Code\Python\decode_universal`
+      — cách giải mã cũ có sẵn nhưng chưa từng nối vào dự án Solieu26. Kèm
+      test trong `tests/test_decode.py` và `tests/test_pipeline.py` (nay
+      `tests/test_csv_pipeline.py`).
+- [ ] Nhóm chỉ báo `9`/`5` (dữ liệu bổ sung / xu hướng khí áp 3 giờ) vẫn đang
+      bị bỏ qua hoàn toàn khi giải mã (xem `decode.decode_indicators`) — cần
+      viết lại phần decode nếu có tính năng sau này cần đến dữ liệu này.
 - [ ] Biểu đồ/plot theo thời gian — ý tưởng đã nêu, chưa quyết định phạm vi.
 
 ## Đã hoàn thành gần đây

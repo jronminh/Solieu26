@@ -1,7 +1,7 @@
 """
-test_pipeline.py
+test_csv_pipeline.py
 ====================
-Unit tests for the CSV-export half of pipeline.py (flatten_record,
+Unit tests for the CSV-export half of csv_pipeline.py (flatten_record,
 cloud_layers_needed, write_csv, export_history_by_date) plus the small
 filename<->datetime helpers. The FTP download layer (download_files,
 run_pipeline) needs a live/mocked server and isn't covered here.
@@ -11,7 +11,7 @@ import csv
 import os
 
 from decode import decode_qt_file
-from pipeline import (
+from csv_pipeline import (
     cloud_layers_needed,
     export_history_by_date,
     flatten_record,
@@ -77,6 +77,11 @@ def test_flatten_record_yenbai(qt_00):
     assert flat["weather_W1"] == "Nhiều mây"
     assert flat["weather_W2"] == "Nhiều mây"
 
+    # Yên Bái's record has no 'A' (storm) group -> columns present but blank
+    assert flat["storm_dd_deg"] is None
+    assert flat["storm_distance"] is None
+    assert flat["storm_trend"] is None
+
     assert flat["pressure_hpa"] == 993.7
 
     assert flat["cloud_layers"] == 1
@@ -96,6 +101,14 @@ def test_flatten_record_pads_missing_cloud_layers():
     flat = flatten_record(records[0], max_cloud_layers=3)
     assert flat["cloud_2_Ns"] is None
     assert flat["cloud_3_hshs"] is None
+
+
+def test_flatten_record_storm_group():
+    record = {"storm": {"storm_dd": 140, "storm_L": "10-20km", "storm_Cg": "Phát triển chậm"}}
+    flat = flatten_record(record, max_cloud_layers=1)
+    assert flat["storm_dd_deg"] == 140
+    assert flat["storm_distance"] == "10-20km"
+    assert flat["storm_trend"] == "Phát triển chậm"
 
 
 def test_flatten_record_no_source_file():

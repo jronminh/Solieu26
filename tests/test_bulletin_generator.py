@@ -71,7 +71,7 @@ def test_encode_state_defaults_mandatory_fields_when_uncovered():
     not raise."""
     raw = _encode_state({}, "k31", 21.7, 104.85, "Yên Bái")
     decoded = decode_record(raw)
-    assert decoded["wind"] == {"wind_N": "0", "wind_dd": 0, "wind_ff": 0}
+    assert decoded["wind"] == {"wind_N": "0", "wind_N_num": 0, "wind_dd": 0, "wind_ff": 0}
     assert decoded["head"]["VV"] == "0.0"
 
 
