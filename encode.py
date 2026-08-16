@@ -41,7 +41,7 @@ REV_W1W2       = _reverse_table(TABLES["W1W2"])
 def encode_head(station_code: str, vv_code: str) -> str:
     """station_code: 'kXX' (3 chars — matches gui_common.STATIONS keys and
     decode_tail's station_code). vv_code: raw 2-digit VV code (00-99), NOT
-    a km value — decode._vv_value is piecewise/lossy, so there's no single
+    a km value — decode.vv_value is piecewise/lossy, so there's no single
     correct code for a given distance."""
     if not station_code or not station_code.startswith('k') or len(station_code) != 3:
         raise ValueError(f"mã trạm không hợp lệ: {station_code!r} (cần dạng 'kXX')")

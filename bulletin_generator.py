@@ -21,7 +21,7 @@ import os
 import tkinter as tk
 from tkinter import ttk, messagebox, filedialog
 
-from decode import decode_record, _vv_value, _hshs_value
+from decode import decode_record, vv_value, hshs_value
 from encode import encode_record
 from tables import TABLES
 
@@ -59,7 +59,7 @@ class CloudRow:
         self._update_preview()
 
     def _update_preview(self):
-        h = _hshs_value(self.hshs.get().strip(), TABLES)
+        h = hshs_value(self.hshs.get().strip(), TABLES)
         self.preview.config(text=f"≈ {h} m" if h is not None else "mã không hợp lệ")
 
     def to_dict(self):
@@ -156,7 +156,7 @@ class App:
         self._update_vv_preview()
 
     def _update_vv_preview(self):
-        v = _vv_value(f"{int(self.vv_code.get() or 0):02d}", TABLES)
+        v = vv_value(f"{int(self.vv_code.get() or 0):02d}", TABLES)
         self.vv_preview.config(text=f"≈ {v} km" if v is not None else "không xác định")
 
     def _build_temp_section(self, parent):

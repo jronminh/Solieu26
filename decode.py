@@ -69,7 +69,9 @@ def _temp_value(token: str):
         return None
 
 
-def _hshs_value(code: str, tables: dict):
+def hshs_value(code: str, tables: dict):
+    """Public: also used by bulletin_generator.py for a live height preview
+    while the user types a cloud-base code."""
     try:
         h = int(code)
     except ValueError:
@@ -81,7 +83,9 @@ def _hshs_value(code: str, tables: dict):
     return tables["hshs_special"].get(code)
 
 
-def _vv_value(vv_code: str, tables: dict):
+def vv_value(vv_code: str, tables: dict):
+    """Public: also used by bulletin_generator.py for a live visibility
+    preview while the user types a VV code."""
     if len(vv_code) < 2:
         return None
     try:
@@ -102,7 +106,7 @@ def _vv_value(vv_code: str, tables: dict):
 def decode_head(token: str, tables: dict):
     if not token or not token.startswith('k'):
         return None
-    return {"iii": token[:3], "VV": _vv_value(token[3:], tables)}
+    return {"iii": token[:3], "VV": vv_value(token[3:], tables)}
 
 
 def decode_wind(token: str, tables: dict):
@@ -130,7 +134,7 @@ def decode_cloud(token: str, tables: dict):
         return None
     return {"cloud_Ns": tables["N_oktas"].get(token[1]),
             "cloud_C":  tables["cloud_type"].get(token[2]),
-            "cloud_hshs": _hshs_value(token[3:5], tables)}
+            "cloud_hshs": hshs_value(token[3:5], tables)}
 
 
 def decode_pressure(token: str):
