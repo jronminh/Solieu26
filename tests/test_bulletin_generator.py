@@ -83,7 +83,7 @@ def test_encode_state_omits_uncovered_optional_fields():
     assert decoded["dewpoint"] is None
     assert decoded["pressure"] is None
     assert decoded["weather"] is None
-    assert "cloud" not in decoded  # decode.py only adds the key when an '8' token is present
+    assert "cloud" not in decoded  # key is only added when an '8' token is present
 
 
 def test_encode_state_includes_covered_fields():

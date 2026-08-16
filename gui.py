@@ -71,7 +71,7 @@ class App:
                 pass   # e.g. platform without .ico support — window just keeps the default icon
 
         # CSV viewer Treeview look — taller rows + bold headings read better than
-        # the ttk defaults across the many columns flatten_record() produces.
+        # the ttk defaults across the many columns a data row can have.
         style = ttk.Style(root)
         style.configure("Treeview", rowheight=22)
         style.configure("Treeview.Heading", font=("Segoe UI", 9, "bold"))
@@ -223,9 +223,8 @@ class App:
         self.log.config(state="disabled")
 
     # ----- Dialog helpers (generic) ---------------------------------------
-    # Shared by history_viewer.HistoryViewer and dialogs.SettingsDialog/AdvancedDialog
-    # via self.app._make_dialog(...)/self.app._center_over_root(...) — App owns
-    # self._dialogs (the singleton registry), so it owns the generic helpers too.
+    # Shared singleton-dialog helpers used by every popup window in the app.
+    # App owns self._dialogs (the singleton registry), so it owns these too.
     def _make_dialog(self, key: str, title: str):
         """Create a singleton Toplevel: if already open, bring it to front and return None."""
         existing = self._dialogs.get(key)

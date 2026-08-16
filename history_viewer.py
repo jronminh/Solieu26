@@ -108,11 +108,10 @@ class HistoryViewer:
 
         # Hour filter — same post-process idea as the station filter above, but over
         # the "hour" column (always present, just hidden from the rendered table).
-        # Its OWN options are derived from the station filter (see
-        # _sync_hour_filter_for_station): a specific station locks giờ to "Tất cả
-        # các giờ" (one station's whole history), while "Tất cả các trạm" hides that
-        # option and forces a specific giờ (otherwise the table would be every
-        # station × every hour at once).
+        # Its own options depend on the station filter: a specific station locks
+        # giờ to "Tất cả các giờ" (one station's whole history), while "Tất cả các
+        # trạm" hides that option and forces a specific giờ — otherwise the table
+        # would be every station × every hour at once.
         win._hour_filter = tk.StringVar(value=ALL_HOURS)
         ttk.Label(bar, text="Giờ:").pack(side="left", padx=(12, 2))
         win._hour_combo = ttk.Combobox(bar, textvariable=win._hour_filter,
@@ -124,9 +123,8 @@ class HistoryViewer:
         self._sync_hour_filter_for_station(win)
 
         # Date filter — NOT a row filter: each history_YYYYMMDD.csv is already one
-        # day, so picking a date here SWITCHES WHICH FILE is loaded (see
-        # _on_date_filter_change / _available_history_files), same idea as a file
-        # picker rather than a post-process filter like Trạm/Giờ above.
+        # day, so picking a date here switches WHICH FILE is loaded, same idea as
+        # a file picker rather than a post-process filter like Trạm/Giờ above.
         win._date_filter = tk.StringVar(value=date_key)
         ttk.Label(bar, text="Ngày:").pack(side="left", padx=(12, 2))
         win._date_combo = ttk.Combobox(bar, textvariable=win._date_filter,
@@ -372,8 +370,8 @@ class HistoryViewer:
                 h_idx = header.index("hour")
                 data = [r for r in data if h_idx < len(r) and r[h_idx] == hour]
 
-        # No date filter here — win._date_filter now picks WHICH FILE is loaded
-        # (see _on_date_filter_change), not a row filter within it.
+        # No date filter here — win._date_filter picks WHICH FILE is loaded,
+        # not a row filter within it.
 
         if mode == "raw":
             # Just obs_time + raw, to read the original bulletin per station.

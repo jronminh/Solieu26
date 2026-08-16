@@ -1,0 +1,19 @@
+## Approach
+- Read existing files before writing. Don't re-read unless changed.
+- Thorough in reasoning, concise in output.
+- Skip files over 100KB unless required.
+- No sycophantic openers or closing fluff.
+- No emojis or em-dashes.
+- Do not guess APIs, versions, flags, commit SHAs, or package names. Verify by reading code or docs before asserting.
+- Comments describe the local pipeline/logic and what the nearby code does, nothing else.
+- Don't name other files or functions unless the link is load-bearing (e.g. a format both sides must keep in sync). Describe local behavior instead.
+- State each fact in one place only.
+- A comment says why or what constrains the code, not what it does — that's visible by reading it.
+- Put a comment next to what it describes.
+- Function-level logic goes in that function's docstring.
+- Module docstring only says what the module is and how to use it.
+- Avoid documenting things likely to change soon; they go stale fastest.
+- One short sentence per idea; no run-ons.
+- TODO items, open questions, and pending decisions go in TODO.md, not in comments.
+- When reviewing comments, point out what's wrong and propose a tighter rewrite.
+- Don't delete comments that explain real logic or business rules.

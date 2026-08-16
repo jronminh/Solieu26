@@ -12,7 +12,7 @@ takes the raw CODE as input rather than trying to invert the decoded value —
 callers (e.g. a GUI) should let the user pick the code, showing decode.py's
 own output as a live preview instead of pretending the inverse is unambiguous.
 
-No file I/O, no Tkinter — mirrors decode.py's role as the pure-logic half.
+No file I/O, no Tkinter.
 """
 
 from tables import TABLES

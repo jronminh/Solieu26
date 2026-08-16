@@ -3,9 +3,9 @@ csv_pipeline.py
 ====================
 CSV-export pipeline: FTP download + CSV export + the run_pipeline()
 orchestrator. Named "csv_pipeline" (not just "pipeline") to stay distinct from
-the forecast-scoring pipeline planned in buckets.py — this module produces the
-display-oriented CSV export only, unaffected by the type coercion decode.py
-does for buckets.py's benefit.
+the forecast-scoring pipeline planned in score_tables.py/scorer.py — this
+module produces the display-oriented CSV export only, unaffected by the type
+coercion decode.py does for score_tables.py's benefit.
 
 Built on config.py (settings/paths) and decode.py (bulletin → dict decoding).
 GUI-only — not runnable standalone. gui.py calls config.apply_config_file() at
@@ -215,7 +215,7 @@ def flatten_record(record: dict, source_file: str = None,
     Flatten a record into one CSV row with a clean schema:
 
       - Time & meta come FIRST (obs_time / date / hour / source_file).
-      - lat/lon coordinates are DECIMAL DEGREES (already converted in decode_tail).
+      - lat/lon coordinates are DECIMAL DEGREES (already converted upstream).
       - Column names carry their UNIT; drops the duplicate 'iii' column and the
         debug column 'pressure_raw'.
       - 'total_cloud_N' replaces the old 'wind_N' (it's actually total cloud

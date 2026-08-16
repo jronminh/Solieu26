@@ -1,89 +1,52 @@
 """
 forecast_bucket_generator.py
 ====================
-Standalone Tkinter tool that lets a dự báo viên (forecaster) pick a BUCKET
-(from buckets.py's BUCKETS, via forecast_bucket_logic.py) for each of the 6
-scored fields over a time range, and exports one CSV row per HOUR covered -
-this is a hand-built stand-in for stage 2 ("Dự báo") of the scoring pipeline
-mapped out in TODO.md, which currently has no UI at all.
+Standalone Tkinter tool that lets a dự báo viên (forecaster) pick a bucket
+for each of the 6 scored fields over a time range, and exports the result
+to CSV - a hand-built stand-in for the "Dự báo" stage of the scoring
+pipeline, which has no other UI yet (see TODO.md).
 
 GUI vs helper split: this file is Tkinter ONLY - every non-widget rule
-(bucket labels, hour-range merge, CSV shape, CSV import) lives in
-forecast_bucket_logic.py and is imported here, not reimplemented. The only
-things this file adds on top of that pure logic are: 4 widget-builder
-functions (_build_*_bucket_field, one per BUCKETS "kind") that wrap a logic
-label-list in a Combobox, and the RowEditorPanel/App classes that wire
-widgets to user actions. If forecast_bucket_logic.py's functions ever need
-reuse outside a GUI (a headless script, a future pipeline module, tests),
-they can be imported straight from there with no tkinter dependency along
-for the ride.
+(bucket labels, hour-range merge, CSV shape/import/export, record CRUD)
+lives in a separate logic module and is imported here, not reimplemented.
+This file only adds: 4 widget-builder functions (one per bucket "kind")
+that wrap a logic label-list in a Combobox, and the RowEditorPanel/App
+classes that wire widgets to the imported CRUD functions.
 
-Backbone and pipeline mirror bulletin_generator.py on purpose (same table +
-always-visible side editor + "merge by hour" flow), just pointed at bucket
-choices instead of raw mã "Qt..." field values:
+Data model: the whole program is 1 micro-database - a list of dicts
+{start_hour, end_hour, data_name, bucket_selected}. This App operates
+directly on that list, no separate copy: add/remove/edit all go through
+the imported CRUD functions, which take/return a plain list index, not a
+synthetic id. The table is never re-sorted, so a row's index stays stable
+as long as no row before it is removed.
 
-  - Table (_build_table_section-style): Thời gian / Trường dữ liệu / Bucket
-    đã chọn. One row = "field F is bucket B from giờ START to giờ END, both
-    included" - same hourly, overlap-allowed shape as bulletin_generator.py
-    (a "07-09" row covers hours 07, 08 AND 09).
-  - RowEditorPanel: same always-visible add/edit panel, double-click a row
-    to edit it. The value widget per field is a Combobox built from
-    forecast_bucket_logic's label helpers (themselves derived from
-    BUCKETS[...]["windows"]/["bounds"]/["labels"], not hardcoded, so they
-    can't drift from bucket_of()) instead of a raw-value widget from
-    tables.py.
-  - "Sinh CSV theo giờ" (_build_output_section-style): for every hour any
-    row covers, merge whichever rows currently cover that hour (one bucket
-    per field, last-started row wins on overlap - same rule as
-    bulletin_generator.py) into ONE csv row. Missing fields at an hour are
-    left BLANK (not defaulted) and flagged in a warning, since a forecaster
-    not yet having picked a bucket is meaningfully different from picking
-    bucket 0.
-  - "Nhập CSV..." is the inverse: reads a CSV built to this same schema,
-    run-length-encodes each field's per-hour value back into rows, and
-    REPLACES whatever is currently in the table/station fields. Malformed
-    cells are skipped with a warning rather than aborting the whole import.
+No station/trạm or ngày dự báo anywhere - the micro-database is scoped to
+1 station/1 day implicitly (by whoever is running the tool); the schema
+intentionally carries only start_hour/end_hour/data_name/bucket_selected.
 
-hien_tuong is special: the forecaster only picks the MEGA bucket (loại hiện
-tượng). The SUB bucket (buổi) is never picked by hand - it is derived per
-HOUR from "Khung giờ áp dụng" via buckets.sub_of_hour() (inside
-forecast_bucket_logic.hien_tuong_row_values), since buổi is tightly coupled
-to giờ and a free-standing choice could silently disagree with the time
-range already set on the row.
-
-Deliberately narrow, same spirit as bulletin_generator.py and
-buckets_scoring_lab.py: exercises ONLY the forecast-entry step. Does not
-touch the observation adapter (stage 3), matcher (stage 4), the scorer
-itself (stage 5 - see buckets_scoring_lab.py), or storage (stage 6).
-
-Imports forecast_bucket_logic.py (which itself only imports buckets.py) and
-nothing else project-local - no gui.py/decode.py/encode.py/csv_pipeline.py/
-config.py/tables.py/bulletin_generator.py. Run:
+Imports only the logic module above and nothing else project-local. Run:
     python forecast_bucket_generator.py
 """
 
-import csv
-import io
 import os
-from datetime import date
 
 import tkinter as tk
 from tkinter import ttk, messagebox, filedialog
 
 from forecast_bucket_logic import (
+    forecast_db,
     FIELD_ORDER, FIELD_LABELS, FIELD_DEFAULTS,
     HUONG_GIO_LABELS, PHENOMENON_MEGA_KEYS, PHENOMENON_MEGA_LABEL_TEXT,
-    CSV_FIELDNAMES,
-    window_labels, linear_labels, field_key_from_label, row_value_str,
-    covered_hours, merge_at_hour, csv_row_for_hour, import_csv_rows,
+    window_labels, linear_labels, field_key_from_label, bucket_label,
+    import_csv, export_csv, add_record, remove_record, edit_record,
 )
 
 
 # =============================================================================
 # Widget builders - 1 / kind trong BUCKETS ("forecast_window", "linear",
 # "circular", "phenomenon"). Mỗi builder(parent) -> (widget, get() -> bucket
-# value, set_(value)) - CHỈ đọc nhãn/khóa từ forecast_bucket_logic, không tự
-# tính lại gì từ BUCKETS.
+# value, set_(value)) - chỉ đọc nhãn/khóa đã tra sẵn, không tự tính lại gì
+# từ BUCKETS.
 # =============================================================================
 
 def _build_window_bucket_field(field_key: str, width: int = 16):
@@ -137,16 +100,13 @@ def _build_circular_bucket_field(parent):
 
 
 def _build_phenomenon_bucket_field(parent):
-    """Chỉ chọn MEGA (loại hiện tượng). Buổi (sub-bucket) KHÔNG chọn ở đây -
-    nó luôn suy trực tiếp từ "Khung giờ áp dụng" phía trên (qua
-    forecast_bucket_logic.hien_tuong_row_values -> buckets.sub_of_hour()),
-    vì buổi vốn gắn chặt với giờ, chọn tay thêm dễ lệch với khung giờ đã
-    đặt."""
+    """Chỉ chọn MEGA (loại hiện tượng). Buổi (sub-bucket) KHÔNG chọn/lưu ở
+    đây - nó chỉ được suy sau này, ở tầng chấm điểm, từ cột "hour"."""
     frame = ttk.Frame(parent)
     mega_cb = ttk.Combobox(frame, width=30, state="readonly", values=PHENOMENON_MEGA_LABEL_TEXT)
     mega_cb.current(0)
     mega_cb.pack(anchor="w")
-    ttk.Label(frame, text="(buổi tự suy từ \"Khung giờ áp dụng\" ở trên)",
+    ttk.Label(frame, text="(buổi suy từ giờ lúc chấm điểm - không chọn ở đây)",
               foreground="#6b7280").pack(anchor="w", pady=(2, 0))
     frame.pack(anchor="w")
 
@@ -170,9 +130,10 @@ FIELD_WIDGET_BUILDERS = {
 
 
 # =============================================================================
-# RowEditorPanel - giống hệt vai trò trong bulletin_generator.py: khung thời
-# gian áp dụng + trường dữ liệu + giá trị (ở đây là bucket), luôn hiện, không
-# phải popup. load_new()/load_row() chuyển đổi mode, Lưu dòng gọi on_save.
+# RowEditorPanel - khung thời gian áp dụng + trường dữ liệu + bucket, luôn
+# hiện, không phải popup. load_new()/load_row() chuyển đổi mode, Lưu dòng
+# gọi on_save(record, editing_index) - editing_index None = thêm mới, số =
+# sửa bản ghi tại đúng vị trí đó trong data_base.
 # =============================================================================
 
 class RowEditorPanel(ttk.Frame):
@@ -224,42 +185,38 @@ class RowEditorPanel(ttk.Frame):
         set_(initial if initial is not None else FIELD_DEFAULTS[key])
 
     def load_new(self):
-        self.editing_id = None
+        self.editing_index = None
         self.mode_label.config(text="+ Thêm dòng mới")
         self.start_hour.current(7)
         self.end_hour.current(9)
         self.field_var.set(FIELD_LABELS[FIELD_ORDER[0]])
         self._rebuild_value_widget()
 
-    def load_row(self, row: dict):
-        self.editing_id = row["_id"]
+    def load_row(self, record: dict, index: int):
+        self.editing_index = index
         self.mode_label.config(
-            text=f"Đang sửa: {row['start']:02d}-{row['end']:02d} - "
-                 f"{FIELD_LABELS[row['field']]}")
-        self.start_hour.set(f"{row['start']:02d}")
-        self.end_hour.set(f"{row['end']:02d}")
-        self.field_var.set(FIELD_LABELS[row["field"]])
-        self._rebuild_value_widget(initial=row["value"])
+            text=f"Đang sửa: {record['start_hour']:02d}-{record['end_hour']:02d} - "
+                 f"{FIELD_LABELS[record['data_name']]}")
+        self.start_hour.set(f"{record['start_hour']:02d}")
+        self.end_hour.set(f"{record['end_hour']:02d}")
+        self.field_var.set(FIELD_LABELS[record["data_name"]])
+        self._rebuild_value_widget(initial=record["bucket_selected"])
 
     def _save(self):
-        try:
-            start = int(self.start_hour.get())
-            end = int(self.end_hour.get())
-            if end < start:
-                raise ValueError("giờ kết thúc phải lớn hơn hoặc bằng giờ bắt đầu")
-            key = field_key_from_label(self.field_var.get())
-            value = self._value_get()
-        except ValueError as e:
-            messagebox.showerror("Không lưu được dòng", str(e))
-            return
-        self.on_save({"start": start, "end": end, "field": key, "value": value}, self.editing_id)
-        self.load_new()
+        key = field_key_from_label(self.field_var.get())
+        record = {
+            "start_hour": int(self.start_hour.get()),
+            "end_hour": int(self.end_hour.get()),
+            "data_name": key,
+            "bucket_selected": self._value_get(),
+        }
+        self.on_save(record, self.editing_index)
 
 
 class App:
     def __init__(self, root: tk.Tk):
         self.root = root
-        root.title("Sinh CSV bucket dự báo theo giờ (dựa trên bulletin_generator.py)")
+        root.title("Sinh CSV bucket dự báo (dựa trên bulletin_generator.py)")
         root.minsize(1040, 660)
         icon_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "icon.ico")
         if os.path.isfile(icon_path):
@@ -268,14 +225,12 @@ class App:
             except tk.TclError:
                 pass
 
-        self.rows = []      # list of {"_id", "start", "end", "field", "value"}
-        self._next_id = 1
-        self._last_rows = []     # csv row dicts from the last "Sinh CSV theo giờ"
+        self.data_base = forecast_db     # tham chiếu THẲNG micro-database chung
+        self._last_result = None         # result trả về từ lần "Xuất CSV..." gần nhất
+        self._last_csv_text = None       # nội dung file vừa ghi, để "Chép tất cả" dùng lại
 
         body = ttk.Frame(root, padding=10)
         body.pack(fill="both", expand=True)
-
-        self._build_station_section(body)
 
         main_row = ttk.Frame(body)
         main_row.pack(fill="both", expand=True)
@@ -290,26 +245,6 @@ class App:
 
         self._build_table_section(left)
         self._build_output_section(left)
-
-    # ----- trạm & ngày dự báo (global, áp dụng cho mọi dòng csv) --------
-    def _build_station_section(self, parent):
-        box = ttk.LabelFrame(parent, text="Trạm & ngày dự báo (áp dụng cho mọi dòng)", padding=8)
-        box.pack(fill="x", pady=(0, 8))
-
-        ttk.Label(box, text="Trạm (mã, vd k31):").grid(row=0, column=0, sticky="w")
-        self.station_code = ttk.Entry(box, width=18)
-        self.station_code.insert(0, "k31")
-        self.station_code.grid(row=0, column=1, sticky="w")
-
-        ttk.Label(box, text="Tên trạm:").grid(row=0, column=2, sticky="w", padx=(12, 0))
-        self.station_name = ttk.Entry(box, width=18)
-        self.station_name.insert(0, "Yên Bái")
-        self.station_name.grid(row=0, column=3, sticky="w")
-
-        ttk.Label(box, text="Ngày dự báo (YYYY-MM-DD):").grid(row=0, column=4, sticky="w", padx=(12, 0))
-        self.forecast_date = ttk.Entry(box, width=12)
-        self.forecast_date.insert(0, date.today().isoformat())
-        self.forecast_date.grid(row=0, column=5, sticky="w")
 
     # ----- table backbone: thời gian / trường dữ liệu / bucket ----------
     def _build_table_section(self, parent):
@@ -341,110 +276,85 @@ class App:
         vsb.pack(side="left", fill="y")
         self.tree.bind("<Double-1>", lambda e: self._edit_selected())
 
-    def _selected_row_id(self):
+    def _selected_index(self):
         sel = self.tree.selection()
         return int(sel[0]) if sel else None
 
-    def _find_row(self, row_id):
-        return next((r for r in self.rows if r["_id"] == row_id), None)
-
-    def _selected_row_id_or_warn(self):
-        row_id = self._selected_row_id()
-        if row_id is None:
+    def _selected_index_or_warn(self):
+        index = self._selected_index()
+        if index is None:
             messagebox.showinfo("Chưa chọn dòng", "Hãy chọn một dòng trong bảng trước.")
-        return row_id
+        return index
 
     def _edit_selected(self):
-        row_id = self._selected_row_id_or_warn()
-        if row_id is not None:
-            self.editor.load_row(self._find_row(row_id))
+        index = self._selected_index_or_warn()
+        if index is not None:
+            self.editor.load_row(self.data_base[index], index)
 
     def _delete_selected(self):
-        row_id = self._selected_row_id_or_warn()
-        if row_id is None:
+        index = self._selected_index_or_warn()
+        if index is None:
             return
-        self.rows = [r for r in self.rows if r["_id"] != row_id]
-        if self.editor.editing_id == row_id:
+        remove_record(self.data_base, index)
+        if self.editor.editing_index == index:
             self.editor.load_new()
         self._refresh_table()
 
-    def _on_editor_save(self, row_dict: dict, editing_id):
-        if editing_id is None:
-            self._on_row_added(row_dict)
-        else:
-            self._on_row_edited(editing_id, row_dict)
-
-    def _on_row_added(self, row: dict):
-        row["_id"] = self._next_id
-        self._next_id += 1
-        self.rows.append(row)
+    def _on_editor_save(self, record: dict, editing_index):
+        try:
+            if editing_index is None:
+                add_record(self.data_base, **record)
+            else:
+                edit_record(self.data_base, editing_index, **record)
+        except ValueError as e:
+            messagebox.showerror("Không lưu được dòng", str(e))
+            return
         self._refresh_table()
-
-    def _on_row_edited(self, row_id, new_row: dict):
-        new_row["_id"] = row_id
-        self.rows = [new_row if r["_id"] == row_id else r for r in self.rows]
-        self._refresh_table()
+        self.editor.load_new()
 
     def _refresh_table(self):
-        self.rows.sort(key=lambda r: (r["start"], FIELD_LABELS[r["field"]]))
+        # KHÔNG sắp xếp lại - đúng thứ tự thêm vào self.data_base, iid = index
+        # hiện tại của dòng đó (luôn khớp vì bảng được dựng lại toàn bộ mỗi lần).
         self.tree.delete(*self.tree.get_children())
-        for r in self.rows:
-            time_str = f"{r['start']:02d}-{r['end']:02d}"
-            self.tree.insert("", "end", iid=str(r["_id"]),
-                              values=(time_str, FIELD_LABELS[r["field"]], row_value_str(r)))
+        for i, r in enumerate(self.data_base):
+            time_str = f"{r['start_hour']:02d}-{r['end_hour']:02d}"
+            value_str = bucket_label(r["data_name"], r["bucket_selected"])
+            self.tree.insert("", "end", iid=str(i),
+                              values=(time_str, FIELD_LABELS[r["data_name"]], value_str))
 
     def _import_from_file(self):
+        """Replaces the whole table - the imported file must validate
+        strictly (raises on the first bad row) before anything is applied,
+        so a rejected import leaves the current table untouched."""
         path = filedialog.askopenfilename(
             title="Nhập CSV dự báo",
             filetypes=[("CSV files", "*.csv"), ("All files", "*.*")])
         if not path:
             return
         try:
-            with open(path, encoding="utf-8-sig", newline="") as f:
-                records = list(csv.DictReader(f))
-            meta, imported_rows, warnings = import_csv_rows(records)
+            imported = import_csv(path)
         except (ValueError, OSError) as e:
             messagebox.showerror("Không nhập được CSV", str(e))
             return
 
-        if self.rows and not messagebox.askyesno(
+        if self.data_base and not messagebox.askyesno(
                 "Ghi đè dữ liệu hiện tại?",
-                f"Bảng hiện có {len(self.rows)} dòng. Nhập CSV sẽ THAY THẾ toàn bộ. Tiếp tục?"):
+                f"Bảng hiện có {len(self.data_base)} dòng. Nhập CSV sẽ THAY THẾ toàn bộ. Tiếp tục?"):
             return
 
-        self.station_code.delete(0, "end")
-        self.station_code.insert(0, meta["station_code"])
-        self.station_name.delete(0, "end")
-        self.station_name.insert(0, meta["station_name"])
-        self.forecast_date.delete(0, "end")
-        self.forecast_date.insert(0, meta["date"])
-
-        self.rows = []
-        self._next_id = 1
-        for r in imported_rows:
-            r["_id"] = self._next_id
-            self._next_id += 1
-            self.rows.append(r)
+        self.data_base[:] = imported
         self._refresh_table()
+        messagebox.showinfo("Đã nhập CSV", f"Đã nhập {len(imported)} dòng từ:\n{path}")
 
-        msg = f"Đã nhập {len(imported_rows)} dòng từ:\n{path}"
-        if warnings:
-            shown = warnings[:20]
-            msg += f"\n\n{len(warnings)} cảnh báo (đã bỏ qua ô lỗi):\n" + "\n".join(shown)
-            if len(warnings) > len(shown):
-                msg += f"\n... và {len(warnings) - len(shown)} cảnh báo khác."
-        messagebox.showinfo("Đã nhập CSV", msg)
-
-    # ----- output: generate csv rows / copy / save -----------------------
+    # ----- output: xuất CSV / chép -----------------------------------
     def _build_output_section(self, parent):
-        box = ttk.LabelFrame(parent, text="CSV dự báo sinh ra (gộp các dòng theo mốc giờ thay đổi)", padding=8)
+        box = ttk.LabelFrame(parent, text="Xuất CSV (gộp các dòng theo mốc giờ thay đổi)", padding=8)
         box.pack(fill="both", expand=False)
 
         btns = ttk.Frame(box)
         btns.pack(fill="x")
-        ttk.Button(btns, text="Sinh CSV theo giờ", command=self._generate_all).pack(side="left")
+        ttk.Button(btns, text="Xuất CSV...", command=self._export_to_file).pack(side="left")
         ttk.Button(btns, text="Chép tất cả", command=self._copy_all).pack(side="left", padx=(6, 0))
-        ttk.Button(btns, text="Lưu vào file...", command=self._save_to_file).pack(side="left", padx=(6, 0))
 
         self.summary_label = ttk.Label(box, foreground="#374151")
         self.summary_label.pack(anchor="w", pady=(6, 0))
@@ -453,77 +363,40 @@ class App:
         self.preview_text.pack(fill="both", expand=True, pady=(4, 0))
         self.preview_text.config(state="disabled")
 
-    def _meta(self):
-        return {
-            "station_code": self.station_code.get().strip(),
-            "station_name": self.station_name.get().strip(),
-            "date": self.forecast_date.get().strip(),
-        }
-
-    def _generate_all(self):
-        if not self.rows:
+    def _export_to_file(self):
+        """Writes straight to the chosen path - no separate preview step;
+        the rows shown afterwards are read-only confirmation of what was
+        written, not a proposal to approve."""
+        if not self.data_base:
             messagebox.showinfo("Chưa có dòng", "Hãy thêm ít nhất một dòng trong bảng.")
             return
-        meta = self._meta()
-
-        rows, all_missing = [], []
-        for h in covered_hours(self.rows):
-            state = merge_at_hour(self.rows, h)
-            row, missing = csv_row_for_hour(state, meta, h)
-            rows.append(row)
-            if missing:
-                missing_labels = ", ".join(FIELD_LABELS[k] for k in missing)
-                all_missing.append(f"{h:02d}h: thiếu {missing_labels}")
-
-        self._last_rows = rows
-        buf = io.StringIO()
-        writer = csv.DictWriter(buf, fieldnames=CSV_FIELDNAMES)
-        writer.writeheader()
-        writer.writerows(rows)
-
-        self.preview_text.config(state="normal")
-        self.preview_text.delete("1.0", "end")
-        self.preview_text.insert("1.0", buf.getvalue())
-        self.preview_text.config(state="disabled")
-
-        self.summary_label.config(
-            text=f"Đã sinh {len(rows)} dòng (giờ {rows[0]['hour']}-{rows[-1]['hour']}). "
-                 f"{len(all_missing)} giờ còn thiếu ít nhất 1 trường.")
-        if all_missing:
-            messagebox.showwarning("Một số giờ còn thiếu trường", "\n".join(all_missing))
-
-    def _copy_all(self):
-        if not self._last_rows:
-            messagebox.showwarning("Chưa có CSV", "Hãy bấm 'Sinh CSV theo giờ' trước.")
-            return
-        buf = io.StringIO()
-        writer = csv.DictWriter(buf, fieldnames=CSV_FIELDNAMES)
-        writer.writeheader()
-        writer.writerows(self._last_rows)
-        self.root.clipboard_clear()
-        self.root.clipboard_append(buf.getvalue())
-
-    def _save_to_file(self):
-        if not self._last_rows:
-            messagebox.showwarning("Chưa có CSV", "Hãy bấm 'Sinh CSV theo giờ' trước.")
-            return
         path = filedialog.asksaveasfilename(
-            title="Lưu vào file CSV dự báo",
+            title="Xuất file CSV dự báo",
             defaultextension=".csv",
             filetypes=[("CSV files", "*.csv"), ("All files", "*.*")])
         if not path:
             return
-        # Cùng quy ước với csv_pipeline.write_csv(): utf-8-sig + DictWriter.
-        # Nối vào file đã có (không ghi lại header) để gộp nhiều phiên làm
-        # việc thành 1 file forecasts.csv dần lớn dần, giống cách
-        # bulletin_generator.py append vào file .txt.
-        file_exists = os.path.isfile(path) and os.path.getsize(path) > 0
-        with open(path, "a" if file_exists else "w", newline="", encoding="utf-8-sig") as f:
-            writer = csv.DictWriter(f, fieldnames=CSV_FIELDNAMES)
-            if not file_exists:
-                writer.writeheader()
-            writer.writerows(self._last_rows)
-        messagebox.showinfo("Đã lưu", f"Đã thêm {len(self._last_rows)} dòng vào:\n{path}")
+
+        result = export_csv(self.data_base, path)
+        with open(path, encoding="utf-8-sig") as f:
+            self._last_csv_text = f.read()
+        self._last_result = result
+
+        self.preview_text.config(state="normal")
+        self.preview_text.delete("1.0", "end")
+        self.preview_text.insert("1.0", self._last_csv_text)
+        self.preview_text.config(state="disabled")
+
+        self.summary_label.config(
+            text=f"Đã xuất {len(result)} dòng (giờ {result[0]['hour']:02d}-{result[-1]['hour']:02d}) vào:\n{path}")
+        messagebox.showinfo("Đã xuất CSV", f"Đã ghi {len(result)} dòng vào:\n{path}")
+
+    def _copy_all(self):
+        if not self._last_csv_text:
+            messagebox.showwarning("Chưa có CSV", "Hãy bấm 'Xuất CSV...' trước.")
+            return
+        self.root.clipboard_clear()
+        self.root.clipboard_append(self._last_csv_text)
 
 
 if __name__ == "__main__":

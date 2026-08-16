@@ -246,7 +246,7 @@ class AdvancedDialog:
                 app.auto_job = None
             app.auto_next_run = None
         else:
-            app._schedule_auto_tick()   # resume per the settings already in config/mã nguồn
+            app._schedule_auto_tick()   # resume using the already-configured interval
         self.refresh_controls_state()
         app._refresh_info_panel()
 

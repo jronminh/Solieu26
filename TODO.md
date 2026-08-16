@@ -31,8 +31,20 @@ ngắn gọn để không phải lục `git log` mỗi lần cần nhớ lại �
 `buckets.py` là bảng bucket + engine chấm điểm (dự báo so với quan trắc) cho 6
 trường: tổng lượng mây, độ cao màn mây (trần), hiện tượng, hướng gió, tốc độ
 gió, tầm nhìn. Đây là chương trình con tách biệt với phần decode/encode/
-pipeline hiện có của Solieu26 — `buckets.py` chưa được import ở đâu khác trong
-repo. Việc cần làm trước khi dùng thật:
+pipeline hiện có của Solieu26. Việc cần làm trước khi dùng thật:
+
+> **Cập nhật 2026-08-17**: `buckets.py` đã tách làm 2 file — `score_tables.py`
+> (đổi tên từ `buckets.py`, chỉ còn `BUCKETS`/`NO_CEILING`, dữ liệu thuần) và
+> `scorer.py` (toàn bộ bộ máy chấm: `bucket_of`/`is_hit_window`/
+> `is_hit_scalar`/`score_field`/`score_wind`/`score_phenomenon`/`mega_of`/
+> `sub_of_hour`/`solve_ceiling`, `import score_tables`). Các mục CŨ bên dưới
+> còn nhắc `buckets.py` là nói về code trước khi tách — đọc tương ứng là
+> `score_tables.py`/`scorer.py`, không sửa lại nguyên văn để giữ đúng bối
+> cảnh lúc quyết định. Cũng đã có `forecast_bucket_logic.py`/
+> `forecast_bucket_generator.py` (micro-database `{start_hour, end_hour,
+> data_name, bucket_selected}` + GUI nhập dự báo — xem mục "Dự báo" giai đoạn
+> 2 bên dưới) import `score_tables.py`, nên câu "chưa được import ở đâu khác
+> trong repo" không còn đúng.
 
 ### Pipeline chấm điểm dự kiến — 6 giai đoạn, cấu thành còn thiếu
 

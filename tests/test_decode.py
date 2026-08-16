@@ -95,7 +95,7 @@ def test_hshs_value_ranges():
 # =============================================================================
 
 def test_decode_head():
-    """'VV_km' is VV coerced to a float km — added for buckets.py's tam_nhin
+    """'VV_km' is VV coerced to a float km — added for score_tables.py's tam_nhin
     field, alongside (not replacing) the existing display string 'VV'."""
     assert decode_head("k3158", TABLES) == {"iii": "k31", "VV": "8", "VV_km": 8.0}
     assert decode_head(None, TABLES) is None
@@ -104,7 +104,7 @@ def test_decode_head():
 
 def test_decode_wind():
     """'wind_N_num' is the N_oktas value coerced to an int — added for
-    buckets.py's tong_luong_may field, alongside the existing display string
+    score_tables.py's tong_luong_may field, alongside the existing display string
     'wind_N'."""
     assert decode_wind("60000", TABLES) == {
         "wind_N": "8", "wind_N_num": 8, "wind_dd": 0, "wind_ff": 0,
@@ -124,7 +124,7 @@ def test_decode_wind_bad_digits_keeps_N():
 
 def test_decode_wind_obscured_sky_keeps_slash_sentinel():
     """N_oktas code '9' maps to '/' (obscured sky) — wind_N_num must pass it
-    through unchanged (not None), since buckets.py's tong_luong_may treats
+    through unchanged (not None), since score_tables.py's tong_luong_may treats
     '/' as its own distinct na-sentinel, not "missing data"."""
     decoded = decode_wind("90000", TABLES)
     assert decoded["wind_N"] == "/"
@@ -212,7 +212,7 @@ def test_decode_record_name_only_station():
 
 def test_decode_indicators_ignores_unknown_groups():
     """Group codes other than 1/2/7/8/A (e.g. '9' supplementary data) must be
-    silently ignored, not raise — see the TODO note in decode.py."""
+    silently ignored, not raise — see TODO.md for the pending indicators."""
     record = "k3158 60000 90000 7453 tYên Bái  k31214410453"
     decoded = decode_record(record)
     assert decoded["temperature"] is None

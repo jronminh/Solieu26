@@ -1,33 +1,21 @@
 """
 bulletin_generator.py
 ====================
-Standalone Tkinter tool that generates synthetic raw "Qt..." bulletin records
-— the reverse of decode.py — for testing decode.py/csv_pipeline.py without
-needing a real FTP download.
+Standalone Tkinter tool that generates synthetic raw "Qt..." bulletin
+records — the reverse of decode.py — for testing without needing a real
+FTP download.
 
 The backbone is a table of Thời gian / Trường dữ liệu / Giá trị: each row
 says "field F holds value V from giờ START to giờ END, both included" for
-the (single, fixed) station entered at the top — e.g. "07–09 / Tốc độ gió /
-5", "09–11 / Tốc độ gió / 7", "07–10 / Nhiệt độ / 28.5". Rows can be added,
-edited (double-click, or "Sửa dòng") and deleted freely, one field at a time,
-each with its own time range. Editing happens in the "Thêm / sửa dòng" panel
-docked on the right — always visible, not a popup — which "+ Thêm dòng"
-resets to add-mode and "Sửa dòng"/double-click switches to edit-mode for the
-selected row.
+the (single, fixed) station entered at the top. Rows can be added, edited
+(double-click, or "Sửa dòng") and deleted freely. Editing happens in the
+"Thêm / sửa dòng" panel docked on the right — always visible, not a popup.
 
-"Sinh tất cả mã" is where the rows get merged: for every HOUR any row's
-range touches (a "07–09" row covers hours 07, 08 AND 09 — the format is
-inherently hourly, one record per hour), it merges whichever rows currently
-cover that hour — one value per field, last-started row wins on overlap —
-into a single encode.encode_record() call. So the wind example above (07–09
-=5, 09–11 =7 — both covering hour 09, the later-starting row wins there)
-produces five codes, at 07h/08h/09h/10h/11h. Each result is
-immediately decode.decode_record()-checked for a live sanity
-preview, and "Lưu vào file..." appends every generated record (';'-terminated)
-to a .txt file in the same shape decode.get_qt_data() reads — so you can
-point gui.py's output folder at it, or feed it straight into
-decode.decode_qt_file, to sanity-check the whole pipeline against a
-hand-built time series.
+"Sinh tất cả mã" merges the rows into one record per hour (see
+_covered_hours/_merge_at_hour for the merge rule) and decodes each one back
+for a live sanity preview. "Lưu vào file..." appends the generated records
+to a .txt file, so you can feed it into the same decode pipeline used for
+real downloads to sanity-check against a hand-built time series.
 
 Standalone — does not import gui.py/csv_pipeline.py/config.py, does not touch FTP
 or the app's config. Run:  python bulletin_generator.py
@@ -589,7 +577,7 @@ class App:
             filetypes=[("Text files", "*.txt"), ("All files", "*.*")])
         if not path:
             return
-        # ';'-terminated so decode.get_qt_data() (data.split(';')[:-1]) reads it back.
+        # ';'-terminated to match the format the decoder expects when reading it back.
         with open(path, "a", encoding="utf-8") as f:
             for raw in self._last_lines:
                 f.write(raw + ";")

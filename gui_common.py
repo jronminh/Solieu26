@@ -1,10 +1,10 @@
 """
 gui_common.py
 ====================
-Constants + small OS-integration helpers shared by gui.py, history_viewer.py
-and dialogs.py. No Tkinter App state lives here (only the stdlib `tkinter`
-messagebox, used by report_open) — keeps this module import-safe from all
-three without any risk of a circular import.
+Constants + small OS-integration helpers shared across the GUI modules. No
+Tkinter App state lives here (only the stdlib `tkinter` messagebox, used by
+report_open) — keeps this module import-safe from all of them without any
+risk of a circular import.
 """
 
 import os
@@ -15,7 +15,7 @@ from tkinter import messagebox
 
 
 # =============================================================================
-# LOG COLORS (Tkinter Text tags — see csv_pipeline.py for the shared level format)
+# LOG COLORS — Tkinter Text tag color per log level (INFO/OK/SKIP/MISS/WARN/ERR/ACT)
 # =============================================================================
 
 LOG_COLORS = {
@@ -59,9 +59,9 @@ ALL_STATIONS = "Tất cả các trạm"   # station-filter dropdown option that 
 HOURS = [f"{h:02d}" for h in range(24)]
 ALL_HOURS = "Tất cả các giờ"   # hour-filter dropdown option that disables filtering
 
-# Matches csv_pipeline.export_history_by_date()'s output filenames — one CSV per day.
+# Matches the per-day history CSV filenames this app writes (one file per day).
 # The viewer's Ngày dropdown lists dates found this way and picks which file to
-# load, rather than filtering rows within a single (now nonexistent) history.csv.
+# load, rather than filtering rows within a single file.
 HISTORY_CSV_RE = re.compile(r"^history_(\d{8})\.csv$")
 
 

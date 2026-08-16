@@ -5,12 +5,11 @@ Pure decoding layer: turn one raw "Qt..." bulletin record (a string) into a
 nested dict, and one downloaded bulletin file into a list of such dicts.
 
 No file I/O beyond reading the bulletin files themselves, no FTP, no config —
-csv_pipeline.py's export step (flatten_record) is what turns this module's
-output into CSV rows.
+this module only decodes; turning its output into CSV rows happens elsewhere.
 
-Lookup tables (code -> human-readable value) live in tables.py, not here —
-that lets encode.py (the reverse, used by bulletin_generator.py) share the
-same tables without importing this whole module.
+Lookup tables (code -> human-readable value) live in a separate module, not
+here, so the reverse (encoding) direction can share them without importing
+this whole module.
 """
 
 from tables import TABLES
@@ -70,8 +69,8 @@ def _temp_value(token: str):
 
 
 def hshs_value(code: str, tables: dict):
-    """Public: also used by bulletin_generator.py for a live height preview
-    while the user types a cloud-base code."""
+    """Public: also used elsewhere for a live height preview while the user
+    types a cloud-base code."""
     try:
         h = int(code)
     except ValueError:
@@ -84,8 +83,8 @@ def hshs_value(code: str, tables: dict):
 
 
 def vv_value(vv_code: str, tables: dict):
-    """Public: also used by bulletin_generator.py for a live visibility
-    preview while the user types a VV code."""
+    """Public: also used elsewhere for a live visibility preview while the
+    user types a VV code."""
     if len(vv_code) < 2:
         return None
     try:
@@ -104,11 +103,10 @@ def vv_value(vv_code: str, tables: dict):
 
 
 def _vv_km(vv: str):
-    """Coerce vv_value()'s display string (e.g. '3.0', '8') into a float km —
-    buckets.py's tam_nhin field needs a number, not a string. Kept separate
-    from vv_value() itself (rather than changing its return type) since
-    vv_value() is also used by bulletin_generator.py for a live text preview;
-    changing its type there would be a behavior change on unrelated UI."""
+    """Coerce vv_value()'s display string (e.g. '3.0', '8') into a float km.
+    Kept separate from vv_value() itself since that function also feeds a
+    live UI preview, where changing the return type would be a visible
+    regression."""
     if vv is None:
         return None
     try:
@@ -119,13 +117,9 @@ def _vv_km(vv: str):
 
 def _oktas_number(coded: str):
     """Coerce an N_oktas-table value (e.g. '10', '8', or the obscured-sky
-    sentinel '/') into an int 0-10 — buckets.py's tong_luong_may field needs a
-    number, not a string. '/' is passed through unchanged: it's already the
-    exact sentinel buckets.py's "na" list checks for, so bucket_of()/
-    is_hit_window() can bỏ cặp on it same as before. Kept separate from
-    decode_wind()/decode_cloud()'s existing 'wind_N'/'cloud_Ns' string (rather
-    than changing their type) since those feed bulletin_generator.py's live
-    preview text too."""
+    sentinel '/') into an int 0-10, passing '/' through unchanged as a
+    not-applicable sentinel. Kept separate from decode_wind()/decode_cloud()'s
+    existing string fields since those also feed a live UI preview."""
     if coded is None or coded == "/":
         return coded
     try:
@@ -238,10 +232,10 @@ DISPATCH = {'1': h_temp, '2': h_dew, '7': h_weather, '8': h_cloud, 'A': h_storm}
 
 
 def decode_indicators(indicators: list, tables: dict) -> dict:
-    """Only dispatches indicator groups flatten_record() (csv_pipeline.py) actually
-    turns into CSV columns (temperature/dewpoint/weather/cloud/storm) — any
-    other group code (e.g. '9'/'5' supplementary/pressure-tendency sections)
-    is ignored, since nothing downstream reads it."""
+    """Only dispatches indicator groups that end up as CSV columns
+    (temperature/dewpoint/weather/cloud/storm) — other group codes (e.g.
+    '9'/'5' supplementary/pressure-tendency sections) are ignored, since
+    nothing downstream reads them. See TODO.md for the pending indicators."""
     out = {"temperature": None, "dewpoint": None, "weather": None, "storm": None}
     for t in indicators:
         if not t:

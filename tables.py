@@ -1,12 +1,11 @@
 """
 tables.py
 ====================
-Lookup tables shared by decode.py (decoding) and encode.py (the reverse,
-used by bulletin_generator.py) — the single source of truth for every
-code -> human-readable-value mapping in the "Qt..." bulletin format. Kept in
-its own module (rather than living in decode.py) so encode.py doesn't have
-to import decode.py just to reach the tables, and so the two stay in sync
-by construction.
+Lookup tables shared by decode.py (decoding) and encode.py (the reverse) —
+the single source of truth for every code -> human-readable-value mapping
+in the "Qt..." bulletin format. Kept in its own module (rather than living
+in decode.py) so encode.py doesn't have to import decode.py just to reach
+the tables, and so the two stay in sync by construction.
 
 No logic here — just data.
 """

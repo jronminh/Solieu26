@@ -1,39 +1,84 @@
 """
 forecast_bucket_logic.py
 ====================
-Pure logic behind forecast_bucket_generator.py's Tkinter GUI - no tkinter
-import anywhere in this file. Everything here is plain data + functions over
-dicts/lists: the 6-field bucket registry (labels, defaults, valid ranges),
-the hour-range row model (covered_hours/merge_at_hour), the per-hour CSV
-shape (csv_row_for_hour), and CSV import (collapse_to_ranges/import_csv_rows).
-
-Split out on purpose so this can be imported repeatedly wherever the scoring
-pipeline in TODO.md ("Nối buckets.py vào pipeline") needs it next - a
-headless script, a future pipeline module, tests - without dragging a
-tkinter dependency along for the ride. forecast_bucket_generator.py imports
-this module for all of its non-widget logic; it does not duplicate any of it.
-
-Only depends on buckets.py.
+Micro-database cho các bản ghi dự báo đã chọn bucket: CRUD trong bộ nhớ
+(add/remove/edit_record), import/export CSV, và tra nhãn hiển thị cho từng
+bucket theo cấu hình BUCKETS.
 """
 
-from buckets import BUCKETS, sub_of_hour
+import csv
 
-INF = float("inf")
+from score_tables import BUCKETS
+
+# Micro-database: TOÀN BỘ chương trình chỉ có 1 danh sách bản ghi dự báo,
+# mỗi bản ghi là 1 dict với đúng 4 khóa:
+#   start_hour       : giờ bắt đầu áp dụng (int, 0-23)
+#   end_hour         : giờ kết thúc áp dụng, gồm cả giờ này (int, 0-23)
+#   data_name        : tên trường dữ liệu (vd "tong_luong_may", "huong_gio")
+#   bucket_selected  : giá trị bucket đã chọn cho trường đó
+forecast_db: list = []
 
 
-# =============================================================================
-# Nhãn bucket - suy từ chính BUCKETS (không hardcode) để luôn khớp chỉ số
-# với bucket_of()/score_field() bên buckets.py.
-# =============================================================================
+def export_csv(data_base: list, path: str) -> list:
+    """
+    data_base: micro-database (list các dict {start_hour, end_hour, data_name,
+    bucket_selected}, giống forecast_db).
+
+    Tìm giờ nhỏ nhất trong mọi start_hour và giờ lớn nhất trong mọi end_hour,
+    sinh ra từng đó phần tử - một phần tử / giờ - đã điền số liệu ứng với
+    giờ đó (2 bản ghi cùng data_name chồng giờ nhau -> bản ghi có start_hour
+    muộn hơn thắng), rồi GHI THẲNG ra file CSV tại `path` (utf-8-sig +
+    csv.DictWriter).
+
+    Mỗi phần tử của result (và mỗi dòng CSV) là 1 dict
+    {"hour": <giờ>, <data_name>: <NHÃN ĐỌC ĐƯỢC>, ...} - giá trị là
+    bucket_label(data_name, bucket_selected), KHÔNG phải bucket_selected
+    thô, để CSV xuất ra đã sẵn nhãn dễ đọc. Chỉ những data_name có bản ghi
+    phủ giờ đó mới có giá trị, còn lại để trống. Cột CSV lấy đúng THỨ TỰ
+    khai báo trong BUCKETS (không phải thứ tự xuất hiện trong data_base)
+    cho những data_name THỰC SỰ có mặt.
+
+    data_base rỗng -> không ghi file, trả về [].
+    Trả về result để dùng tiếp nếu cần (vd hiển thị preview) mà không phải
+    đọc lại file vừa ghi.
+    """
+    if not data_base:
+        return []
+
+    min_hour = min(r["start_hour"] for r in data_base)
+    max_hour = max(r["end_hour"] for r in data_base)
+    records_by_start = sorted(data_base, key=lambda r: r["start_hour"])
+
+    result = []
+    for hour in range(min_hour, max_hour + 1):
+        row = {"hour": hour}
+        for r in records_by_start:
+            if r["start_hour"] <= hour <= r["end_hour"]:
+                row[r["data_name"]] = bucket_label(r["data_name"], r["bucket_selected"])
+        result.append(row)
+
+    present_fields = {r["data_name"] for r in data_base}
+    fieldnames = ["hour"] + [k for k in BUCKETS.keys() if k in present_fields]
+
+    with open(path, "w", newline="", encoding="utf-8-sig") as f:
+        writer = csv.DictWriter(f, fieldnames=fieldnames, restval="")
+        writer.writeheader()
+        writer.writerows(result)
+
+    return result
+
 
 def window_labels(field: str) -> list:
+    """Nhãn cửa sổ (kind="forecast_window"), chỉ số list = bucket_selected."""
     labels = []
     for lo, hi in BUCKETS[field]["windows"]:
-        labels.append(f"{lo}+ tro len" if hi == INF else f"{lo}-{hi}")
+        labels.append(f"{lo}+ trở lên" if hi == float("inf") else f"{lo}-{hi}")
     return labels
 
 
 def linear_labels(field: str) -> list:
+    """Nhãn bucket (kind="linear"), chỉ số list = bucket_selected. "Không
+    màn" (nếu trường có no_ceiling) là bucket cuối, chỉ số cao nhất."""
     spec = BUCKETS[field]
     bounds = spec["bounds"]
     labels = [f"<{bounds[0]}"]
@@ -44,15 +89,18 @@ def linear_labels(field: str) -> list:
     return labels
 
 
-def valid_index_count(field: str) -> int:
+def _valid_index_count(field: str) -> int:
+    """Số chỉ số bucket hợp lệ (0..n-1) cho 1 trường theo đúng khai báo
+    trong BUCKETS - KHÔNG áp cho kind="phenomenon" (hien_tuong dùng
+    mega_buckets)."""
     kind = BUCKETS[field]["kind"]
     if kind == "forecast_window":
-        return len(BUCKETS[field]["windows"])
+        return len(window_labels(field))
     if kind == "linear":
         return len(linear_labels(field))
     if kind == "circular":
         return BUCKETS[field]["n"]
-    raise ValueError(f"valid_index_count không áp cho kind={kind!r}")
+    raise ValueError(f"_valid_index_count không áp cho kind={kind!r}")
 
 
 HUONG_GIO_LABELS = BUCKETS["huong_gio"]["labels"]
@@ -61,9 +109,9 @@ PHENOMENON_MEGA_LABEL_TEXT = [BUCKETS["hien_tuong"]["mega_labels"][k] for k in P
 
 
 # =============================================================================
-# FIELD REGISTRY - dữ liệu thuần cho 6 trường được chấm (nhãn + bucket mặc
-# định khi thêm dòng mới). forecast_bucket_generator.py tự ghép thêm 1
-# widget-builder GUI cho mỗi field_key - KHÔNG đặt builder ở đây.
+# Metadata hiển thị cho 6 trường - BUCKETS có nhãn cho GIÁ TRỊ bên trong mỗi
+# trường (mega_labels, sub_labels...) nhưng không có nhãn cho chính TÊN
+# trường, nên FIELD_LABELS khai báo riêng ở đây.
 # =============================================================================
 
 FIELD_ORDER = ["tong_luong_may", "do_cao_man_may", "hien_tuong",
@@ -95,191 +143,139 @@ def field_key_from_label(label: str):
     return None
 
 
-def row_value_str(row: dict) -> str:
-    key, v = row["field"], row["value"]
-    if key == "hien_tuong":
-        spec = BUCKETS["hien_tuong"]
-        buoi_seen = []
-        for h in range(row["start"], row["end"] + 1):
-            b = sub_of_hour(h)
-            if b is not None and b not in buoi_seen:
-                buoi_seen.append(b)
-        buoi_str = ", ".join(spec["sub_labels"][b] for b in buoi_seen)
-        return f"{spec['mega_labels'][v]} (buổi: {buoi_str})"
-    kind = BUCKETS[key]["kind"]
+def bucket_label(data_name: str, bucket_selected) -> str:
+    """Nhãn đọc được của 1 bucket_selected, đúng theo kind của data_name -
+    dùng để hiển thị (vd trong Treeview), không dùng để so sánh/lưu trữ."""
+    kind = BUCKETS[data_name]["kind"]
+    if kind == "phenomenon":
+        return BUCKETS[data_name]["mega_labels"][bucket_selected]
     if kind == "forecast_window":
-        return window_labels(key)[v]
+        return window_labels(data_name)[bucket_selected]
     if kind == "linear":
-        return linear_labels(key)[v]
+        return linear_labels(data_name)[bucket_selected]
     if kind == "circular":
-        return BUCKETS[key]["labels"][v]
-    return str(v)
+        return BUCKETS[data_name]["labels"][bucket_selected]
+    raise ValueError(f"bucket_label không áp cho kind={kind!r}")
 
 
-# =============================================================================
-# Gộp theo giờ (thuần) - dùng cả khi sinh CSV lẫn (gián tiếp) khi nhập CSV.
-# =============================================================================
+def _validate_record(record: dict, context: str = "") -> None:
+    """Kiểm tra 1 bản ghi {start_hour, end_hour, data_name, bucket_selected}
+    đúng định dạng khai báo trong BUCKETS. Raise ValueError nếu sai (chỉ
+    kiểm tra, không sửa/trả về gì) - dùng chung cho import_csv/add_record/
+    edit_record để cả 3 lối ghi vào database đều tuân cùng 1 luật.
+    `context`: tiền tố cho thông báo lỗi (vd "Dòng 5: ")."""
+    data_name = record.get("data_name")
+    if data_name not in BUCKETS:
+        raise ValueError(
+            f"{context}data_name '{data_name}' không hợp lệ "
+            f"(hợp lệ: {', '.join(BUCKETS.keys())})")
 
-def covered_hours(rows: list) -> list:
-    """Every hour any row's [start, end] range touches (both ends included) -
-    same rule as bulletin_generator.py's _covered_hours: a "07-09" row
-    covers hours 07, 08 AND 09, each getting its own csv row."""
-    hours = set()
-    for r in rows:
-        hours.update(range(r["start"], r["end"] + 1))
-    return sorted(hours)
+    start_hour, end_hour = record.get("start_hour"), record.get("end_hour")
+    if not (isinstance(start_hour, int) and isinstance(end_hour, int)) or \
+            isinstance(start_hour, bool) or isinstance(end_hour, bool):
+        raise ValueError(f"{context}start_hour/end_hour phải là số nguyên")
+    if not (0 <= start_hour <= 23 and 0 <= end_hour <= 23):
+        raise ValueError(f"{context}start_hour/end_hour phải trong khoảng 0-23")
+    if end_hour < start_hour:
+        raise ValueError(f"{context}end_hour phải >= start_hour")
 
-
-def merge_at_hour(rows: list, hour: int) -> dict:
-    """One bucket per field: among rows covering `hour`, the one with the
-    latest start wins (same rule as bulletin_generator.py's _merge_at_hour)."""
-    state = {}
-    for r in sorted(rows, key=lambda r: r["start"]):
-        if r["start"] <= hour <= r["end"]:
-            state[r["field"]] = r["value"]
-    return state
-
-
-# =============================================================================
-# CSV shape - một cột máy (dùng thẳng cho score_field/score_wind/
-# score_phenomenon) + một cột nhãn đọc được, cho từng trường.
-# =============================================================================
-
-def field_columns(key: str) -> list:
-    if key == "hien_tuong":
-        return ["hien_tuong_mega", "hien_tuong_mega_label",
-                "hien_tuong_buoi", "hien_tuong_buoi_label"]
-    return [f"{key}_bucket_idx", f"{key}_bucket_label"]
-
-
-def field_row_values(key: str, value) -> dict:
-    """Cho 5 trường bucket-đơn (không dùng cho hien_tuong - buổi của nó phụ
-    thuộc GIỜ, xem hien_tuong_row_values)."""
-    cols = field_columns(key)
-    if value is None:
-        return {c: "" for c in cols}
-    return {f"{key}_bucket_idx": value, f"{key}_bucket_label": row_value_str({"field": key, "value": value})}
+    bucket_selected = record.get("bucket_selected")
+    if BUCKETS[data_name]["kind"] == "phenomenon":
+        mega_buckets = BUCKETS[data_name]["mega_buckets"]
+        if bucket_selected not in mega_buckets:
+            raise ValueError(
+                f"{context}bucket_selected '{bucket_selected}' không phải mega hợp lệ "
+                f"của {data_name} (hợp lệ: {', '.join(mega_buckets)})")
+    else:
+        if not isinstance(bucket_selected, int) or isinstance(bucket_selected, bool):
+            raise ValueError(
+                f"{context}bucket_selected '{bucket_selected}' phải là số nguyên cho {data_name}")
+        n = _valid_index_count(data_name)
+        if not (0 <= bucket_selected < n):
+            raise ValueError(
+                f"{context}bucket_selected {bucket_selected} ngoài phạm vi cho {data_name} "
+                f"(hợp lệ: 0..{n - 1})")
 
 
-def hien_tuong_row_values(mega: str, hour: int) -> dict:
-    """Mega là lựa chọn của dự báo viên; buổi LUÔN suy từ `hour` qua
-    sub_of_hour() - không đọc từ riêng 1 lựa chọn buổi nào."""
-    if mega is None:
-        return {c: "" for c in field_columns("hien_tuong")}
-    spec = BUCKETS["hien_tuong"]
-    buoi = sub_of_hour(hour)
-    return {
-        "hien_tuong_mega": mega,
-        "hien_tuong_mega_label": spec["mega_labels"][mega],
-        "hien_tuong_buoi": buoi,
-        "hien_tuong_buoi_label": spec["sub_labels"][buoi] if buoi is not None else "",
-    }
+def import_csv(path: str) -> list:
+    """
+    Đọc 1 file CSV đúng định dạng micro-database (4 cột start_hour,end_hour,
+    data_name,bucket_selected - header đặt tên đúng 4 khóa đó) -> trả về
+    data_base: list các dict {start_hour, end_hour, data_name, bucket_selected}.
 
+    Mỗi dòng được ép kiểu (start_hour/end_hour/bucket_selected -> int, trừ
+    bucket_selected của hien_tuong là chuỗi mega) rồi kiểm tra bằng
+    _validate_record() - sai bất kỳ điểm nào thì raise ValueError NGAY (không
+    nhận một phần file, không âm thầm bỏ qua).
+    """
+    with open(path, encoding="utf-8-sig", newline="") as f:
+        rows = list(csv.DictReader(f))
 
-CSV_FIELDNAMES = ["date", "hour", "station_code", "station"]
-for _k in FIELD_ORDER:
-    CSV_FIELDNAMES += field_columns(_k)
+    data_base = []
+    for i, r in enumerate(rows, start=2):   # dòng 1 là header
+        context = f"Dòng {i}: "
+        data_name = r.get("data_name")
 
+        try:
+            start_hour = int(r["start_hour"])
+            end_hour = int(r["end_hour"])
+        except (KeyError, ValueError, TypeError):
+            raise ValueError(f"{context}start_hour/end_hour phải là số nguyên")
 
-def csv_row_for_hour(state: dict, meta: dict, hour: int):
-    """-> (row_dict, missing_field_keys)."""
-    row = {
-        "date": meta["date"],
-        "hour": f"{hour:02d}",
-        "station_code": meta["station_code"],
-        "station": meta["station_name"],
-    }
-    missing = []
-    for key in FIELD_ORDER:
-        value = state.get(key)
-        if value is None:
-            missing.append(key)
-        if key == "hien_tuong":
-            row.update(hien_tuong_row_values(value, hour))
+        raw_bucket = r.get("bucket_selected")
+        if data_name in BUCKETS and BUCKETS[data_name]["kind"] == "phenomenon":
+            bucket = raw_bucket
         else:
-            row.update(field_row_values(key, value))
-    return row, missing
-
-
-# =============================================================================
-# Nhập CSV - chiều ngược của covered_hours/merge_at_hour/csv_row_for_hour:
-# gộp lại (run-length) các giờ liên tiếp cùng giá trị của mỗi trường thành 1
-# dòng [start, end, field, value]. Vì CSV đã ở dạng "mỗi giờ 1 dòng" (đã trải
-# phẳng), kết quả không nhất thiết trùng hệt các dòng gốc đã tạo ra nó (2
-# dòng liền kề cùng giá trị sẽ gộp thành 1) - nhưng sinh lại đúng bucket cho
-# từng giờ.
-# =============================================================================
-
-def collapse_to_ranges(pairs: list) -> list:
-    """pairs: [(hour, value_or_None), ...] đã sắp theo hour tăng dần.
-    -> [(start, end, value), ...], chỉ gộp các hour LIÊN TỤC cùng value."""
-    ranges = []
-    start = val = prev_hour = None
-    for h, v in pairs:
-        if v is not None and start is not None and v == val and h == prev_hour + 1:
-            prev_hour = h
-            continue
-        if start is not None:
-            ranges.append((start, prev_hour, val))
-            start = val = prev_hour = None
-        if v is not None:
-            start, val, prev_hour = h, v, h
-    if start is not None:
-        ranges.append((start, prev_hour, val))
-    return ranges
-
-
-def import_csv_rows(records: list):
-    """records: list[dict] từ csv.DictReader. -> (meta, rows, warnings).
-    Ô nhiễm cột/giá trị bị bỏ qua (không làm hỏng cả file) và liệt kê trong
-    warnings."""
-    if not records:
-        raise ValueError("File CSV rỗng.")
-    required = {"date", "hour", "station_code", "station"}
-    missing_cols = required - set(records[0].keys())
-    if missing_cols:
-        raise ValueError(f"Thiếu cột bắt buộc: {', '.join(sorted(missing_cols))}")
-
-    records = sorted(records, key=lambda r: int(r["hour"]))
-    meta = {
-        "station_code": records[0]["station_code"],
-        "station_name": records[0]["station"],
-        "date": records[0]["date"],
-    }
-
-    warnings = []
-    rows = []
-    for key in FIELD_ORDER:
-        pairs = []
-        for r in records:
-            hour = int(r["hour"])
-            if key == "hien_tuong":
-                raw = (r.get("hien_tuong_mega") or "").strip()
-                if not raw:
-                    pairs.append((hour, None))
-                elif raw in BUCKETS["hien_tuong"]["mega_buckets"]:
-                    pairs.append((hour, raw))
-                else:
-                    warnings.append(f"{hour:02d}h: mega '{raw}' không hợp lệ cho hiện tượng - bỏ qua")
-                    pairs.append((hour, None))
-                continue
-            raw = (r.get(f"{key}_bucket_idx") or "").strip()
-            if not raw:
-                pairs.append((hour, None))
-                continue
             try:
-                idx = int(raw)
-            except ValueError:
-                warnings.append(f"{hour:02d}h: '{raw}' không phải số nguyên cho {FIELD_LABELS[key]} - bỏ qua")
-                pairs.append((hour, None))
-                continue
-            if not (0 <= idx < valid_index_count(key)):
-                warnings.append(f"{hour:02d}h: bucket #{idx} ngoài phạm vi cho {FIELD_LABELS[key]} - bỏ qua")
-                pairs.append((hour, None))
-                continue
-            pairs.append((hour, idx))
+                bucket = int(raw_bucket)
+            except (TypeError, ValueError):
+                bucket = raw_bucket   # để _validate_record báo lỗi rõ hơn "không phải số nguyên"
 
-        for start, end, val in collapse_to_ranges(pairs):
-            rows.append({"start": start, "end": end, "field": key, "value": val})
+        record = {"start_hour": start_hour, "end_hour": end_hour,
+                  "data_name": data_name, "bucket_selected": bucket}
+        _validate_record(record, context=context)
+        data_base.append(record)
+    return data_base
 
-    return meta, rows, warnings
+
+def add_record(data_base: list, start_hour: int, end_hour: int, data_name: str, bucket_selected) -> dict:
+    """Thêm 1 bản ghi mới vào CUỐI data_base (sửa list TRUYỀN VÀO trực tiếp -
+    in-place, không trả về database mới). Kiểm tra đúng định dạng BUCKETS
+    (_validate_record) TRƯỚC khi thêm - sai thì raise ValueError, không thêm
+    gì cả. Trả về bản ghi vừa thêm."""
+    record = {
+        "start_hour": start_hour,
+        "end_hour": end_hour,
+        "data_name": data_name,
+        "bucket_selected": bucket_selected,
+    }
+    _validate_record(record)
+    data_base.append(record)
+    return record
+
+
+def remove_record(data_base: list, index: int) -> dict:
+    """Xóa bản ghi tại vị trí `index` trong data_base (sửa list TRUYỀN VÀO
+    trực tiếp). Trả về bản ghi vừa xóa. Raise IndexError nếu index không hợp
+    lệ (hành vi mặc định của list.pop)."""
+    return data_base.pop(index)
+
+
+def edit_record(data_base: list, index: int, **kwargs) -> dict:
+    """Sửa bản ghi tại vị trí `index` - CHỈ ghi đè các khóa truyền vào qua
+    kwargs, vd edit_record(db, 0, bucket_selected=3) chỉ đổi bucket_selected,
+    giữ nguyên start_hour/end_hour/data_name. Raise KeyError nếu kwargs có
+    khóa lạ (không thuộc 4 khóa của bản ghi). Bản ghi SAU khi gộp kwargs
+    được kiểm tra bằng _validate_record() TRƯỚC khi áp vào data_base - sai
+    thì raise ValueError và bản ghi cũ giữ nguyên (không sửa nửa chừng).
+    Trả về bản ghi sau khi sửa."""
+    valid_keys = {"start_hour", "end_hour", "data_name", "bucket_selected"}
+    invalid_keys = set(kwargs) - valid_keys
+    if invalid_keys:
+        raise KeyError(f"Khóa không hợp lệ: {', '.join(sorted(invalid_keys))} "
+                        f"(chỉ nhận {', '.join(sorted(valid_keys))})")
+
+    updated = {**data_base[index], **kwargs}
+    _validate_record(updated)
+    data_base[index] = updated
+    return updated
