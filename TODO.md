@@ -34,6 +34,31 @@ gió, tầm nhìn. Đây là chương trình con tách biệt với phần decod
 pipeline hiện có của Solieu26 — `buckets.py` chưa được import ở đâu khác trong
 repo. Việc cần làm trước khi dùng thật:
 
+### Pipeline chấm điểm dự kiến — 6 giai đoạn, cấu thành còn thiếu
+
+Bản đồ tổng quan (chi tiết từng mục nằm trong checklist bên dưới):
+
+1. **Quan trắc** — ĐÃ CÓ phần lớn: `csv_pipeline.download_files()` →
+   `decode.decode_history()` → CSV `history_*.csv`.
+2. **Dự báo** — CHƯA CÓ GÌ. Không có UI cho dự báo viên chọn bucket ở cả 6
+   trường, không có khái niệm "dự báo" trong `gui.py`/`dialogs.py`.
+3. **Adapter quan trắc → giá trị vô hướng cho `buckets.py`** — 2/6 xong
+   (`VV_km`, `wind_N_num`), 4/6 còn thiếu: đổi tên key mây cho
+   `solve_ceiling()`, giữ mã `ww` gốc cho hiện tượng, quy đổi độ→16 hướng gió,
+   chuẩn hoá đơn vị tốc độ gió. Đây là mảng trống lớn nhất — xem checklist.
+4. **Matcher ghép cặp dự báo ↔ quan trắc** (trạm + giờ/buổi) — CHƯA CÓ. Cần
+   chốt chính sách: dự báo hiện tượng chọn theo "buổi" (khung nhiều giờ) nhưng
+   quan trắc theo giờ lẻ — lấy giờ nào đại diện?
+5. **Scorer** (`score_field`/`score_wind`/`score_phenomenon` trong
+   `buckets.py`) — ĐÃ XONG VỀ LOGIC, đã dò tay xác nhận đúng qua nhiều lần
+   chạy ngẫu nhiên (2026-08-17). Còn thiếu `tests/test_buckets.py` chính thức
+   (mới có script ad-hoc ở `/tmp`, không nằm trong repo).
+6. **Lưu trữ** `forecasts`/`observations`/`scores` khoá theo trạm+giờ — CHƯA
+   CÓ (hiện chỉ có `config.ini` + CSV xuất, không có lớp lưu trữ truy vấn
+   qua lại được).
+
+Việc cần làm trước khi dùng thật (checklist chi tiết):
+
 - [x] Gán bảng `hien_tuong["groups"]` (mã ww → mega-nhóm) trong `buckets.py`.
       Phân loại theo nhãn + xác nhận với anh Minh 2026-08-16 (13/18/19 gộp
       dong_mua_rao; 04/06 gộp mu_mu_kho; 66-69/83-86 → N_0; 20-29 "giờ trước"
