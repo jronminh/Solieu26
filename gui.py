@@ -18,6 +18,7 @@ import csv
 import datetime
 import os
 import queue
+import re
 import subprocess
 import sys
 import threading
@@ -46,9 +47,9 @@ LOG_COLORS = {
 # =============================================================================
 # STATION LIST (code → name)
 # -----------------------------------------------------------------------------
-# Feeds the station filter dropdown in the "Xem lịch sử" viewer (history.csv holds
-# every station already — the dropdown just filters rows client-side, it no longer
-# drives what gets downloaded/decoded). Add/remove a station by editing this table.
+# Feeds the station filter dropdown in the "Xem lịch sử" viewer (each history_*.csv
+# holds every station already — the dropdown just filters rows client-side, it no
+# longer drives what gets downloaded/decoded). Add/remove a station by editing this table.
 # =============================================================================
 STATIONS = {
     "k31": "Yên Bái",    "k21": "Nội Bài",     "k27": "Kép",
@@ -60,22 +61,23 @@ STATIONS = {
     "k92": "Trường Sa",  "k93": "Thuyền Chài",
 }
 
-# Names feed the dropdown — order KEPT the same as latest.csv (order of the table
-# above); also builds the reverse lookup name → code.
+# Names feed the dropdown — order KEPT the same as the STATIONS table above;
+# also builds the reverse lookup name → code.
 STATION_NAMES = list(STATIONS.values())
 NAME_TO_CODE  = {name: code for code, name in STATIONS.items()}
 
 ALL_STATIONS = "Tất cả các trạm"   # station-filter dropdown option that disables filtering
 
-# Hours feed the hour-filter dropdown in the "Xem lịch sử" viewer — history.csv's
-# "hour" column is a zero-padded string ("00".."23"), so the dropdown values match.
+# Hours feed the hour-filter dropdown in the "Xem lịch sử" viewer — each
+# history_*.csv's "hour" column is a zero-padded string ("00".."23"), so the
+# dropdown values match.
 HOURS = [f"{h:02d}" for h in range(24)]
 ALL_HOURS = "Tất cả các giờ"   # hour-filter dropdown option that disables filtering
 
-# Date-filter dropdown option that disables filtering. Unlike HOURS/STATIONS, the
-# actual date VALUES aren't a fixed table — they're whatever "date" ("YYYY-MM-DD")
-# values are present in the loaded history.csv, populated in _load_csv_into_viewer.
-ALL_DATES = "Tất cả các ngày"
+# Matches core.export_history_by_date()'s output filenames — one CSV per day.
+# The viewer's Ngày dropdown lists dates found this way and picks which file to
+# load, rather than filtering rows within a single (now nonexistent) history.csv.
+HISTORY_CSV_RE = re.compile(r"^history_(\d{8})\.csv$")
 
 
 # Numeric columns in the CSV viewer — right-aligned + compared as NUMBERS when
@@ -91,7 +93,7 @@ NUMERIC_VIEWER_COLUMNS = {
 # Columns that never appear in the CSV viewer — not shown in either mode, and
 # not offered in the "Hiển thị" picker either, so they can't be toggled back on
 # from the GUI. They stay in the exported CSV file untouched; the only way to
-# see them is opening latest.csv/history.csv directly (e.g. in Excel).
+# see them is opening a history_*.csv file directly (e.g. in Excel).
 ALWAYS_HIDDEN_VIEWER_COLUMNS = {
     "date", "hour", "source_file", "station_code", "lat", "lon", "cloud_layers",
 }
@@ -179,7 +181,7 @@ class App:
         self.cfg_path, self.cfg_overrides = core.apply_config_file(config_path)
 
         # Columns hidden in the CSV viewer — shared across all viewer windows
-        # (latest/history have the same schema); loaded from config, saved back on change.
+        # (every history_*.csv has the same schema); loaded from config, saved back on change.
         self.hidden_cols = set(core.CONFIG.get("viewer_hidden_columns", []))
 
         root.title("Solieu26")
@@ -223,7 +225,6 @@ class App:
         # Read-only labels in the "Thông tin truy vấn" panel — recomputed by
         # _refresh_info_panel() whenever the underlying state changes.
         self.info = {
-            "latest_file":   tk.StringVar(value="—"),
             "csv_result":    tk.StringVar(value="—"),
             "data_status":   tk.StringVar(value="Chưa có dữ liệu"),
             "auto_status":   tk.StringVar(value="—"),
@@ -337,11 +338,10 @@ class App:
         self._info_advanced_rows.append(btn_row)
 
         info_row(3, "Máy chủ:", self.v["ftp_host"], advanced_only=True)
-        info_row(4, "File mới:", self.info["latest_file"], advanced_only=True)
-        info_row(5, "Xuất CSV:", self.info["csv_result"], advanced_only=True)
-        info_row(6, "Dữ liệu:", self.info["data_status"])
-        info_row(7, "Tự động:", self.info["auto_status"])
-        info_row(8, "File thiếu:", self.info["missing"], advanced_only=True)
+        info_row(4, "Xuất CSV:", self.info["csv_result"], advanced_only=True)
+        info_row(5, "Dữ liệu:", self.info["data_status"])
+        info_row(6, "Tự động:", self.info["auto_status"])
+        info_row(7, "File thiếu:", self.info["missing"], advanced_only=True)
         top.columnconfigure(1, weight=1)
 
         # --- Xem số liệu — luôn hiển thị (cả Cơ bản lẫn Nâng cao), ngay dưới trường
@@ -350,10 +350,7 @@ class App:
         view_row = ttk.Frame(frm)
         view_row.pack(pady=(8, 0))
         ttk.Button(view_row, text="Xem số liệu",
-                  command=lambda: self._open_csv_viewer(
-                      "history.csv", "history.csv", with_station_filter=True,
-                      with_hour_filter=True, with_date_filter=True)
-                  ).pack(side="left")
+                  command=self._open_history_viewer).pack(side="left")
 
         # --- Status bar at the BOTTOM: display-mode toggle at bottom-left, status
         # indicator at bottom-right ---
@@ -547,27 +544,62 @@ class App:
             return self.last_output_dir
         return os.path.abspath(self.v["output_dir"].get().strip() or core.DEFAULT_OUTPUT_DIR)
 
-    def _open_csv_viewer(self, filename: str, title: str, with_station_filter: bool = False,
-                          with_hour_filter: bool = False, with_date_filter: bool = False):
-        """Open a dedicated window to view a CSV file as a table (read-only)."""
+    def _available_history_files(self) -> dict:
+        """Scan the current output dir for history_YYYYMMDD.csv files (one per
+        day, written by core.export_history_by_date). Returns {"YYYY-MM-DD": path},
+        sorted by nothing in particular — callers sort the keys as needed."""
+        out_dir = self._current_output_dir()
+        found = {}
+        try:
+            names = os.listdir(out_dir)
+        except OSError:
+            return found
+        for name in names:
+            m = HISTORY_CSV_RE.match(name)
+            if m:
+                ymd = m.group(1)
+                date_key = f"{ymd[0:4]}-{ymd[4:6]}-{ymd[6:8]}"
+                found[date_key] = os.path.join(out_dir, name)
+        return found
+
+    def _open_history_viewer(self):
+        """'Xem số liệu' — opens the history viewer showing the MOST RECENT day
+        available on disk. core.export_history_by_date() writes one
+        history_YYYYMMDD.csv per day, so a multi-day advanced query leaves several
+        files behind — the 'Ngày' dropdown inside the viewer switches between them."""
+        history_files = self._available_history_files()
+        if not history_files:
+            self._log("WARN", "Xem số liệu: chưa có file lịch sử nào — hãy 'Làm mới' trước")
+            messagebox.showwarning("Chưa có dữ liệu",
+                                   "Chưa có file lịch sử nào.\n\nHãy bấm 'Làm mới' để tạo file trước.")
+            return
+        self._show_history_date(max(history_files))
+
+    def _show_history_date(self, date_key: str):
+        """Open the (single, shared) history viewer window on history_YYYYMMDD.csv
+        for `date_key`, or switch its content to that date if it's already open."""
+        history_files = self._available_history_files()
+        path = history_files.get(date_key)
+        filename = f"history_{date_key.replace('-', '')}.csv"
         self._log("ACT", f"Xem {filename}")
-        path = os.path.join(self._current_output_dir(), filename)
-        if not os.path.isfile(path):
+        if not path or not os.path.isfile(path):
             self._log("ERR", f"Chưa có {filename} trong {self._current_output_dir()} — hãy Làm mới trước")
             messagebox.showwarning(
                 "Chưa có file",
-                f"Không tìm thấy:\n{path}\n\nHãy bấm 'Làm mới' để tạo file trước.")
+                f"Không có dữ liệu ngày {date_key}.\n\nHãy bấm 'Làm mới' để tạo file trước.")
             return
 
-        key = "view_" + filename
+        key = "view_history"
         existing = self._dialogs.get(key)
         if existing is not None and existing.winfo_exists():
             existing.deiconify(); existing.lift(); existing.focus_set()
-            self._load_csv_into_viewer(existing, path)   # refresh the content
+            existing.title(filename)
+            existing._path = path
+            existing._date_filter.set(date_key)   # triggers _on_date_filter_change → reloads
             return
 
         win = tk.Toplevel(self.root)
-        win.title(title)
+        win.title(filename)
         win.transient(self.root)
         win.geometry("1040x480")
         win.minsize(480, 240)
@@ -584,25 +616,23 @@ class App:
                                      command=lambda: self._toggle_viewer_mode(win))
         win._toggle_btn.pack(side="left")
         ttk.Button(bar, text="Làm mới",
-                   command=lambda: self._load_csv_into_viewer(win, path)).pack(side="left", padx=6)
+                   command=lambda: self._load_csv_into_viewer(win, win._path)).pack(side="left", padx=6)
         ttk.Button(bar, text="Mở bằng Excel",
-                   command=lambda: self._open_csv_external(path)).pack(side="left")
+                   command=lambda: self._open_csv_external(win._path)).pack(side="left")
         ttk.Button(bar, text="Hiển thị",
                    command=lambda: self._open_column_picker(win)).pack(side="left", padx=6)
 
-        # Station filter — post-process filter over history.csv (which already holds
-        # every station); default to the station_code configured in config.ini.
-        if with_station_filter:
-            default_code = (core.CONFIG.get("station_code") or "").strip()
-            default_name = STATIONS.get(default_code, ALL_STATIONS)
-            win._station_filter = tk.StringVar(value=default_name)
-            ttk.Label(bar, text="Trạm:").pack(side="left", padx=(12, 2))
-            ttk.Combobox(bar, textvariable=win._station_filter,
-                        values=[ALL_STATIONS] + STATION_NAMES, state="readonly",
-                        width=16).pack(side="left")
-            win._station_filter.trace_add("write", lambda *_: self._on_station_filter_change(win))
-        else:
-            win._station_filter = None
+        # Station filter — post-process filter over the loaded day's file (which
+        # already holds every station); default to the station_code configured
+        # in config.ini.
+        default_code = (core.CONFIG.get("station_code") or "").strip()
+        default_name = STATIONS.get(default_code, ALL_STATIONS)
+        win._station_filter = tk.StringVar(value=default_name)
+        ttk.Label(bar, text="Trạm:").pack(side="left", padx=(12, 2))
+        ttk.Combobox(bar, textvariable=win._station_filter,
+                    values=[ALL_STATIONS] + STATION_NAMES, state="readonly",
+                    width=16).pack(side="left")
+        win._station_filter.trace_add("write", lambda *_: self._on_station_filter_change(win))
 
         # Hour filter — same post-process idea as the station filter above, but over
         # the "hour" column (always present, just hidden from the rendered table).
@@ -611,32 +641,26 @@ class App:
         # các giờ" (one station's whole history), while "Tất cả các trạm" hides that
         # option and forces a specific giờ (otherwise the table would be every
         # station × every hour at once).
-        if with_hour_filter:
-            win._hour_filter = tk.StringVar(value=ALL_HOURS)
-            ttk.Label(bar, text="Giờ:").pack(side="left", padx=(12, 2))
-            win._hour_combo = ttk.Combobox(bar, textvariable=win._hour_filter,
-                        values=[ALL_HOURS] + HOURS, state="readonly",
-                        width=8)
-            win._hour_combo.pack(side="left")
-            win._hour_filter.trace_add("write", lambda *_: self._on_hour_filter_change(win))
-        else:
-            win._hour_filter = None
+        win._hour_filter = tk.StringVar(value=ALL_HOURS)
+        ttk.Label(bar, text="Giờ:").pack(side="left", padx=(12, 2))
+        win._hour_combo = ttk.Combobox(bar, textvariable=win._hour_filter,
+                    values=[ALL_HOURS] + HOURS, state="readonly",
+                    width=8)
+        win._hour_combo.pack(side="left")
+        win._hour_filter.trace_add("write", lambda *_: self._on_hour_filter_change(win))
 
-        if with_station_filter and with_hour_filter:
-            self._sync_hour_filter_for_station(win)
+        self._sync_hour_filter_for_station(win)
 
-        # Date filter — same post-process idea, but the dropdown's values are data-
-        # driven (whatever dates are actually present), refreshed on every load in
-        # _load_csv_into_viewer rather than fixed up front like STATIONS/HOURS.
-        if with_date_filter:
-            win._date_filter = tk.StringVar(value=ALL_DATES)
-            ttk.Label(bar, text="Ngày:").pack(side="left", padx=(12, 2))
-            win._date_combo = ttk.Combobox(bar, textvariable=win._date_filter,
-                        values=[ALL_DATES], state="readonly", width=12)
-            win._date_combo.pack(side="left")
-            win._date_filter.trace_add("write", lambda *_: self._on_date_filter_change(win))
-        else:
-            win._date_filter = None
+        # Date filter — NOT a row filter: each history_YYYYMMDD.csv is already one
+        # day, so picking a date here SWITCHES WHICH FILE is loaded (see
+        # _on_date_filter_change / _available_history_files), same idea as a file
+        # picker rather than a post-process filter like Trạm/Giờ above.
+        win._date_filter = tk.StringVar(value=date_key)
+        ttk.Label(bar, text="Ngày:").pack(side="left", padx=(12, 2))
+        win._date_combo = ttk.Combobox(bar, textvariable=win._date_filter,
+                    values=sorted(history_files), state="readonly", width=12)
+        win._date_combo.pack(side="left")
+        win._date_filter.trace_add("write", lambda *_: self._on_date_filter_change(win))
 
         win._status = ttk.Label(bar, text="")
         win._status.pack(side="right")
@@ -671,34 +695,31 @@ class App:
             self._log("ERR", f"Không đọc được {os.path.basename(path)}: {e}")
             return
 
+        self._refresh_date_filter_options(win)
+
         if not rows:
             win._header, win._data = [], []
             win._tree.delete(*win._tree.get_children())
             win._tree["columns"] = ()
-            if win._date_filter is not None:
-                win._date_combo["values"] = [ALL_DATES]
-                win._date_filter.set(ALL_DATES)
             win._status.config(text="File rỗng")
             return
 
         win._header, win._data = rows[0], rows[1:]
-        self._sync_date_filter_values(win)
         self._apply_sort(win)         # keep the current sort (if any) after reloading
         self._render_viewer(win)
         self._log("OK", f"Đã hiển thị {os.path.basename(path)} ({len(win._data)} dòng)")
 
-    def _sync_date_filter_values(self, win):
-        """Rebuild the Ngày dropdown's values from the dates actually present in the
-        just-loaded win._data (dates aren't a fixed table like STATIONS/HOURS). Falls
-        back to 'Tất cả các ngày' if the previously selected date is gone (e.g. a
-        Làm mới that no longer includes it)."""
-        if win._date_filter is None or "date" not in win._header:
-            return
-        idx = win._header.index("date")
-        dates = sorted({r[idx] for r in win._data if idx < len(r) and r[idx]})
-        win._date_combo["values"] = [ALL_DATES] + dates
-        if win._date_filter.get() not in win._date_combo["values"]:
-            win._date_filter.set(ALL_DATES)
+    def _refresh_date_filter_options(self, win):
+        """Rebuild the Ngày dropdown's values from the history_*.csv files currently
+        on disk (one file = one day, unlike STATIONS/HOURS which are a fixed table).
+        Picks up new days written since the window was opened (e.g. a fresh 'Làm
+        mới'). Falls back to the most recent date if the current selection's file
+        is gone."""
+        history_files = self._available_history_files()
+        dates = sorted(history_files)
+        win._date_combo["values"] = dates
+        if win._date_filter.get() not in dates and dates:
+            win._date_filter.set(dates[-1])
 
     def _toggle_viewer_mode(self, win):
         """Switch between Data mode (hides raw) and Raw mode (identity cols + raw)."""
@@ -716,8 +737,19 @@ class App:
         self._render_viewer(win)
 
     def _on_date_filter_change(self, win):
-        self._log("ACT", f"Lọc ngày: {win._date_filter.get()}")
-        self._render_viewer(win)
+        """Ngày dropdown = file picker now (each history_YYYYMMDD.csv is one day),
+        so changing it loads a different file instead of filtering the loaded one."""
+        date_key = win._date_filter.get()
+        history_files = self._available_history_files()
+        path = history_files.get(date_key)
+        if not path or not os.path.isfile(path):
+            self._log("ERR", f"Chọn ngày: không có dữ liệu cho {date_key}")
+            win._status.config(text=f"Không có dữ liệu ngày {date_key}")
+            return
+        self._log("ACT", f"Chọn ngày: {date_key}")
+        win._path = path
+        win.title(os.path.basename(path))
+        self._load_csv_into_viewer(win, path)
 
     def _sync_hour_filter_for_station(self, win):
         """Giờ filter's OWN options depend on the trạm filter: chọn một trạm cụ thể
@@ -837,11 +869,8 @@ class App:
                 h_idx = header.index("hour")
                 data = [r for r in data if h_idx < len(r) and r[h_idx] == hour]
 
-        if win._date_filter is not None and "date" in header:
-            date = win._date_filter.get()
-            if date != ALL_DATES:
-                d_idx = header.index("date")
-                data = [r for r in data if d_idx < len(r) and r[d_idx] == date]
+        # No date filter here — win._date_filter now picks WHICH FILE is loaded
+        # (see _on_date_filter_change), not a row filter within it.
 
         if mode == "raw":
             # Just a few identity columns + raw, to read the original bulletin per station.
@@ -934,12 +963,10 @@ class App:
         auto-query schedule). Cheap — just StringVar.set() calls — safe to call often."""
         result = self.last_result or {}
 
-        self.info["latest_file"].set(result.get("latest_file") or "—")
-
         if self.last_result is not None:
-            lr = result.get("latest_records", 0)
             hr = result.get("history_records", 0)
-            self.info["csv_result"].set(f"{lr} trạm (latest.csv) · {hr} record (history.csv)")
+            history_files = result.get("history_files") or {}
+            self.info["csv_result"].set(f"{hr} record · {len(history_files)} ngày (history_*.csv)")
             missing = len(result.get("missing") or [])
             self.info["missing"].set("Không thiếu" if missing == 0 else f"{missing} file")
         else:
@@ -1250,11 +1277,9 @@ class App:
             return
 
         self.status.config(text="Hoàn tất")
-        parts = []
-        if result.get("latest_csv"):
-            parts.append(f"latest.csv ({result['latest_records']} trạm)")
-        if result.get("history_csv"):
-            parts.append(f"history.csv ({result['history_records']} record)")
+        history_files = result.get("history_files") or {}
+        parts = [f"{os.path.basename(info['csv'])} ({info['records']} record)"
+                 for _, info in sorted(history_files.items())]
         self._log("OK", "Hoàn tất — đã xuất: " + (", ".join(parts) if parts else "(không có)"))
 
 

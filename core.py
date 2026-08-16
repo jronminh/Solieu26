@@ -717,14 +717,7 @@ def decode_qt_file(file_path: str, tables: dict = TABLES) -> list:
     return results
 
 
-def decode_latest_file(local_files: list):
-    if not local_files:
-        return None, []
-    latest_file = sorted(local_files)[-1]
-    return latest_file, decode_qt_file(latest_file)
-
-
-def get_full_history(local_files: list) -> list:
+def decode_history(local_files: list) -> list:
     """
     Decode every downloaded file and keep EVERY station's record (not just one) —
     the full day's station × hour matrix. Station filtering happens later, in the
@@ -847,23 +840,34 @@ def write_csv(file_path: str, rows: list):
         writer.writerows(rows)
 
 
-def export_latest_to_csv(latest_file: str, latest_data: list, out_dir: str) -> str:
-    n_cloud = cloud_layers_needed(latest_data)
-    rows = [flatten_record(r, source_file=latest_file, max_cloud_layers=n_cloud)
-            for r in latest_data]
-    out_path = os.path.join(out_dir, "latest.csv")
-    write_csv(out_path, rows)
-    return out_path
+def export_history_by_date(local_files: list, out_dir: str) -> dict:
+    """
+    Decode every downloaded file (decode_history) and split the result into one
+    history_YYYYMMDD.csv per observation date — a day only gets written once every
+    file belonging to it has been decoded, so a query spanning N days produces N
+    files instead of one growing history.csv.
 
+    The sole remaining CSV-producing function now that "latest" export is gone.
+    Returns {"YYYY-MM-DD": {"csv": path, "records": n}, ...}, one entry per date
+    actually present in local_files (a file whose name doesn't parse as a
+    QtYYMMDDHH.txt timestamp falls under the "unknown" bucket instead of being
+    dropped).
+    """
+    by_date = {}
+    for item in decode_history(local_files):
+        obs_dt = parse_obs_dt(item["file"])
+        date_key = obs_dt.strftime("%Y-%m-%d") if obs_dt else "unknown"
+        by_date.setdefault(date_key, []).append(item)
 
-def export_history_to_csv(history: list, out_dir: str) -> str:
-    # obs_time / date / hour / source_file are all derived by flatten_record from the filename.
-    n_cloud = cloud_layers_needed([item["data"] for item in history])
-    rows = [flatten_record(item["data"], source_file=item["file"], max_cloud_layers=n_cloud)
-            for item in history]
-    out_path = os.path.join(out_dir, "history.csv")
-    write_csv(out_path, rows)
-    return out_path
+    exported = {}
+    for date_key, items in sorted(by_date.items()):
+        n_cloud = cloud_layers_needed([item["data"] for item in items])
+        rows = [flatten_record(item["data"], source_file=item["file"], max_cloud_layers=n_cloud)
+                for item in items]
+        out_path = os.path.join(out_dir, f"history_{date_key.replace('-', '')}.csv")
+        write_csv(out_path, rows)
+        exported[date_key] = {"csv": out_path, "records": len(rows)}
+    return exported
 
 
 # =============================================================================
@@ -877,9 +881,7 @@ def run_pipeline(cfg: dict, log=_console_log, progress=None) -> dict:
     it to show a dialog; a headless caller can just let it propagate).
     """
     result = {"ok": False, "files": [], "missing": [],
-              "latest_file": None,
-              "latest_csv": None, "latest_records": 0,
-              "history_csv": None, "history_records": 0,
+              "history_files": {}, "history_records": 0,
               "output_dir": cfg.get("output_dir", DEFAULT_OUTPUT_DIR)}
 
     log("INFO", f"Thư mục tải tạm: {cfg.get('local_dir')}")
@@ -906,23 +908,14 @@ def run_pipeline(cfg: dict, log=_console_log, progress=None) -> dict:
         os.makedirs(output_dir, exist_ok=True)
         result["output_dir"] = output_dir
 
-        latest_file, latest_data = decode_latest_file(files)
-        if latest_file:
-            result["latest_file"] = os.path.basename(latest_file)
-            log("INFO", f"File mới nhất: {os.path.basename(latest_file)} "
-                        f"({len(latest_data)} record)")
-            csv_path = export_latest_to_csv(latest_file, latest_data, output_dir)
-            result["latest_csv"] = csv_path
-            result["latest_records"] = len(latest_data)
-            log("OK", f"Đã xuất snapshot: {csv_path}")
-
-        history = get_full_history(files)
-        log("INFO", f"Lịch sử đầy đủ: {len(history)} record (mọi trạm, mọi giờ)")
-        if history:
-            csv_path = export_history_to_csv(history, output_dir)
-            result["history_csv"] = csv_path
-            result["history_records"] = len(history)
-            log("OK", f"Đã xuất lịch sử: {csv_path}")
+        history_files = export_history_by_date(files, output_dir)
+        result["history_files"] = history_files
+        result["history_records"] = sum(v["records"] for v in history_files.values())
+        log("INFO", f"Lịch sử đầy đủ: {result['history_records']} record "
+                    f"(mọi trạm, mọi giờ, {len(history_files)} ngày)")
+        for date_key in sorted(history_files):
+            info = history_files[date_key]
+            log("OK", f"Đã xuất lịch sử {date_key}: {info['csv']} ({info['records']} record)")
 
         result["ok"] = True
         return result
