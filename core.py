@@ -22,7 +22,6 @@ import datetime
 import configparser
 import os
 import sys
-import tempfile
 import time
 from ftplib import FTP, error_perm, error_temp
 
@@ -50,11 +49,17 @@ else:
     except NameError:
         SCRIPT_DIR = os.path.abspath(".")
 
-# Downloaded files go into the OS temp dir; use a fixed subfolder (NOT random)
-# so a later run still recognizes old files and can SKIP instead of re-downloading.
-TEMP_DL_DIR = os.path.join(tempfile.gettempdir(), "solieu26_dl")
+# Everything the app persists lives under the user's home folder (works the
+# same way on Windows and Linux via os.path.expanduser), not the OS temp dir or
+# next to the script — so it survives temp-dir cleanup and doesn't depend on
+# where the exe/script happens to sit.
+USER_BASE_DIR = os.path.join(os.path.expanduser("~"), "solieu26_dl")
 
-DEFAULT_OUTPUT_DIR = SCRIPT_DIR          # default CSV location, next to the script (absolute)
+# Downloaded (raw) files; a fixed subfolder (NOT random) so a later run still
+# recognizes old files and can SKIP instead of re-downloading.
+TEMP_DL_DIR = os.path.join(USER_BASE_DIR, "data")
+
+DEFAULT_OUTPUT_DIR = USER_BASE_DIR       # default CSV location
 
 FTP_TIMEOUT = 30                         # seconds
 RETRY_TEMP  = 1                          # extra retry attempts when server reports busy (4xx)
@@ -93,7 +98,7 @@ CONFIG = {
     "retry_wait": RETRY_WAIT,
 
     "remote_dir": "Quantrac",
-    "local_dir":  TEMP_DL_DIR,           # downloads go into temp
+    "local_dir":  TEMP_DL_DIR,           # downloads go under the user folder
     "output_dir": DEFAULT_OUTPUT_DIR,
     "delete_on_exit": False,
 
@@ -110,6 +115,12 @@ CONFIG = {
     "auto_query_on_startup": False,      # GUI-only: run once automatically right after launch
 }
 
+# Pristine snapshot of the hardcoded defaults, taken before anything (loaded
+# config.ini, in-session edits) ever mutates CONFIG. Powers "Khôi phục mặc
+# định" — restoring must come from the source code, not from whatever CONFIG
+# currently holds.
+DEFAULT_CONFIG = dict(CONFIG)
+
 
 # =============================================================================
 # LOADING THE EXTERNAL CONFIG (config.ini)
@@ -117,7 +128,7 @@ CONFIG = {
 # If a config.ini file exists (in TEMP_DL_DIR, or passed on the command line),
 # read it and OVERRIDE the defaults in CONFIG. Missing file → keep code defaults.
 # Only the keys you want to change need to be present; absent keys keep their default.
-# 'local_dir' is never read from config — downloads always go into the temp dir.
+# 'local_dir' is never read from config — downloads always go into TEMP_DL_DIR.
 # =============================================================================
 
 CONFIG_FILENAME = "config.ini"          # default name, looked up in TEMP_DL_DIR
@@ -184,10 +195,43 @@ def load_config_file(path: str) -> dict:
     return out
 
 
+def _default_config_lines() -> list:
+    """Render DEFAULT_CONFIG as config.ini lines — the single source of truth
+    for both auto-creating a missing config.ini and 'Khôi phục mặc định'."""
+    d = DEFAULT_CONFIG
+    return [
+        "# config.ini cho Solieu26 — sửa giá trị rồi lưu lại.",
+        "# Xóa dòng nào muốn dùng mặc định trong mã.",
+        f"[{CONFIG_SECTION}]",
+        f"ftp_host = {d['ftp_host']}",
+        f"ftp_user = {d['ftp_user']}",
+        f"ftp_pass = {d['ftp_pass']}",
+        f"remote_dir = {d['remote_dir']}",
+        f"output_dir = {d['output_dir']}",
+        f"station_code = {d['station_code']}",
+        f"end_hour = {d['end_hour']}",
+        f"delete_on_exit = {'true' if d['delete_on_exit'] else 'false'}",
+        f"auto_query_value = {d['auto_query_value']}",
+        f"auto_query_unit = {d['auto_query_unit']}",
+        f"auto_query_on_startup = {'true' if d['auto_query_on_startup'] else 'false'}",
+    ]
+
+
+def write_default_config(path: str = None) -> str:
+    """Write a fresh config.ini from the hardcoded defaults (DEFAULT_CONFIG),
+    overwriting whatever was there. Returns the path written."""
+    path = path or os.path.join(TEMP_DL_DIR, CONFIG_FILENAME)
+    os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
+    with open(path, "w", encoding="utf-8") as f:
+        f.write("\n".join(_default_config_lines()) + "\n")
+    return path
+
+
 def apply_config_file(path: str = None):
     """
-    Resolve the config path (argument > default alongside the data folder), load
-    it, and override CONFIG. Returns (path_used, dict_of_overridden_keys).
+    Resolve the config path (argument > default alongside the data folder),
+    auto-creating it from DEFAULT_CONFIG if it doesn't exist yet, then load it
+    and override CONFIG. Returns (path_used, dict_of_overridden_keys).
 
     Default location is TEMP_DL_DIR (same place downloaded bulletins land), not
     next to the script/exe — that folder is always writable, unlike an exe that
@@ -195,6 +239,8 @@ def apply_config_file(path: str = None):
     """
     path = path or os.path.join(TEMP_DL_DIR, CONFIG_FILENAME)
     os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
+    if not os.path.isfile(path):
+        write_default_config(path)
     overrides = load_config_file(path)
     CONFIG.update(overrides)
     return path, overrides

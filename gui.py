@@ -141,28 +141,6 @@ def open_in_editor(path: str):
     return _os_open(path)
 
 
-def write_minimal_config(path: str, values: dict):
-    """Write a minimal config.ini from the current settings (only the keys the GUI has)."""
-    lines = [
-        "# config.ini cho Solieu26 — sửa giá trị rồi lưu lại.",
-        "# Xóa dòng nào muốn dùng mặc định trong mã.",
-        "[Solieu26]",
-        f"ftp_host = {values['ftp_host']}",
-        f"ftp_user = {values['ftp_user']}",
-        f"ftp_pass = {values['ftp_pass']}",
-        f"remote_dir = {values['remote_dir']}",
-        f"output_dir = {values['output_dir']}",
-        f"station_code = {values['station_code']}",
-        f"end_hour = {values['end_hour']}",
-        f"delete_on_exit = {'true' if values['delete_on_exit'] else 'false'}",
-        f"auto_query_value = {values['auto_query_value']}",
-        f"auto_query_unit = {values['auto_query_unit']}",
-        f"auto_query_on_startup = {'true' if values['auto_query_on_startup'] else 'false'}",
-    ]
-    with open(path, "w", encoding="utf-8") as f:
-        f.write("\n".join(lines) + "\n")
-
-
 class App:
     def __init__(self, root: tk.Tk, config_path: str = None):
         self.root = root
@@ -176,6 +154,7 @@ class App:
         self.last_cfg = None        # cfg dict from the last _on_run (carries the queried date)
         self.last_updated_at = None # datetime the last run finished (success or not)
         self._dialogs = {}          # keeps references to open dialogs (avoids reopening duplicates)
+        self.btn_open_csv = None    # "Mở thư mục CSV" button, lives in the Thiết lập dialog
 
         # Load the external config (if any) BEFORE prefilling the form
         self.cfg_path, self.cfg_overrides = core.apply_config_file(config_path)
@@ -248,11 +227,12 @@ class App:
     # -----------------------------------------------------------------
     def _build_menu(self):
         """Single menu bar entry, 'Tùy chọn' — every action (run / toggles /
-        settings / file ops) lives here. Xem số liệu is a button on the main
-        screen now, not a menu item — see _build_ui."""
+        settings) lives here. Xem số liệu is a button on the main screen now,
+        not a menu item — see _build_ui. Folder-opening actions live inside the
+        Thiết lập dialog (see _open_settings_dialog), not this menu."""
         menubar = tk.Menu(self.root)
 
-        # --- Tùy chọn --- grouped: run → toggles/settings → file ops
+        # --- Tùy chọn --- grouped: run → settings
         opt_menu = tk.Menu(menubar, tearoff=0)
 
         opt_menu.add_command(label="Làm mới", command=self._on_run)
@@ -263,15 +243,10 @@ class App:
         opt_menu.add_command(label="Thiết lập...", command=self._open_settings_dialog)
         opt_menu.add_separator()
 
-        opt_menu.add_command(label="Mở thư mục CSV", command=self._on_open_folder)
-        opt_menu.add_command(label="Mở thư mục data", command=self._on_open_data)
-        opt_menu.add_separator()
         opt_menu.add_command(label="Thoát", command=self._on_exit)
 
         menubar.add_cascade(label="Tùy chọn", menu=opt_menu)
-        self.opt_menu = opt_menu   # lets us enable/disable entries by state ("Làm mới" while
-                                    # running, "Mở thư mục CSV" until there's something to open)
-        self.opt_menu.entryconfig("Mở thư mục CSV", state="disabled")   # nothing to open yet
+        self.opt_menu = opt_menu   # lets us enable/disable entries by state ("Làm mới" while running)
 
         self.root.config(menu=menubar)
 
@@ -418,7 +393,7 @@ class App:
 
     def _open_settings_dialog(self):
         """Combined settings dialog: Kết nối / Đường dẫn / Tự động truy vấn, plus
-        config.ini actions (create-or-edit at bottom-left, explicit save at bottom-right)."""
+        config.ini actions (restore-defaults at bottom-left, explicit save at bottom-right)."""
         self._log("ACT", "Mở hộp thoại Thiết lập")
         win = self._make_dialog("settings", "Thiết lập")
         if win is None:
@@ -443,6 +418,17 @@ class App:
                         variable=self.v["delete_on_exit"],
                         command=self._on_toggle_delete).grid(
                         row=2, column=0, columnspan=3, sticky="w", pady=(6, 0))
+
+        open_row = ttk.Frame(path_box)
+        open_row.grid(row=3, column=0, columnspan=3, sticky="w", pady=(6, 0))
+        self.btn_open_csv = ttk.Button(open_row, text="Mở thư mục CSV",
+                                        command=self._on_open_folder)
+        self.btn_open_csv.pack(side="left")
+        self.btn_open_csv.config(state="normal" if (
+            self.last_output_dir and os.path.isdir(self.last_output_dir)) else "disabled")
+        ttk.Button(open_row, text="Mở thư mục data",
+                   command=self._on_open_data).pack(side="left", padx=(6, 0))
+
         path_box.columnconfigure(1, weight=1)
 
         # Auto-query: re-runs the pipeline on a timer (system time → "Về hiện tại" →
@@ -464,8 +450,8 @@ class App:
 
         btn_bar = ttk.Frame(frm)
         btn_bar.pack(fill="x", pady=(12, 0))
-        ttk.Button(btn_bar, text="Tạo/sửa config.ini",
-                   command=self._on_edit_config).pack(side="left")
+        ttk.Button(btn_bar, text="Khôi phục mặc định",
+                   command=self._on_restore_defaults).pack(side="left")
         ttk.Button(btn_bar, text="Lưu thiết lập",
                    command=self._on_save_settings).pack(side="right")
 
@@ -1030,6 +1016,12 @@ class App:
             if warn:
                 messagebox.showwarning("Không mở được", info)
 
+    def _set_open_csv_enabled(self, enabled: bool):
+        """Enable/disable the 'Mở thư mục CSV' button in the Thiết lập dialog.
+        A no-op if that dialog hasn't been opened yet (or was closed)."""
+        if self.btn_open_csv is not None and self.btn_open_csv.winfo_exists():
+            self.btn_open_csv.config(state="normal" if enabled else "disabled")
+
     def _on_open_folder(self):
         self._log("ACT", "Mở thư mục CSV")
         self._report_open(*open_folder(self.last_output_dir), "thư mục CSV")
@@ -1039,46 +1031,36 @@ class App:
         os.makedirs(core.TEMP_DL_DIR, exist_ok=True)   # create it upfront if never run before
         self._report_open(*open_folder(core.TEMP_DL_DIR), "thư mục data")
 
-    def _read_form_values(self) -> dict:
-        """Current form values (as strings/bools) for writing out to config.ini."""
-        return {
-            "ftp_host": self.v["ftp_host"].get().strip(),
-            "ftp_user": self.v["ftp_user"].get().strip(),
-            "ftp_pass": self.v["ftp_pass"].get(),
-            "remote_dir": self.v["remote_dir"].get().strip(),
-            "output_dir": self.v["output_dir"].get().strip(),
-            "station_code": core.CONFIG.get("station_code", ""),
-            "end_hour": 23,
-            "delete_on_exit": self.v["delete_on_exit"].get(),
-            "auto_query_value": self._auto_effective_value(),
-            "auto_query_unit": "hours" if self.v["auto_unit"].get() == "Hours" else "minutes",
-            "auto_query_on_startup": self.v["auto_on_startup"].get(),
-        }
+    def _on_restore_defaults(self):
+        """Overwrite config.ini with the hardcoded defaults (core.DEFAULT_CONFIG)
+        and reflect them back into the open Thiết lập dialog."""
+        self._log("ACT", "Khôi phục thiết lập mặc định")
+        if not messagebox.askyesno(
+                "Khôi phục mặc định",
+                "Toàn bộ thiết lập hiện tại sẽ bị ghi đè bằng mặc định trong "
+                "mã nguồn. Bạn có chắc muốn tiếp tục?"):
+            self._log("INFO", "Đã hủy khôi phục mặc định")
+            return
+        try:
+            path = core.write_default_config(self.cfg_path)
+        except OSError as e:
+            self._log("ERR", f"Không khôi phục được mặc định: {e}")
+            messagebox.showerror("Lỗi", f"Không khôi phục được mặc định:\n{e}")
+            return
 
-    def _on_edit_config(self):
-        self._log("ACT", "Tạo/sửa config.ini")
-        path = os.path.abspath(self.cfg_path)
-        created = False
-        if not os.path.isfile(path):
-            try:
-                write_minimal_config(path, self._read_form_values())
-                created = True
-                self._log("OK", f"Đã tạo config từ thiết lập hiện tại: {path}")
-            except Exception as e:
-                self._log("ERR", f"Không tạo được config: {e}")
-                messagebox.showerror("Lỗi", f"Không tạo được config:\n{e}")
-                return
-        ok, info = open_in_editor(path)
-        if ok:
-            if created:
-                self._log("OK", f"Đã tạo & mở config để sửa "
-                              f"(lần chạy sau tự nạp): {info}")
-            else:
-                self._log("ACT", f"Mở config để sửa: {info}")
-        else:
-            self._log("ERR", f"Không mở được config: {info}")
-            messagebox.showwarning("Không mở được",
-                                   f"{info}\n\nBạn có thể mở tay file:\n{path}")
+        d = core.DEFAULT_CONFIG
+        core.CONFIG.update(d)
+        self.v["ftp_host"].set(d["ftp_host"])
+        self.v["ftp_user"].set(d["ftp_user"])
+        self.v["ftp_pass"].set(d["ftp_pass"])
+        self.v["remote_dir"].set(d["remote_dir"])
+        self.v["output_dir"].set(d["output_dir"])
+        self.v["delete_on_exit"].set(bool(d["delete_on_exit"]))
+        self.v["auto_value"].set(str(d["auto_query_value"]))
+        self.v["auto_unit"].set("Hours" if d["auto_query_unit"] == "hours" else "Minutes")
+        self.v["auto_on_startup"].set(bool(d["auto_query_on_startup"]))
+        self._schedule_auto_tick()
+        self._log("OK", f"Đã khôi phục thiết lập mặc định vào config: {path}")
 
     def _browse_output(self, parent=None):
         self._log("ACT", "Chọn thư mục xuất CSV")
@@ -1162,7 +1144,7 @@ class App:
                              f"{cfg['end_date']:%Y-%m-%d} ({days} ngày)")
         self.last_cfg = cfg
         self._set_actions_enabled(False)
-        self.opt_menu.entryconfig("Mở thư mục CSV", state="disabled")
+        self._set_open_csv_enabled(False)
         self.status.config(text="Đang chạy...")
 
         self.worker = threading.Thread(target=self._work, args=(cfg,), daemon=True)
@@ -1204,7 +1186,7 @@ class App:
         self._set_actions_enabled(True)
         self.last_output_dir = result.get("output_dir")
         if self.last_output_dir and os.path.isdir(self.last_output_dir):
-            self.opt_menu.entryconfig("Mở thư mục CSV", state="normal")
+            self._set_open_csv_enabled(True)
 
         self.last_result = result
         self.last_updated_at = datetime.datetime.now()
