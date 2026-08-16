@@ -341,10 +341,10 @@ def _fetch_and_bucket(ftp: FTP, filename: str, local_dir: str, retry_temp: int, 
     local_path = os.path.join(local_dir, filename)
     status = _download_one(ftp, filename, local_path, retry_temp=retry_temp, retry_wait=retry_wait)
     if status == 0:
-        log("OK", f"Tải về      {filename}")
+        log("OK", f"Tải về          {filename}")
         buckets["files"].append(local_path); buckets["downloaded"].append(filename)
     elif status == 1:
-        log("SKIP", f"Đã có sẵn   {filename}")
+        log("SKIP", f"Đã có sẵn       {filename}")
         buckets["files"].append(local_path); buckets["skipped"].append(filename)
     else:
         log("MISS", f"Server chưa có  {filename}")

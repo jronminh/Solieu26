@@ -206,7 +206,7 @@ class App:
             "end_date":    tk.StringVar(value=today.strftime("%Y-%m-%d")),
             "delete_on_exit": tk.BooleanVar(value=bool(d.get("delete_on_exit", False))),
             "auto_value":  tk.StringVar(value=str(d.get("auto_query_value", 15))),
-            "auto_unit":   tk.StringVar(value="Hours" if d.get("auto_query_unit", "minutes") == "hours" else "Minutes"),
+            "auto_unit":   tk.StringVar(value="Giờ" if d.get("auto_query_unit", "minutes") == "hours" else "Phút"),
             "auto_on_startup": tk.BooleanVar(value=bool(d.get("auto_query_on_startup", False))),
         }
 
@@ -412,7 +412,7 @@ class App:
         auto_entry.bind("<FocusOut>", self._on_auto_change)
         auto_entry.bind("<Return>", self._on_auto_change)
         auto_unit = ttk.Combobox(auto_box, textvariable=self.v["auto_unit"],
-                                 values=["Minutes", "Hours"], state="readonly", width=8)
+                                 values=["Phút", "Giờ"], state="readonly", width=8)
         auto_unit.grid(row=0, column=1)
         auto_unit.bind("<<ComboboxSelected>>", self._on_auto_change)
         ttk.Label(auto_box, text="(0 = tắt)").grid(row=0, column=2, padx=(8, 0))
@@ -435,7 +435,7 @@ class App:
         self._log("ACT", "Lưu thiết lập")
         v = self._auto_effective_value()
         self.v["auto_value"].set(str(v))
-        unit_key = "hours" if self.v["auto_unit"].get() == "Hours" else "minutes"
+        unit_key = "hours" if self.v["auto_unit"].get() == "Giờ" else "minutes"
         values = {
             "ftp_host":           self.v["ftp_host"].get().strip(),
             "ftp_user":           self.v["ftp_user"].get().strip(),
@@ -494,7 +494,7 @@ class App:
         self.v["output_dir"].set(d["output_dir"])
         self.v["delete_on_exit"].set(bool(d["delete_on_exit"]))
         self.v["auto_value"].set(str(d["auto_query_value"]))
-        self.v["auto_unit"].set("Hours" if d["auto_query_unit"] == "hours" else "Minutes")
+        self.v["auto_unit"].set("Giờ" if d["auto_query_unit"] == "hours" else "Phút")
         self.v["auto_on_startup"].set(bool(d["auto_query_on_startup"]))
         self._schedule_auto_tick()
         self._log("OK", f"Đã khôi phục thiết lập mặc định vào config: {path}")
@@ -808,7 +808,7 @@ class App:
     # ----- Column visibility --------------------------------------------
     def _open_column_picker(self, win):
         """Open a checkbox dialog to pick visible columns (shared across all viewer windows)."""
-        self._log("ACT", "Mở 'Hiển thị cột'")
+        self._log("ACT", "Mở hộp thoại Chọn cột hiển thị")
         dlg = self._make_dialog("columns", "Chọn cột hiển thị")
         if dlg is None:
             return
@@ -1048,7 +1048,7 @@ class App:
         if self._auto_effective_minutes() <= 0:
             self.info["auto_status"].set("Tắt")
         else:
-            v, unit = self.v["auto_value"].get(), self.v["auto_unit"].get()
+            v, unit = self.v["auto_value"].get(), self.v["auto_unit"].get().lower()
             next_run = f" (tiếp theo: {self.auto_next_run:%H:%M:%S})" if self.auto_next_run else ""
             self.info["auto_status"].set(f"Bật — mỗi {v} {unit}{next_run}")
 
@@ -1060,7 +1060,7 @@ class App:
         except ValueError:
             v = 0
         v = max(v, 0)
-        return v * 60 if self.v["auto_unit"].get() == "Hours" else v
+        return v * 60 if self.v["auto_unit"].get() == "Giờ" else v
 
     def _schedule_auto_tick(self):
         """(Re)schedule the next auto-query tick from the current value/unit; cancels any pending
@@ -1152,7 +1152,6 @@ class App:
         skipped (a run is already in progress) or rejected (bad input). Callers
         that need to know whether the query truly started (e.g. _on_advanced_start,
         to decide whether to close the 'Tải số liệu' dialog) check this."""
-        self._log("ACT", "Bắt đầu truy vấn")
         if self.worker and self.worker.is_alive():
             self._log("WARN", "Bỏ qua: một tác vụ đang chạy")
             return False
