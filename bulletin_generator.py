@@ -10,7 +10,10 @@ says "field F holds value V from giờ START to giờ END, both included" for
 the (single, fixed) station entered at the top — e.g. "07–09 / Tốc độ gió /
 5", "09–11 / Tốc độ gió / 7", "07–10 / Nhiệt độ / 28.5". Rows can be added,
 edited (double-click, or "Sửa dòng") and deleted freely, one field at a time,
-each with its own time range.
+each with its own time range. Editing happens in the "Thêm / sửa dòng" panel
+docked on the right — always visible, not a popup — which "+ Thêm dòng"
+resets to add-mode and "Sửa dòng"/double-click switches to edit-mode for the
+selected row.
 
 "Sinh tất cả mã" is where the rows get merged: for every HOUR any row's
 range touches (a "07–09" row covers hours 07, 08 AND 09 — the format is
@@ -69,7 +72,7 @@ def _set_text(widget: tk.Text, text: str):
 # =============================================================================
 # FIELD REGISTRY — one entry per selectable "trường dữ liệu". Each builder
 # creates the value-editing widget(s) for that field inside a given parent
-# and returns (widget, get() -> value, set(value)) so RowEditor can stay
+# and returns (widget, get() -> value, set(value)) so RowEditorPanel can stay
 # generic across every field type (code lookups, floats, composite cloud).
 # =============================================================================
 
@@ -106,32 +109,20 @@ def _build_float_field(width: int = 10):
     return builder
 
 
-def _build_wind_dd_field(parent):
-    sp = ttk.Spinbox(parent, from_=0, to=360, increment=10, width=8)
-    sp.set(0)
-    sp.pack(anchor="w")
+def _build_spinbox_field(to: int, increment: int = 1, width: int = 8):
+    def builder(parent):
+        sp = ttk.Spinbox(parent, from_=0, to=to, increment=increment, width=width)
+        sp.set(0)
+        sp.pack(anchor="w")
 
-    def get():
-        return float(sp.get())
+        def get():
+            return float(sp.get())
 
-    def set_(v):
-        sp.set(v)
+        def set_(v):
+            sp.set(v)
 
-    return sp, get, set_
-
-
-def _build_wind_ff_field(parent):
-    sp = ttk.Spinbox(parent, from_=0, to=99, width=8)
-    sp.set(0)
-    sp.pack(anchor="w")
-
-    def get():
-        return float(sp.get())
-
-    def set_(v):
-        sp.set(v)
-
-    return sp, get, set_
+        return sp, get, set_
+    return builder
 
 
 def _build_vv_field(parent):
@@ -196,8 +187,8 @@ def _build_cloud_field(parent):
 
 
 FIELD_DEFS = {
-    "wind_dd": {"label": "Hướng gió (độ)", "builder": _build_wind_dd_field, "default": 0.0},
-    "wind_ff": {"label": "Tốc độ gió", "builder": _build_wind_ff_field, "default": 0.0},
+    "wind_dd": {"label": "Hướng gió (độ)", "builder": _build_spinbox_field(360, increment=10), "default": 0.0},
+    "wind_ff": {"label": "Tốc độ gió", "builder": _build_spinbox_field(99), "default": 0.0},
     "N_total": {"label": "Mây tổng lượng (N)", "builder": _build_code_field(TABLES["N_oktas"], 20), "default": "0"},
     "vv":      {"label": "Tầm nhìn xa (VV)", "builder": _build_vv_field, "default": "00"},
     "temp":    {"label": "Nhiệt độ (°C)", "builder": _build_float_field(), "default": 28.5},
@@ -290,63 +281,54 @@ def _encode_state(state: dict, station_code: str, lat: float, lon: float, statio
     )
 
 
-class RowEditor(tk.Toplevel):
-    """Add/edit one Thời gian+Trường dữ liệu+Giá trị row — one field, one
-    value, one [start, end] hour range (both ends included). Also the
-    interface for editing an existing row (`row` prefills it; `on_save` gets
-    called with the result either way)."""
+class RowEditorPanel(ttk.Frame):
+    """Always-visible sidebar (not a popup) for adding/editing one Thời
+    gian+Trường dữ liệu+Giá trị row — one field, one value, one [start, end]
+    hour range (both ends included).
+
+    load_new() resets it to "add a row" mode; load_row(row) switches it to
+    "edit this row" mode. Either way, Lưu dòng calls
+    on_save(row_dict, editing_id) — editing_id is None for a new row, or the
+    _id of the row being replaced — and then resets back to add-mode so the
+    panel is immediately ready for the next row."""
 
     HOURS = [f"{h:02d}" for h in range(24)]
 
-    def __init__(self, parent, row: dict, on_save):
+    def __init__(self, parent, on_save):
         super().__init__(parent)
-        self.title("Sửa dòng" if row else "Thêm dòng")
-        self.transient(parent)
-        self.resizable(False, False)
         self.on_save = on_save
-        self._value_get = None
 
-        body = ttk.Frame(self, padding=10)
-        body.pack(fill="both", expand=True)
+        self.mode_label = ttk.Label(self, font=("", 9, "bold"))
+        self.mode_label.pack(anchor="w", pady=(0, 8))
 
-        time_box = ttk.LabelFrame(body, text="Khung giờ áp dụng", padding=8)
+        time_box = ttk.LabelFrame(self, text="Khung giờ áp dụng", padding=8)
         time_box.pack(fill="x")
         ttk.Label(time_box, text="Từ giờ:").grid(row=0, column=0, sticky="w")
         self.start_hour = ttk.Combobox(time_box, width=4, state="readonly", values=self.HOURS)
-        self.start_hour.current(7)
         self.start_hour.grid(row=0, column=1, sticky="w")
-        ttk.Label(time_box, text="Đến giờ (gồm cả giờ này):").grid(row=0, column=2, sticky="w", padx=(10, 0))
+        ttk.Label(time_box, text="Đến giờ (gồm):").grid(row=1, column=0, sticky="w", pady=(4, 0))
         self.end_hour = ttk.Combobox(time_box, width=4, state="readonly", values=self.HOURS)
-        self.end_hour.current(9)
-        self.end_hour.grid(row=0, column=3, sticky="w")
+        self.end_hour.grid(row=1, column=1, sticky="w", pady=(4, 0))
 
-        field_box = ttk.LabelFrame(body, text="Trường dữ liệu & giá trị", padding=8)
+        field_box = ttk.LabelFrame(self, text="Trường dữ liệu & giá trị", padding=8)
         field_box.pack(fill="x", pady=(8, 0))
         ttk.Label(field_box, text="Trường:").pack(anchor="w")
-        self.field_var = tk.StringVar(value=next(iter(FIELD_DEFS.values()))["label"])
+        self.field_var = tk.StringVar()
         self.field_combo = ttk.Combobox(field_box, state="readonly", textvariable=self.field_var,
-                                         values=[d["label"] for d in FIELD_DEFS.values()], width=28)
-        self.field_combo.pack(anchor="w", pady=(0, 6))
+                                         values=[d["label"] for d in FIELD_DEFS.values()], width=26)
+        self.field_combo.pack(anchor="w", pady=(0, 6), fill="x")
         self.field_combo.bind("<<ComboboxSelected>>", lambda e: self._rebuild_value_widget())
 
         ttk.Label(field_box, text="Giá trị:").pack(anchor="w")
         self.value_container = ttk.Frame(field_box)
         self.value_container.pack(anchor="w", fill="x", pady=(0, 4))
 
-        btns = ttk.Frame(body)
+        btns = ttk.Frame(self)
         btns.pack(fill="x", pady=(10, 0))
         ttk.Button(btns, text="Lưu dòng", command=self._save).pack(side="left")
-        ttk.Button(btns, text="Hủy", command=self.destroy).pack(side="left", padx=(6, 0))
+        ttk.Button(btns, text="Dòng mới", command=self.load_new).pack(side="left", padx=(6, 0))
 
-        if row:
-            self._load(row)
-        else:
-            self._rebuild_value_widget()
-
-        self.wait_visibility()
-        self.grab_set()
-        self.focus_set()
-        self.protocol("WM_DELETE_WINDOW", self.destroy)
+        self.load_new()
 
     def _rebuild_value_widget(self, initial=None):
         for w in self.value_container.winfo_children():
@@ -357,7 +339,21 @@ class RowEditor(tk.Toplevel):
         self._value_get = get
         set_(initial if initial is not None else FIELD_DEFS[key]["default"])
 
-    def _load(self, row: dict):
+    def load_new(self):
+        """Reset the panel to add-a-new-row mode."""
+        self.editing_id = None
+        self.mode_label.config(text="+ Thêm dòng mới")
+        self.start_hour.current(7)
+        self.end_hour.current(9)
+        self.field_var.set(next(iter(FIELD_DEFS.values()))["label"])
+        self._rebuild_value_widget()
+
+    def load_row(self, row: dict):
+        """Switch the panel to edit-this-row mode, prefilled from `row`."""
+        self.editing_id = row["_id"]
+        self.mode_label.config(
+            text=f"Đang sửa: {row['start']:02d}–{row['end']:02d} — "
+                 f"{FIELD_DEFS[row['field']]['label']}")
         self.start_hour.set(f"{row['start']:02d}")
         self.end_hour.set(f"{row['end']:02d}")
         self.field_var.set(FIELD_DEFS[row["field"]]["label"])
@@ -374,15 +370,15 @@ class RowEditor(tk.Toplevel):
         except ValueError as e:
             messagebox.showerror("Không lưu được dòng", str(e))
             return
-        self.on_save({"start": start, "end": end, "field": key, "value": value})
-        self.destroy()
+        self.on_save({"start": start, "end": end, "field": key, "value": value}, self.editing_id)
+        self.load_new()
 
 
 class App:
     def __init__(self, root: tk.Tk):
         self.root = root
         root.title("Sinh mã bulletin theo dòng thời gian (dựa trên bulletin_generator.py)")
-        root.minsize(820, 640)
+        root.minsize(1020, 640)
         icon_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "icon.ico")
         if os.path.isfile(icon_path):
             try:
@@ -398,8 +394,20 @@ class App:
         body.pack(fill="both", expand=True)
 
         self._build_station_section(body)
-        self._build_table_section(body)
-        self._build_output_section(body)
+
+        main_row = ttk.Frame(body)
+        main_row.pack(fill="both", expand=True)
+
+        left = ttk.Frame(main_row)
+        left.pack(side="left", fill="both", expand=True)
+
+        right_box = ttk.LabelFrame(main_row, text="Thêm / sửa dòng", padding=8)
+        right_box.pack(side="left", fill="y", padx=(10, 0))
+        self.editor = RowEditorPanel(right_box, self._on_editor_save)
+        self.editor.pack(fill="both", expand=True)
+
+        self._build_table_section(left)
+        self._build_output_section(left)
 
     # ----- station (global, applies to every generated mã) --------------
     def _build_station_section(self, parent):
@@ -433,7 +441,7 @@ class App:
 
         toolbar = ttk.Frame(box)
         toolbar.pack(fill="x")
-        ttk.Button(toolbar, text="+ Thêm dòng", command=self._add_row).pack(side="left")
+        ttk.Button(toolbar, text="+ Thêm dòng", command=self.editor.load_new).pack(side="left")
         ttk.Button(toolbar, text="Sửa dòng", command=self._edit_selected).pack(side="left", padx=(6, 0))
         ttk.Button(toolbar, text="Xóa dòng", command=self._delete_selected).pack(side="left", padx=(6, 0))
 
@@ -470,24 +478,31 @@ class App:
             "station_name": self.station_name.get().strip(),
         }
 
-    def _add_row(self):
-        RowEditor(self.root, None, self._on_row_added)
+    def _selected_row_id_or_warn(self):
+        row_id = self._selected_row_id()
+        if row_id is None:
+            messagebox.showinfo("Chưa chọn dòng", "Hãy chọn một dòng trong bảng trước.")
+        return row_id
 
     def _edit_selected(self):
-        row_id = self._selected_row_id()
-        if row_id is None:
-            messagebox.showinfo("Chưa chọn dòng", "Hãy chọn một dòng trong bảng trước.")
-            return
-        row = self._find_row(row_id)
-        RowEditor(self.root, row, lambda new_row: self._on_row_edited(row_id, new_row))
+        row_id = self._selected_row_id_or_warn()
+        if row_id is not None:
+            self.editor.load_row(self._find_row(row_id))
 
     def _delete_selected(self):
-        row_id = self._selected_row_id()
+        row_id = self._selected_row_id_or_warn()
         if row_id is None:
-            messagebox.showinfo("Chưa chọn dòng", "Hãy chọn một dòng trong bảng trước.")
             return
         self.rows = [r for r in self.rows if r["_id"] != row_id]
+        if self.editor.editing_id == row_id:
+            self.editor.load_new()  # was editing the row that just got deleted
         self._refresh_table()
+
+    def _on_editor_save(self, row_dict: dict, editing_id):
+        if editing_id is None:
+            self._on_row_added(row_dict)
+        else:
+            self._on_row_edited(editing_id, row_dict)
 
     def _on_row_added(self, row: dict):
         row["_id"] = self._next_id
