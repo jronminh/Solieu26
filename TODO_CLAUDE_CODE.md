@@ -28,9 +28,16 @@ ngắn gọn để không phải lục `git log` mỗi lần cần nhớ lại �
 
 ## Backlog khác (chưa ưu tiên)
 
-- [ ] Chưa có test nào trong repo. `decode.py` giờ đã tách thuần (không I/O
+- [x] Chưa có test nào trong repo. `decode.py` giờ đã tách thuần (không I/O
       ngoài đọc file), viết unit test cho các hàm `decode_*`/`flatten_record`
-      sẽ rẻ và có giá trị ngay.
+      sẽ rẻ và có giá trị ngay. — Đã thêm `tests/` (pytest, 73 test):
+      `test_decode.py`, `test_pipeline.py`, `test_encode.py`,
+      `test_bulletin_generator.py`, cộng `tests/fixtures/qt_files/` (file
+      "Qt..." THẬT lấy từ `~/solieu26_dl/data` — 4 file lẻ chọn để phủ ca
+      biên: dấu phân cách `=` thay vì `;`, 4 lớp mây, nhiều ngày khác nhau;
+      cộng `full_day_20260810/` — trọn 1 ngày 24 file liên tục cho test
+      ghép nhiều giờ). Chưa test tầng FTP (`download_files`/`run_pipeline`
+      trong pipeline.py) — cần mock `ftplib`, để sau nếu cần.
 - [ ] Nhóm chỉ báo `9`/`5`/`A` (dữ liệu bổ sung / xu hướng khí áp 3 giờ /
       mục vùng) đang bị bỏ qua hoàn toàn khi giải mã (xem
       `decode.decode_indicators`) — cần viết lại phần decode nếu có tính
