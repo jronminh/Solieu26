@@ -10,3 +10,6 @@ dist/
 data/
 *.csv
 config.ini
+
+# Local-only planning notes
+TODO.md
