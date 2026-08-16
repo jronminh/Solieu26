@@ -23,7 +23,6 @@ from tkinter import ttk, messagebox, filedialog
 
 from decode import TABLES, decode_record, _vv_value, _hshs_value
 from encode import encode_record
-from gui_common import STATIONS, STATION_NAMES, NAME_TO_CODE
 
 
 def _code_desc_values(table: dict) -> list:
@@ -106,11 +105,10 @@ class App:
         box = ttk.LabelFrame(parent, text="Trạm & vị trí", padding=8)
         box.pack(fill="x", pady=(0, 8))
 
-        ttk.Label(box, text="Trạm:").grid(row=0, column=0, sticky="w")
-        self.station = ttk.Combobox(box, width=18, state="readonly", values=STATION_NAMES)
-        self.station.current(0)
+        ttk.Label(box, text="Trạm (mã, vd k31):").grid(row=0, column=0, sticky="w")
+        self.station = ttk.Entry(box, width=18)
+        self.station.insert(0, "k31")
         self.station.grid(row=0, column=1, columnspan=2, sticky="w")
-        self.station.bind("<<ComboboxSelected>>", self._on_station_change)
 
         ttk.Label(box, text="Vĩ độ (độ thập phân):").grid(row=1, column=0, sticky="w", pady=(4, 0))
         self.lat = ttk.Entry(box, width=10)
@@ -124,12 +122,8 @@ class App:
 
         ttk.Label(box, text="Tên trạm (in trong mã):").grid(row=3, column=0, sticky="w", pady=(4, 0))
         self.station_name = ttk.Entry(box, width=18)
+        self.station_name.insert(0, "Yên Bái")
         self.station_name.grid(row=3, column=1, columnspan=2, sticky="w", pady=(4, 0))
-        self._on_station_change()
-
-    def _on_station_change(self, event=None):
-        self.station_name.delete(0, "end")
-        self.station_name.insert(0, self.station.get())
 
     def _build_wind_vv_section(self, parent):
         box = ttk.LabelFrame(parent, text="Gió & tầm nhìn xa", padding=8)
@@ -151,7 +145,7 @@ class App:
         self.wind_ff.set(0)
         self.wind_ff.grid(row=2, column=1, sticky="w", pady=(4, 0))
 
-        ttk.Label(box, text="Mã VV (00-99):").grid(row=3, column=0, sticky="w", pady=(4, 0))
+        ttk.Label(box, text="Tầm nhìn xa (mã VV, 00-99):").grid(row=3, column=0, sticky="w", pady=(4, 0))
         self.vv_code = ttk.Spinbox(box, from_=0, to=99, width=6, command=self._update_vv_preview)
         self.vv_code.set(0)
         self.vv_code.grid(row=3, column=1, sticky="w", pady=(4, 0))
@@ -177,19 +171,19 @@ class App:
         self.dew_c.grid(row=1, column=1, sticky="w", pady=(4, 0))
 
     def _build_weather_section(self, parent):
-        box = ttk.LabelFrame(parent, text="Thời tiết hiện tại", padding=8)
+        box = ttk.LabelFrame(parent, text="Thời tiết", padding=8)
         box.pack(fill="x", pady=(0, 8))
-        ttk.Label(box, text="ww:").grid(row=0, column=0, sticky="w")
+        ttk.Label(box, text="Thời tiết hiện tại:").grid(row=0, column=0, sticky="w")
         self.ww = ttk.Combobox(box, width=28, state="readonly",
                                 values=_code_desc_values(TABLES["ww"]))
         self.ww.current(0)
         self.ww.grid(row=0, column=1, sticky="w")
-        ttk.Label(box, text="W1:").grid(row=1, column=0, sticky="w", pady=(4, 0))
+        ttk.Label(box, text="Thời tiết đã qua 1:").grid(row=1, column=0, sticky="w", pady=(4, 0))
         self.w1 = ttk.Combobox(box, width=18, state="readonly",
                                 values=_code_desc_values(TABLES["W1W2"]))
         self.w1.current(0)
         self.w1.grid(row=1, column=1, sticky="w", pady=(4, 0))
-        ttk.Label(box, text="W2:").grid(row=2, column=0, sticky="w", pady=(4, 0))
+        ttk.Label(box, text="Thời tiết đã qua 2:").grid(row=2, column=0, sticky="w", pady=(4, 0))
         self.w2 = ttk.Combobox(box, width=18, state="readonly",
                                 values=_code_desc_values(TABLES["W1W2"]))
         self.w2.current(0)
@@ -216,9 +210,9 @@ class App:
     def _build_pressure_section(self, parent):
         box = ttk.LabelFrame(parent, text="Áp suất", padding=8)
         box.pack(fill="x")
-        ttk.Label(box, text="Áp suất (hPa):").grid(row=0, column=0, sticky="w")
+        ttk.Label(box, text="Áp suất (mmHg):").grid(row=0, column=0, sticky="w")
         self.pressure = ttk.Entry(box, width=10)
-        self.pressure.insert(0, "1005.3")
+        self.pressure.insert(0, "754.0")
         self.pressure.grid(row=0, column=1, sticky="w")
 
     def _build_output(self, parent):
@@ -240,9 +234,8 @@ class App:
     # ----- actions --------------------------------------------------------
     def _generate(self):
         try:
-            station_code = NAME_TO_CODE[self.station.get()]
             raw = encode_record(
-                station_code=station_code,
+                station_code=self.station.get().strip(),
                 lat=float(self.lat.get()),
                 lon=float(self.lon.get()),
                 vv_code=self.vv_code.get(),
@@ -255,7 +248,7 @@ class App:
                 w1_code=_code_from_selection(self.w1.get()),
                 w2_code=_code_from_selection(self.w2.get()),
                 clouds=[row.to_dict() for row in self.cloud_rows],
-                pressure_hpa=float(self.pressure.get()) if self.pressure.get().strip() else None,
+                pressure_mmhg=float(self.pressure.get()) if self.pressure.get().strip() else None,
                 station_name=self.station_name.get().strip(),
             )
         except ValueError as e:

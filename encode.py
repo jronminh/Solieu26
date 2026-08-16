@@ -100,18 +100,16 @@ def encode_cloud(N_oktas_code: str, cloud_type_code: str, hshs_code: str) -> str
     return f"8{N_oktas_code}{cloud_type_code}{int(hshs_code):02d}"
 
 
-def encode_pressure(hpa: float) -> str:
-    """Reverse of decode_pressure: pressure_hpa = raw * 4 / 3, token is raw
-    written as 4 digits (3 before + 1 after the decimal point). Only raw in
-    [700, 800) round-trips through a 4-digit token, i.e. hpa in
-    [933.3, 1066.7) — comfortably covers real station-level pressure."""
-    raw = hpa * 3 / 4
-    raw_x10 = round(raw * 10)          # round on the tenths digit FIRST so a
-    whole, tenth = divmod(raw_x10, 10)  # 999->1000 carry lands in `whole`, not lost
+def encode_pressure(mmhg: float) -> str:
+    """Reverse of decode_pressure: the token IS the pressure in mmHg (to one
+    decimal) — decode_pressure just relabels it pressure_raw and additionally
+    converts to pressure_hpa = raw * 4/3. Token is 4 digits (3 before + 1
+    after the decimal point), so only mmhg in [700.0, 800.0) round-trips."""
+    raw_x10 = round(mmhg * 10)          # round on the tenths digit FIRST so a
+    whole, tenth = divmod(raw_x10, 10)  # 799.99->8000 carry lands in `whole`, not lost
     if not (700 <= whole <= 799):
         raise ValueError(
-            f"áp suất {hpa} hPa ngoài phạm vi mã hoá được "
-            f"(quy đổi raw={raw:.1f}, cần trong khoảng 933.3-1066.6 hPa)")
+            f"áp suất {mmhg} mmHg ngoài phạm vi mã hoá được (cần 700.0-799.9 mmHg)")
     return f"{whole:03d}{tenth}"
 
 
@@ -133,7 +131,7 @@ def encode_record(*, station_code: str, lat: float, lon: float, vv_code: str,
                    wind_N_code: str, wind_dd: float, wind_ff: float,
                    temp_c: float = None, dew_c: float = None,
                    ww_code: str = None, w1_code: str = "/", w2_code: str = "/",
-                   clouds: list = None, pressure_hpa: float = None,
+                   clouds: list = None, pressure_mmhg: float = None,
                    station_name: str = "") -> str:
     """Assemble one full raw record string in the token order split_record()
     expects: head wind [temp] [dew] [weather] [cloud...] [pressure] name tail.
@@ -151,8 +149,8 @@ def encode_record(*, station_code: str, lat: float, lon: float, vv_code: str,
         tokens.append(encode_weather(ww_code, w1_code, w2_code))
     for cloud in (clouds or []):
         tokens.append(encode_cloud(cloud["N"], cloud["C"], cloud["hshs"]))
-    if pressure_hpa is not None:
-        tokens.append(encode_pressure(pressure_hpa))
+    if pressure_mmhg is not None:
+        tokens.append(encode_pressure(pressure_mmhg))
     if station_name:
         tokens.append(encode_name(station_name))
     tokens.append(encode_tail(station_code, lat, lon))
