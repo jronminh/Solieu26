@@ -214,9 +214,6 @@ class App:
             "start_date":  tk.StringVar(value=today.strftime("%Y-%m-%d")),
             "end_date":    tk.StringVar(value=today.strftime("%Y-%m-%d")),
             "delete_on_exit": tk.BooleanVar(value=bool(d.get("delete_on_exit", False))),
-            # Display mode: "Cơ bản" (default) shows only Dữ liệu/Tự động truy vấn
-            # in the info panel and hides the log; "Nâng cao" shows every field + log.
-            "advanced_display": tk.BooleanVar(value=False),
             "auto_value":  tk.StringVar(value=str(d.get("auto_query_value", 15))),
             "auto_unit":   tk.StringVar(value="Hours" if d.get("auto_query_unit", "minutes") == "hours" else "Minutes"),
             "auto_on_startup": tk.BooleanVar(value=bool(d.get("auto_query_on_startup", False))),
@@ -234,8 +231,7 @@ class App:
         self._build_menu()
         self._build_ui()
         self._fit_window_to_content()
-        # Floor = the natural size with the log hidden (its default state) — small
-        # enough to fit just the query box + the 4 buttons, but never smaller.
+        # Floor = the natural size with every field + the log shown.
         self.root.minsize(self.root.winfo_width(), self.root.winfo_height())
         self.root.after(100, self._poll)
         self._log("INFO", "Khởi động xong — sẵn sàng. Điền thông tin rồi bấm 'Làm mới'.")
@@ -262,10 +258,8 @@ class App:
         opt_menu.add_command(label="Làm mới", command=self._on_run)
         opt_menu.add_separator()
 
-        # "Hiển thị nâng cao/cơ bản" is a button at the bottom-left of the main
-        # screen now, not here — see _build_ui. Thiết lập... opens the combined
-        # Kết nối / Đường dẫn / Tự động truy vấn dialog, with config.ini actions
-        # at its bottom.
+        # Thiết lập... opens the combined Kết nối / Đường dẫn / Tự động truy vấn
+        # dialog, with config.ini actions at its bottom.
         opt_menu.add_command(label="Thiết lập...", command=self._open_settings_dialog)
         opt_menu.add_separator()
 
@@ -287,45 +281,34 @@ class App:
         frm.pack(fill="both", expand=True)
 
         # --- Truy vấn nâng cao: checkbox chỉ đổi CHẾ ĐỘ truy vấn (ngày đơn ↔
-        # khoảng ngày) và tạm dừng/tiếp tục tự động truy vấn — KHÔNG điều khiển
-        # hiển thị gì cả. Chế độ thường (bỏ tick, mặc định) luôn truy vấn "hôm nay".
+        # khoảng ngày) và tạm dừng/tiếp tục tự động truy vấn. Chế độ thường (bỏ
+        # tick, mặc định) luôn truy vấn "hôm nay".
         self.adv_check = ttk.Checkbutton(frm, text="Nâng cao",
                                          variable=self.v["advanced_mode"],
                                          command=self._on_toggle_advanced)
         self.adv_check.pack(anchor="w")
 
         # --- Thông tin truy vấn --- (read-only status; recomputed by _refresh_info_panel)
-        # No LabelFrame border — laid directly on frm. Chế độ Cơ bản (mặc định) chỉ
-        # hiện Dữ liệu/Tự động truy vấn; Nâng cao hiện đầy đủ, kể cả Ngày bắt đầu/
-        # kết thúc của Truy vấn nâng cao — hàng "advanced_only" được grid_remove()/
-        # grid() lại theo "Hiển thị nâng cao" trong _apply_display_mode(), độc lập
-        # với checkbox ở trên.
+        # No LabelFrame border — laid directly on frm.
         top = ttk.Frame(frm)
         top.pack(fill="x", pady=(8, 0))
-        self.top_frame = top   # anchor: adv_check is packed(before=self.top_frame) when re-shown
 
-        # Widgets shown only in "Hiển thị nâng cao" — grid()/grid_remove()'d as a
-        # flat list in _apply_display_mode().
-        self._info_advanced_rows = []
-
-        def info_row(r, caption, var=None, widget=None, advanced_only=False):
+        def info_row(r, caption, var=None, widget=None):
             """One grid row: caption label + either a read-only value (var, as a
             Label) or an editable/composite widget passed in directly."""
             cap = ttk.Label(top, text=caption)
             val = widget if widget is not None else ttk.Label(top, textvariable=var)
             cap.grid(row=r, column=0, sticky="w", padx=6, pady=2)
             val.grid(row=r, column=1, sticky="ew" if widget is not None else "w", padx=6, pady=2)
-            if advanced_only:
-                self._info_advanced_rows.extend((cap, val))
 
         # Ngày bắt đầu/kết thúc + 2 nút điều khiển chỉ THẬT SỰ dùng được khi
         # "Truy vấn nâng cao" được tick — _refresh_advanced_controls_state() giữ
-        # chúng ở trạng thái disabled khi chưa tick, dù đang hiển thị hay không.
+        # chúng ở trạng thái disabled khi chưa tick.
         self.start_date_entry = ttk.Entry(top, textvariable=self.v["start_date"], width=12)
-        info_row(0, "Ngày bắt đầu:", widget=self.start_date_entry, advanced_only=True)
+        info_row(0, "Ngày bắt đầu:", widget=self.start_date_entry)
 
         self.end_date_entry = ttk.Entry(top, textvariable=self.v["end_date"], width=12)
-        info_row(1, "Ngày kết thúc:", widget=self.end_date_entry, advanced_only=True)
+        info_row(1, "Ngày kết thúc:", widget=self.end_date_entry)
 
         # "Bắt đầu" chạy truy vấn nâng cao ngay tại chỗ; "Về hiện tại" nằm cạnh —
         # cả hai căn giữa trên dòng riêng ngay dưới Ngày kết thúc.
@@ -335,47 +318,38 @@ class App:
         self.now_btn = ttk.Button(btn_row, text="Về hiện tại", command=self._on_now)
         self.now_btn.pack(side="left")
         btn_row.grid(row=2, column=0, columnspan=2, pady=(2, 4))
-        self._info_advanced_rows.append(btn_row)
 
-        info_row(3, "Máy chủ:", self.v["ftp_host"], advanced_only=True)
-        info_row(4, "Xuất CSV:", self.info["csv_result"], advanced_only=True)
+        info_row(3, "Máy chủ:", self.v["ftp_host"])
+        info_row(4, "Xuất CSV:", self.info["csv_result"])
         info_row(5, "Dữ liệu:", self.info["data_status"])
         info_row(6, "Tự động:", self.info["auto_status"])
-        info_row(7, "File thiếu:", self.info["missing"], advanced_only=True)
+        info_row(7, "File thiếu:", self.info["missing"])
         top.columnconfigure(1, weight=1)
 
-        # --- Xem số liệu — luôn hiển thị (cả Cơ bản lẫn Nâng cao), ngay dưới trường
-        # dữ liệu, căn giữa. pack() không fill/expand → tự căn giữa theo chiều ngang
-        # trong frm.
+        # --- Xem số liệu — ngay dưới trường dữ liệu, căn giữa. pack() không
+        # fill/expand → tự căn giữa theo chiều ngang trong frm.
         view_row = ttk.Frame(frm)
         view_row.pack(pady=(8, 0))
         ttk.Button(view_row, text="Xem số liệu",
                   command=self._open_history_viewer).pack(side="left")
 
-        # --- Status bar at the BOTTOM: display-mode toggle at bottom-left, status
-        # indicator at bottom-right ---
+        # --- Status bar at the BOTTOM ---
         statusbar = ttk.Frame(frm)
         statusbar.pack(side="bottom", fill="x", pady=(6, 0))
-        self.display_toggle_chk = ttk.Checkbutton(statusbar, text="Hiển thị nâng cao",
-                                                  variable=self.v["advanced_display"],
-                                                  command=self._on_toggle_display_mode)
-        self.display_toggle_chk.pack(side="left")
         self.status = ttk.Label(statusbar, text="Sẵn sàng", anchor="e")
         self.status.pack(side="right")
 
         # --- Log (fills the middle, sits above the status bar) ---
-        # No LabelFrame border — built regardless, only packed/shown in "Nâng cao"
-        # display mode (default off); still receives every log line while hidden,
-        # so nothing is lost.
+        # No LabelFrame border — built regardless.
         self.log = scrolledtext.ScrolledText(frm, height=12, state="disabled",
                                              wrap="word", font=("Consolas", 9))
+        self.log.pack(side="top", fill="both", expand=True, pady=(8, 0))
 
         # Color tags for each part of a log line
         self.log.tag_config("ts", foreground="#9ca3af")          # timestamp (light gray)
         for lvl, color in LOG_COLORS.items():                    # level
             self.log.tag_config("lvl_" + lvl, foreground=color)
 
-        self._apply_display_mode()
         self._refresh_advanced_controls_state()
 
     def _row(self, parent, r, label, var, width=None, show=None):
@@ -873,9 +847,8 @@ class App:
         # (see _on_date_filter_change), not a row filter within it.
 
         if mode == "raw":
-            # Just a few identity columns + raw, to read the original bulletin per station.
-            prefer = ["obs_time", "station", "station_code", "source_file",
-                      "hour", "cloud_layers", "raw"]
+            # Just obs_time + raw, to read the original bulletin per station.
+            prefer = ["obs_time", "raw"]
             cols = [c for c in prefer if c in header]
         else:
             cols = [c for c in header if c != "raw"]   # data mode: all columns, minus raw
@@ -932,8 +905,7 @@ class App:
     def _on_toggle_advanced(self):
         """Toggle 'Truy vấn nâng cao': switches query mode (ngày đơn ↔ khoảng ngày),
         pauses/resumes auto-query (mutually exclusive with advanced mode), and
-        enables/disables the date-range fields + 'Bắt đầu'/'Về hiện tại' (visible
-        or not — that's 'Hiển thị nâng cao', a separate concern)."""
+        enables/disables the date-range fields + 'Bắt đầu'/'Về hiện tại'."""
         on = self.v["advanced_mode"].get()
         if on:
             if self.auto_job is not None:
@@ -948,8 +920,7 @@ class App:
 
     def _refresh_advanced_controls_state(self):
         """Ngày bắt đầu/kết thúc + 'Về hiện tại' theo đúng trạng thái tick của
-        'Truy vấn nâng cao' (bất kể đang hiển thị Cơ bản hay Nâng cao); 'Bắt đầu'
-        còn bị khóa thêm khi đang có tác vụ chạy."""
+        'Truy vấn nâng cao'; 'Bắt đầu' còn bị khóa thêm khi đang có tác vụ chạy."""
         on = self.v["advanced_mode"].get()
         field_state = "normal" if on else "disabled"
         self.start_date_entry.config(state=field_state)
@@ -1046,36 +1017,6 @@ class App:
     def _on_toggle_delete(self):
         state = "Bật" if self.v["delete_on_exit"].get() else "Tắt"
         self._log("ACT", f"Tùy chọn 'Xóa file tải về sau khi xong': {state}")
-
-    def _apply_display_mode(self):
-        """Show/hide the 'Truy vấn nâng cao' checkbox, the advanced-only info rows,
-        and the log frame together, per self.v["advanced_display"]. Switching to
-        'Cơ bản' also force-unchecks 'Truy vấn nâng cao' — can't query a date range
-        you can't see/edit. Called on init and every toggle."""
-        advanced = self.v["advanced_display"].get()
-
-        if advanced:
-            self.adv_check.pack(anchor="w", before=self.top_frame)
-        else:
-            self.adv_check.pack_forget()
-            if self.v["advanced_mode"].get():
-                self.v["advanced_mode"].set(False)
-                self._on_toggle_advanced()
-
-        for w in self._info_advanced_rows:
-            (w.grid if advanced else w.grid_remove)()
-
-        if advanced:
-            self.log.pack(side="top", fill="both", expand=True, pady=(8, 0))
-        else:
-            self.log.pack_forget()
-
-    def _on_toggle_display_mode(self):
-        # Checkbutton already flipped self.v["advanced_display"] before calling this.
-        advanced = self.v["advanced_display"].get()
-        self._apply_display_mode()
-        self._fit_window_to_content()
-        self._log("ACT", f"Chế độ hiển thị: {'Nâng cao' if advanced else 'Cơ bản'}")
 
     def _report_open(self, ok: bool, info: str, what: str = None, warn: bool = False):
         """Log the result of an open_folder()/open_in_editor() call in the standard
