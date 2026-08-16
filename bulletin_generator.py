@@ -1,21 +1,36 @@
 """
 bulletin_generator.py
 ====================
-Small standalone Tkinter tool that generates a synthetic raw "Qt..." bulletin
-record — the reverse of decode.py — for testing decode.py/pipeline.py without
+Standalone Tkinter tool that generates synthetic raw "Qt..." bulletin records
+— the reverse of decode.py — for testing decode.py/pipeline.py without
 needing a real FTP download.
 
-Fill in the form, hit "Sinh mã": encode.py assembles the raw token string,
-then decode.py immediately decodes it again so you can visually confirm the
-round-trip matches what you typed. "Lưu vào file..." appends the record
-(';'-terminated) to a .txt file in the same shape decode.get_qt_data() reads,
-so you can point gui.py's output folder at it (or feed it straight into
-decode.decode_qt_file) to sanity-check the whole pipeline.
+The backbone is a table of Thời gian / Trường dữ liệu / Giá trị: each row
+says "field F holds value V from giờ START to giờ END, both included" for
+the (single, fixed) station entered at the top — e.g. "07–09 / Tốc độ gió /
+5", "09–11 / Tốc độ gió / 7", "07–10 / Nhiệt độ / 28.5". Rows can be added,
+edited (double-click, or "Sửa dòng") and deleted freely, one field at a time,
+each with its own time range.
+
+"Sinh tất cả mã" is where the rows get merged: for every HOUR any row's
+range touches (a "07–09" row covers hours 07, 08 AND 09 — the format is
+inherently hourly, one record per hour), it merges whichever rows currently
+cover that hour — one value per field, last-started row wins on overlap —
+into a single encode.encode_record() call. So the wind example above (07–09
+=5, 09–11 =7 — both covering hour 09, the later-starting row wins there)
+produces five codes, at 07h/08h/09h/10h/11h. Each result is
+immediately decode.decode_record()-checked for a live sanity
+preview, and "Lưu vào file..." appends every generated record (';'-terminated)
+to a .txt file in the same shape decode.get_qt_data() reads — so you can
+point gui.py's output folder at it, or feed it straight into
+decode.decode_qt_file, to sanity-check the whole pipeline against a
+hand-built time series.
 
 Standalone — does not import gui.py/pipeline.py/config.py, does not touch FTP
 or the app's config. Run:  python bulletin_generator.py
 """
 
+import json
 import os
 
 import tkinter as tk
@@ -35,44 +50,339 @@ def _code_from_selection(text: str) -> str:
     return text.split(" — ", 1)[0].strip()
 
 
-class CloudRow:
-    """One 'lớp mây' row: N oktas / loại mây / mã hshs + a live height preview."""
+def _select_code(combo: ttk.Combobox, table: dict, code: str):
+    """Point a 'code — desc' Combobox at the entry whose code matches."""
+    for i, k in enumerate(table.keys()):
+        if k == code:
+            combo.current(i)
+            return
+    combo.current(0)
 
-    def __init__(self, parent, on_remove):
-        self.frame = ttk.Frame(parent)
-        self.N = ttk.Combobox(self.frame, width=6, state="readonly",
-                               values=_code_desc_values(TABLES["N_oktas"]))
-        self.N.current(0)
-        self.C = ttk.Combobox(self.frame, width=10, state="readonly",
-                               values=_code_desc_values(TABLES["cloud_type"]))
-        self.C.current(0)
-        self.hshs = ttk.Entry(self.frame, width=5)
-        self.hshs.insert(0, "00")
-        self.preview = ttk.Label(self.frame, foreground="#6b7280")
-        self.N.grid(row=0, column=0, padx=2)
-        self.C.grid(row=0, column=1, padx=2)
-        self.hshs.grid(row=0, column=2, padx=2)
-        self.preview.grid(row=0, column=3, padx=(6, 2), sticky="w")
-        ttk.Button(self.frame, text="x", width=2,
-                   command=lambda: on_remove(self)).grid(row=0, column=4, padx=2)
-        self.hshs.bind("<KeyRelease>", lambda e: self._update_preview())
-        self._update_preview()
 
-    def _update_preview(self):
-        h = hshs_value(self.hshs.get().strip(), TABLES)
-        self.preview.config(text=f"≈ {h} m" if h is not None else "mã không hợp lệ")
+def _set_text(widget: tk.Text, text: str):
+    widget.config(state="normal")
+    widget.delete("1.0", "end")
+    widget.insert("1.0", text)
+    widget.config(state="disabled")
 
-    def to_dict(self):
-        return {"N": _code_from_selection(self.N.get()),
-                "C": _code_from_selection(self.C.get()),
-                "hshs": self.hshs.get().strip()}
+
+# =============================================================================
+# FIELD REGISTRY — one entry per selectable "trường dữ liệu". Each builder
+# creates the value-editing widget(s) for that field inside a given parent
+# and returns (widget, get() -> value, set(value)) so RowEditor can stay
+# generic across every field type (code lookups, floats, composite cloud).
+# =============================================================================
+
+def _build_code_field(table: dict, width: int = 30):
+    def builder(parent):
+        cb = ttk.Combobox(parent, width=width, state="readonly",
+                           values=_code_desc_values(table))
+        cb.current(0)
+        cb.pack(anchor="w")
+
+        def get():
+            return _code_from_selection(cb.get())
+
+        def set_(code):
+            _select_code(cb, table, code)
+
+        return cb, get, set_
+    return builder
+
+
+def _build_float_field(width: int = 10):
+    def builder(parent):
+        e = ttk.Entry(parent, width=width)
+        e.pack(anchor="w")
+
+        def get():
+            return float(e.get())
+
+        def set_(v):
+            e.delete(0, "end")
+            e.insert(0, str(v))
+
+        return e, get, set_
+    return builder
+
+
+def _build_wind_dd_field(parent):
+    sp = ttk.Spinbox(parent, from_=0, to=360, increment=10, width=8)
+    sp.set(0)
+    sp.pack(anchor="w")
+
+    def get():
+        return float(sp.get())
+
+    def set_(v):
+        sp.set(v)
+
+    return sp, get, set_
+
+
+def _build_wind_ff_field(parent):
+    sp = ttk.Spinbox(parent, from_=0, to=99, width=8)
+    sp.set(0)
+    sp.pack(anchor="w")
+
+    def get():
+        return float(sp.get())
+
+    def set_(v):
+        sp.set(v)
+
+    return sp, get, set_
+
+
+def _build_vv_field(parent):
+    frame = ttk.Frame(parent)
+    sp = ttk.Spinbox(frame, from_=0, to=99, width=6)
+    sp.set(0)
+    sp.pack(side="left")
+    preview = ttk.Label(frame, foreground="#6b7280")
+    preview.pack(side="left", padx=(6, 0))
+
+    def _update_preview(*_):
+        v = vv_value(f"{int(sp.get() or 0):02d}", TABLES)
+        preview.config(text=f"\u2248 {v} km" if v is not None else "không xác định")
+
+    sp.config(command=_update_preview)
+    sp.bind("<KeyRelease>", _update_preview)
+    _update_preview()
+
+    def get():
+        return f"{int(sp.get()):02d}"
+
+    def set_(code):
+        sp.set(int(code))
+        _update_preview()
+
+    return frame, get, set_
+
+
+def _build_cloud_field(parent):
+    frame = ttk.Frame(parent)
+    N = ttk.Combobox(frame, width=6, state="readonly", values=_code_desc_values(TABLES["N_oktas"]))
+    N.current(0)
+    N.pack(side="left", padx=2)
+    C = ttk.Combobox(frame, width=10, state="readonly", values=_code_desc_values(TABLES["cloud_type"]))
+    C.current(0)
+    C.pack(side="left", padx=2)
+    hshs = ttk.Entry(frame, width=5)
+    hshs.insert(0, "00")
+    hshs.pack(side="left", padx=2)
+    preview = ttk.Label(frame, foreground="#6b7280")
+    preview.pack(side="left", padx=(6, 2))
+
+    def _update_preview(*_):
+        h = hshs_value(hshs.get().strip(), TABLES)
+        preview.config(text=f"\u2248 {h} m" if h is not None else "mã không hợp lệ")
+
+    hshs.bind("<KeyRelease>", _update_preview)
+    _update_preview()
+
+    def get():
+        return {"N": _code_from_selection(N.get()), "C": _code_from_selection(C.get()),
+                "hshs": hshs.get().strip()}
+
+    def set_(v):
+        _select_code(N, TABLES["N_oktas"], v["N"])
+        _select_code(C, TABLES["cloud_type"], v["C"])
+        hshs.delete(0, "end")
+        hshs.insert(0, v["hshs"])
+        _update_preview()
+
+    return frame, get, set_
+
+
+FIELD_DEFS = {
+    "wind_dd": {"label": "Hướng gió (độ)", "builder": _build_wind_dd_field, "default": 0.0},
+    "wind_ff": {"label": "Tốc độ gió", "builder": _build_wind_ff_field, "default": 0.0},
+    "N_total": {"label": "Mây tổng lượng (N)", "builder": _build_code_field(TABLES["N_oktas"], 20), "default": "0"},
+    "vv":      {"label": "Tầm nhìn xa (VV)", "builder": _build_vv_field, "default": "00"},
+    "temp":    {"label": "Nhiệt độ (°C)", "builder": _build_float_field(), "default": 28.5},
+    "dew":     {"label": "Điểm sương (°C)", "builder": _build_float_field(), "default": 24.1},
+    "ww":      {"label": "Thời tiết hiện tại", "builder": _build_code_field(TABLES["ww"], 32), "default": "00"},
+    "w1":      {"label": "Thời tiết đã qua 1", "builder": _build_code_field(TABLES["W1W2"], 22), "default": "0"},
+    "w2":      {"label": "Thời tiết đã qua 2", "builder": _build_code_field(TABLES["W1W2"], 22), "default": "0"},
+    "pressure": {"label": "Áp suất (mmHg)", "builder": _build_float_field(), "default": 754.0},
+    "cloud1":  {"label": "Mây — lớp 1", "builder": _build_cloud_field, "default": {"N": "0", "C": "0", "hshs": "00"}},
+    "cloud2":  {"label": "Mây — lớp 2", "builder": _build_cloud_field, "default": {"N": "0", "C": "0", "hshs": "00"}},
+    "cloud3":  {"label": "Mây — lớp 3", "builder": _build_cloud_field, "default": {"N": "0", "C": "0", "hshs": "00"}},
+    "cloud4":  {"label": "Mây — lớp 4", "builder": _build_cloud_field, "default": {"N": "0", "C": "0", "hshs": "00"}},
+}
+
+CLOUD_FIELD_KEYS = ("cloud1", "cloud2", "cloud3", "cloud4")
+
+
+def _field_key_from_label(label: str):
+    for k, d in FIELD_DEFS.items():
+        if d["label"] == label:
+            return k
+    return None
+
+
+def _row_value_str(row: dict) -> str:
+    key, v = row["field"], row["value"]
+    if key in CLOUD_FIELD_KEYS:
+        h = hshs_value(v["hshs"], TABLES)
+        return (f"N={TABLES['N_oktas'].get(v['N'], v['N'])} "
+                f"{TABLES['cloud_type'].get(v['C'], v['C'])} "
+                f"h\u2248{h}m" if h is not None else f"hshs={v['hshs']}")
+    if key == "N_total":
+        return f"{v} — {TABLES['N_oktas'].get(v, '?')}"
+    if key == "vv":
+        km = vv_value(v, TABLES)
+        return f"{v} (\u2248{km} km)" if km is not None else v
+    if key == "ww":
+        return f"{v} — {TABLES['ww'].get(v, '?')}"
+    if key in ("w1", "w2"):
+        return f"{v} — {TABLES['W1W2'].get(v, '?')}"
+    if key == "wind_dd":
+        return f"{v:.0f}\u00b0"
+    if key == "wind_ff":
+        return f"{v:.0f}"
+    if key in ("temp", "dew"):
+        return f"{v}\u00b0C"
+    if key == "pressure":
+        return f"{v} mmHg"
+    return str(v)
+
+
+def _covered_hours(rows: list) -> list:
+    """Every hour any row's [start, end] range touches (both ends included)
+    — a mã gets generated per HOUR, not once per row: a "07–09" row covers
+    hours 07, 08 AND 09, each getting its own record (the format is
+    inherently hourly)."""
+    hours = set()
+    for r in rows:
+        hours.update(range(r["start"], r["end"] + 1))
+    return sorted(hours)
+
+
+def _merge_at_hour(rows: list, hour: int) -> dict:
+    """One value per field: among rows covering `hour` ([start, end], both
+    ends included), the one with the latest start wins (rows are pre-sorted
+    by start ascending, so later-in-list overwrites earlier on a tie/overlap)."""
+    state = {}
+    for r in sorted(rows, key=lambda r: r["start"]):
+        if r["start"] <= hour <= r["end"]:
+            state[r["field"]] = r["value"]
+    return state
+
+
+def _encode_state(state: dict, station_code: str, lat: float, lon: float, station_name: str) -> str:
+    clouds = [state[k] for k in CLOUD_FIELD_KEYS if k in state]
+    return encode_record(
+        station_code=station_code, lat=lat, lon=lon,
+        vv_code=state.get("vv", "00"),
+        wind_N_code=state.get("N_total", "0"),
+        wind_dd=state.get("wind_dd", 0.0),
+        wind_ff=state.get("wind_ff", 0.0),
+        temp_c=state.get("temp"),
+        dew_c=state.get("dew"),
+        ww_code=state.get("ww"),
+        w1_code=state.get("w1", "/"),
+        w2_code=state.get("w2", "/"),
+        clouds=clouds,
+        pressure_mmhg=state.get("pressure"),
+        station_name=station_name,
+    )
+
+
+class RowEditor(tk.Toplevel):
+    """Add/edit one Thời gian+Trường dữ liệu+Giá trị row — one field, one
+    value, one [start, end] hour range (both ends included). Also the
+    interface for editing an existing row (`row` prefills it; `on_save` gets
+    called with the result either way)."""
+
+    HOURS = [f"{h:02d}" for h in range(24)]
+
+    def __init__(self, parent, row: dict, on_save):
+        super().__init__(parent)
+        self.title("Sửa dòng" if row else "Thêm dòng")
+        self.transient(parent)
+        self.resizable(False, False)
+        self.on_save = on_save
+        self._value_get = None
+
+        body = ttk.Frame(self, padding=10)
+        body.pack(fill="both", expand=True)
+
+        time_box = ttk.LabelFrame(body, text="Khung giờ áp dụng", padding=8)
+        time_box.pack(fill="x")
+        ttk.Label(time_box, text="Từ giờ:").grid(row=0, column=0, sticky="w")
+        self.start_hour = ttk.Combobox(time_box, width=4, state="readonly", values=self.HOURS)
+        self.start_hour.current(7)
+        self.start_hour.grid(row=0, column=1, sticky="w")
+        ttk.Label(time_box, text="Đến giờ (gồm cả giờ này):").grid(row=0, column=2, sticky="w", padx=(10, 0))
+        self.end_hour = ttk.Combobox(time_box, width=4, state="readonly", values=self.HOURS)
+        self.end_hour.current(9)
+        self.end_hour.grid(row=0, column=3, sticky="w")
+
+        field_box = ttk.LabelFrame(body, text="Trường dữ liệu & giá trị", padding=8)
+        field_box.pack(fill="x", pady=(8, 0))
+        ttk.Label(field_box, text="Trường:").pack(anchor="w")
+        self.field_var = tk.StringVar(value=next(iter(FIELD_DEFS.values()))["label"])
+        self.field_combo = ttk.Combobox(field_box, state="readonly", textvariable=self.field_var,
+                                         values=[d["label"] for d in FIELD_DEFS.values()], width=28)
+        self.field_combo.pack(anchor="w", pady=(0, 6))
+        self.field_combo.bind("<<ComboboxSelected>>", lambda e: self._rebuild_value_widget())
+
+        ttk.Label(field_box, text="Giá trị:").pack(anchor="w")
+        self.value_container = ttk.Frame(field_box)
+        self.value_container.pack(anchor="w", fill="x", pady=(0, 4))
+
+        btns = ttk.Frame(body)
+        btns.pack(fill="x", pady=(10, 0))
+        ttk.Button(btns, text="Lưu dòng", command=self._save).pack(side="left")
+        ttk.Button(btns, text="Hủy", command=self.destroy).pack(side="left", padx=(6, 0))
+
+        if row:
+            self._load(row)
+        else:
+            self._rebuild_value_widget()
+
+        self.wait_visibility()
+        self.grab_set()
+        self.focus_set()
+        self.protocol("WM_DELETE_WINDOW", self.destroy)
+
+    def _rebuild_value_widget(self, initial=None):
+        for w in self.value_container.winfo_children():
+            w.destroy()
+        key = _field_key_from_label(self.field_var.get())
+        widget, get, set_ = FIELD_DEFS[key]["builder"](self.value_container)
+        widget.pack(anchor="w")
+        self._value_get = get
+        set_(initial if initial is not None else FIELD_DEFS[key]["default"])
+
+    def _load(self, row: dict):
+        self.start_hour.set(f"{row['start']:02d}")
+        self.end_hour.set(f"{row['end']:02d}")
+        self.field_var.set(FIELD_DEFS[row["field"]]["label"])
+        self._rebuild_value_widget(initial=row["value"])
+
+    def _save(self):
+        try:
+            start = int(self.start_hour.get())
+            end = int(self.end_hour.get())
+            if end < start:
+                raise ValueError("giờ kết thúc phải lớn hơn hoặc bằng giờ bắt đầu")
+            key = _field_key_from_label(self.field_var.get())
+            value = self._value_get()
+        except ValueError as e:
+            messagebox.showerror("Không lưu được dòng", str(e))
+            return
+        self.on_save({"start": start, "end": end, "field": key, "value": value})
+        self.destroy()
 
 
 class App:
     def __init__(self, root: tk.Tk):
         self.root = root
-        root.title("Sinh mã bulletin (thử nghiệm — đảo ngược decode.py)")
-        root.minsize(760, 560)
+        root.title("Sinh mã bulletin theo dòng thời gian (dựa trên bulletin_generator.py)")
+        root.minsize(820, 640)
         icon_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "icon.ico")
         if os.path.isfile(icon_path):
             try:
@@ -80,206 +390,183 @@ class App:
             except tk.TclError:
                 pass
 
-        self.cloud_rows = []
-        self._last_raw = None
+        self.rows = []      # list of {"_id", "start", "end", "field", "value"}
+        self._next_id = 1
+        self._last_lines = []  # raw records from the last "Sinh tất cả mã", in hour order
 
         body = ttk.Frame(root, padding=10)
         body.pack(fill="both", expand=True)
-        left = ttk.Frame(body)
-        left.pack(side="left", fill="y", anchor="n")
-        right = ttk.Frame(body)
-        right.pack(side="left", fill="both", expand=True, padx=(12, 0))
 
-        self._build_station_section(left)
-        self._build_wind_vv_section(left)
-        self._build_temp_section(left)
-        self._build_weather_section(left)
-        self._build_cloud_section(left)
-        self._build_pressure_section(left)
+        self._build_station_section(body)
+        self._build_table_section(body)
+        self._build_output_section(body)
 
-        ttk.Button(left, text="Sinh mã", command=self._generate).pack(fill="x", pady=(10, 0))
-
-        self._build_output(right)
-
-    # ----- form sections -----------------------------------------------
+    # ----- station (global, applies to every generated mã) --------------
     def _build_station_section(self, parent):
-        box = ttk.LabelFrame(parent, text="Trạm & vị trí", padding=8)
+        box = ttk.LabelFrame(parent, text="Trạm & vị trí (áp dụng cho mọi mã)", padding=8)
         box.pack(fill="x", pady=(0, 8))
 
         ttk.Label(box, text="Trạm (mã, vd k31):").grid(row=0, column=0, sticky="w")
         self.station = ttk.Entry(box, width=18)
         self.station.insert(0, "k31")
-        self.station.grid(row=0, column=1, columnspan=2, sticky="w")
+        self.station.grid(row=0, column=1, sticky="w")
 
-        ttk.Label(box, text="Vĩ độ (độ thập phân):").grid(row=1, column=0, sticky="w", pady=(4, 0))
+        ttk.Label(box, text="Vĩ độ:").grid(row=0, column=2, sticky="w", padx=(12, 0))
         self.lat = ttk.Entry(box, width=10)
         self.lat.insert(0, "21.7")
-        self.lat.grid(row=1, column=1, sticky="w", pady=(4, 0))
+        self.lat.grid(row=0, column=3, sticky="w")
 
-        ttk.Label(box, text="Kinh độ (độ thập phân):").grid(row=2, column=0, sticky="w", pady=(4, 0))
+        ttk.Label(box, text="Kinh độ:").grid(row=0, column=4, sticky="w", padx=(12, 0))
         self.lon = ttk.Entry(box, width=10)
         self.lon.insert(0, "104.85")
-        self.lon.grid(row=2, column=1, sticky="w", pady=(4, 0))
+        self.lon.grid(row=0, column=5, sticky="w")
 
-        ttk.Label(box, text="Tên trạm (in trong mã):").grid(row=3, column=0, sticky="w", pady=(4, 0))
+        ttk.Label(box, text="Tên trạm (in trong mã):").grid(row=1, column=0, sticky="w", pady=(4, 0))
         self.station_name = ttk.Entry(box, width=18)
         self.station_name.insert(0, "Yên Bái")
-        self.station_name.grid(row=3, column=1, columnspan=2, sticky="w", pady=(4, 0))
+        self.station_name.grid(row=1, column=1, sticky="w", pady=(4, 0))
 
-    def _build_wind_vv_section(self, parent):
-        box = ttk.LabelFrame(parent, text="Gió & tầm nhìn xa", padding=8)
-        box.pack(fill="x", pady=(0, 8))
+    # ----- table backbone: thời gian / trường dữ liệu / giá trị ---------
+    def _build_table_section(self, parent):
+        box = ttk.LabelFrame(parent, text="Bảng thời gian — trường dữ liệu — giá trị", padding=8)
+        box.pack(fill="both", expand=True, pady=(0, 8))
 
-        ttk.Label(box, text="Mây tổng lượng (N):").grid(row=0, column=0, sticky="w")
-        self.wind_N = ttk.Combobox(box, width=14, state="readonly",
-                                    values=_code_desc_values(TABLES["N_oktas"]))
-        self.wind_N.current(0)
-        self.wind_N.grid(row=0, column=1, sticky="w")
+        toolbar = ttk.Frame(box)
+        toolbar.pack(fill="x")
+        ttk.Button(toolbar, text="+ Thêm dòng", command=self._add_row).pack(side="left")
+        ttk.Button(toolbar, text="Sửa dòng", command=self._edit_selected).pack(side="left", padx=(6, 0))
+        ttk.Button(toolbar, text="Xóa dòng", command=self._delete_selected).pack(side="left", padx=(6, 0))
 
-        ttk.Label(box, text="Hướng gió (độ):").grid(row=1, column=0, sticky="w", pady=(4, 0))
-        self.wind_dd = ttk.Spinbox(box, from_=0, to=360, increment=10, width=6)
-        self.wind_dd.set(0)
-        self.wind_dd.grid(row=1, column=1, sticky="w", pady=(4, 0))
+        table_frame = ttk.Frame(box)
+        table_frame.pack(fill="both", expand=True, pady=(6, 0))
 
-        ttk.Label(box, text="Tốc độ gió:").grid(row=2, column=0, sticky="w", pady=(4, 0))
-        self.wind_ff = ttk.Spinbox(box, from_=0, to=99, width=6)
-        self.wind_ff.set(0)
-        self.wind_ff.grid(row=2, column=1, sticky="w", pady=(4, 0))
+        columns = ("time", "field", "value")
+        self.tree = ttk.Treeview(table_frame, columns=columns, show="headings",
+                                  height=10, selectmode="browse")
+        self.tree.heading("time", text="Thời gian")
+        self.tree.heading("field", text="Trường dữ liệu")
+        self.tree.heading("value", text="Giá trị")
+        self.tree.column("time", width=90, anchor="w")
+        self.tree.column("field", width=200, anchor="w")
+        self.tree.column("value", width=380, anchor="w")
+        vsb = ttk.Scrollbar(table_frame, orient="vertical", command=self.tree.yview)
+        self.tree.configure(yscrollcommand=vsb.set)
+        self.tree.pack(side="left", fill="both", expand=True)
+        vsb.pack(side="left", fill="y")
+        self.tree.bind("<Double-1>", lambda e: self._edit_selected())
 
-        ttk.Label(box, text="Tầm nhìn xa (mã VV, 00-99):").grid(row=3, column=0, sticky="w", pady=(4, 0))
-        self.vv_code = ttk.Spinbox(box, from_=0, to=99, width=6, command=self._update_vv_preview)
-        self.vv_code.set(0)
-        self.vv_code.grid(row=3, column=1, sticky="w", pady=(4, 0))
-        self.vv_preview = ttk.Label(box, foreground="#6b7280")
-        self.vv_preview.grid(row=3, column=2, sticky="w", padx=(6, 0), pady=(4, 0))
-        self.vv_code.bind("<KeyRelease>", lambda e: self._update_vv_preview())
-        self._update_vv_preview()
+    def _selected_row_id(self):
+        sel = self.tree.selection()
+        return int(sel[0]) if sel else None
 
-    def _update_vv_preview(self):
-        v = vv_value(f"{int(self.vv_code.get() or 0):02d}", TABLES)
-        self.vv_preview.config(text=f"≈ {v} km" if v is not None else "không xác định")
+    def _find_row(self, row_id):
+        return next((r for r in self.rows if r["_id"] == row_id), None)
 
-    def _build_temp_section(self, parent):
-        box = ttk.LabelFrame(parent, text="Nhiệt độ", padding=8)
-        box.pack(fill="x", pady=(0, 8))
-        ttk.Label(box, text="Nhiệt độ (°C):").grid(row=0, column=0, sticky="w")
-        self.temp_c = ttk.Entry(box, width=8)
-        self.temp_c.insert(0, "28.5")
-        self.temp_c.grid(row=0, column=1, sticky="w")
-        ttk.Label(box, text="Điểm sương (°C):").grid(row=1, column=0, sticky="w", pady=(4, 0))
-        self.dew_c = ttk.Entry(box, width=8)
-        self.dew_c.insert(0, "24.1")
-        self.dew_c.grid(row=1, column=1, sticky="w", pady=(4, 0))
+    def _station_ctx(self):
+        return {
+            "station_code": self.station.get().strip(),
+            "lat": self.lat.get().strip(),
+            "lon": self.lon.get().strip(),
+            "station_name": self.station_name.get().strip(),
+        }
 
-    def _build_weather_section(self, parent):
-        box = ttk.LabelFrame(parent, text="Thời tiết", padding=8)
-        box.pack(fill="x", pady=(0, 8))
-        ttk.Label(box, text="Thời tiết hiện tại:").grid(row=0, column=0, sticky="w")
-        self.ww = ttk.Combobox(box, width=28, state="readonly",
-                                values=_code_desc_values(TABLES["ww"]))
-        self.ww.current(0)
-        self.ww.grid(row=0, column=1, sticky="w")
-        ttk.Label(box, text="Thời tiết đã qua 1:").grid(row=1, column=0, sticky="w", pady=(4, 0))
-        self.w1 = ttk.Combobox(box, width=18, state="readonly",
-                                values=_code_desc_values(TABLES["W1W2"]))
-        self.w1.current(0)
-        self.w1.grid(row=1, column=1, sticky="w", pady=(4, 0))
-        ttk.Label(box, text="Thời tiết đã qua 2:").grid(row=2, column=0, sticky="w", pady=(4, 0))
-        self.w2 = ttk.Combobox(box, width=18, state="readonly",
-                                values=_code_desc_values(TABLES["W1W2"]))
-        self.w2.current(0)
-        self.w2.grid(row=2, column=1, sticky="w", pady=(4, 0))
+    def _add_row(self):
+        RowEditor(self.root, None, self._on_row_added)
 
-    def _build_cloud_section(self, parent):
-        box = ttk.LabelFrame(parent, text="Các lớp mây", padding=8)
-        box.pack(fill="x", pady=(0, 8))
-        self.cloud_container = ttk.Frame(box)
-        self.cloud_container.pack(fill="x")
-        ttk.Button(box, text="+ Thêm lớp mây", command=self._add_cloud_row).pack(anchor="w", pady=(4, 0))
-
-    def _add_cloud_row(self):
-        if len(self.cloud_rows) >= 4:
+    def _edit_selected(self):
+        row_id = self._selected_row_id()
+        if row_id is None:
+            messagebox.showinfo("Chưa chọn dòng", "Hãy chọn một dòng trong bảng trước.")
             return
-        row = CloudRow(self.cloud_container, self._remove_cloud_row)
-        row.frame.pack(fill="x", pady=1)
-        self.cloud_rows.append(row)
+        row = self._find_row(row_id)
+        RowEditor(self.root, row, lambda new_row: self._on_row_edited(row_id, new_row))
 
-    def _remove_cloud_row(self, row):
-        row.frame.destroy()
-        self.cloud_rows.remove(row)
+    def _delete_selected(self):
+        row_id = self._selected_row_id()
+        if row_id is None:
+            messagebox.showinfo("Chưa chọn dòng", "Hãy chọn một dòng trong bảng trước.")
+            return
+        self.rows = [r for r in self.rows if r["_id"] != row_id]
+        self._refresh_table()
 
-    def _build_pressure_section(self, parent):
-        box = ttk.LabelFrame(parent, text="Áp suất", padding=8)
-        box.pack(fill="x")
-        ttk.Label(box, text="Áp suất (mmHg):").grid(row=0, column=0, sticky="w")
-        self.pressure = ttk.Entry(box, width=10)
-        self.pressure.insert(0, "754.0")
-        self.pressure.grid(row=0, column=1, sticky="w")
+    def _on_row_added(self, row: dict):
+        row["_id"] = self._next_id
+        self._next_id += 1
+        self.rows.append(row)
+        self._refresh_table()
 
-    def _build_output(self, parent):
-        ttk.Label(parent, text="Mã sinh ra (raw record):").pack(anchor="w")
-        self.raw_text = tk.Text(parent, height=3, wrap="word", font=("Consolas", 10))
-        self.raw_text.pack(fill="x", pady=(2, 8))
-        self.raw_text.config(state="disabled")
+    def _on_row_edited(self, row_id, new_row: dict):
+        new_row["_id"] = row_id
+        self.rows = [new_row if r["_id"] == row_id else r for r in self.rows]
+        self._refresh_table()
 
-        btns = ttk.Frame(parent)
-        btns.pack(fill="x", pady=(0, 8))
-        ttk.Button(btns, text="Chép mã", command=self._copy_raw).pack(side="left")
+    def _refresh_table(self):
+        self.rows.sort(key=lambda r: (r["start"], FIELD_DEFS[r["field"]]["label"]))
+        self.tree.delete(*self.tree.get_children())
+        for r in self.rows:
+            time_str = f"{r['start']:02d}\u2013{r['end']:02d}"
+            self.tree.insert("", "end", iid=str(r["_id"]),
+                              values=(time_str, FIELD_DEFS[r["field"]]["label"], _row_value_str(r)))
+
+    # ----- output: generate all / copy / save ----------------------------
+    def _build_output_section(self, parent):
+        box = ttk.LabelFrame(parent, text="Mã sinh ra (gộp các dòng theo mốc giờ thay đổi)", padding=8)
+        box.pack(fill="both", expand=False)
+
+        btns = ttk.Frame(box)
+        btns.pack(fill="x")
+        ttk.Button(btns, text="Sinh tất cả mã", command=self._generate_all).pack(side="left")
+        ttk.Button(btns, text="Chép tất cả", command=self._copy_all).pack(side="left", padx=(6, 0))
         ttk.Button(btns, text="Lưu vào file...", command=self._save_to_file).pack(side="left", padx=(6, 0))
 
-        ttk.Label(parent, text="Giải mã lại để kiểm tra (decode.py):").pack(anchor="w")
-        self.preview_text = tk.Text(parent, wrap="word", font=("Consolas", 9))
-        self.preview_text.pack(fill="both", expand=True, pady=(2, 0))
+        self.raw_text = tk.Text(box, height=5, wrap="word", font=("Consolas", 10))
+        self.raw_text.pack(fill="x", pady=(6, 4))
+        self.raw_text.config(state="disabled")
+
+        self.preview_text = tk.Text(box, height=8, wrap="word", font=("Consolas", 9))
+        self.preview_text.pack(fill="both", expand=True)
         self.preview_text.config(state="disabled")
 
-    # ----- actions --------------------------------------------------------
-    def _generate(self):
+    def _generate_all(self):
+        if not self.rows:
+            messagebox.showinfo("Chưa có dòng", "Hãy thêm ít nhất một dòng trong bảng.")
+            return
+        ctx = self._station_ctx()
         try:
-            raw = encode_record(
-                station_code=self.station.get().strip(),
-                lat=float(self.lat.get()),
-                lon=float(self.lon.get()),
-                vv_code=self.vv_code.get(),
-                wind_N_code=_code_from_selection(self.wind_N.get()),
-                wind_dd=float(self.wind_dd.get()),
-                wind_ff=float(self.wind_ff.get()),
-                temp_c=float(self.temp_c.get()) if self.temp_c.get().strip() else None,
-                dew_c=float(self.dew_c.get()) if self.dew_c.get().strip() else None,
-                ww_code=_code_from_selection(self.ww.get()),
-                w1_code=_code_from_selection(self.w1.get()),
-                w2_code=_code_from_selection(self.w2.get()),
-                clouds=[row.to_dict() for row in self.cloud_rows],
-                pressure_mmhg=float(self.pressure.get()) if self.pressure.get().strip() else None,
-                station_name=self.station_name.get().strip(),
-            )
-        except ValueError as e:
-            messagebox.showerror("Không sinh được mã", str(e))
+            lat = float(ctx["lat"])
+            lon = float(ctx["lon"])
+        except ValueError:
+            messagebox.showerror("Lỗi", "Vĩ độ/kinh độ trạm không hợp lệ.")
             return
 
-        self._last_raw = raw
-        self._set_text(self.raw_text, raw)
+        display_lines, raw_lines, decoded_all, errors = [], [], [], []
+        for h in _covered_hours(self.rows):
+            state = _merge_at_hour(self.rows, h)
+            try:
+                raw = _encode_state(state, ctx["station_code"], lat, lon, ctx["station_name"])
+            except ValueError as e:
+                errors.append(f"{h:02d}h: {e}")
+                continue
+            display_lines.append(f"[{h:02d}h] {raw}")
+            raw_lines.append(raw)
+            decoded_all.append({"hour": f"{h:02d}h", **decode_record(raw)})
 
-        decoded = decode_record(raw)
-        import json
-        self._set_text(self.preview_text, json.dumps(decoded, ensure_ascii=False, indent=2))
+        self._last_lines = raw_lines
+        _set_text(self.raw_text, "\n".join(display_lines) if display_lines else "(không có mã nào được sinh)")
+        _set_text(self.preview_text, json.dumps(decoded_all, ensure_ascii=False, indent=2))
+        if errors:
+            messagebox.showwarning("Một số mốc giờ lỗi", "\n".join(errors))
 
-    @staticmethod
-    def _set_text(widget: tk.Text, text: str):
-        widget.config(state="normal")
-        widget.delete("1.0", "end")
-        widget.insert("1.0", text)
-        widget.config(state="disabled")
-
-    def _copy_raw(self):
-        if not self._last_raw:
-            messagebox.showwarning("Chưa có mã", "Hãy bấm 'Sinh mã' trước.")
+    def _copy_all(self):
+        if not self._last_lines:
+            messagebox.showwarning("Chưa có mã", "Hãy bấm 'Sinh tất cả mã' trước.")
             return
         self.root.clipboard_clear()
-        self.root.clipboard_append(self._last_raw)
+        self.root.clipboard_append("\n".join(self._last_lines))
 
     def _save_to_file(self):
-        if not self._last_raw:
-            messagebox.showwarning("Chưa có mã", "Hãy bấm 'Sinh mã' trước.")
+        if not self._last_lines:
+            messagebox.showwarning("Chưa có mã", "Hãy bấm 'Sinh tất cả mã' trước.")
             return
         path = filedialog.asksaveasfilename(
             title="Lưu vào file bulletin",
@@ -289,8 +576,9 @@ class App:
             return
         # ';'-terminated so decode.get_qt_data() (data.split(';')[:-1]) reads it back.
         with open(path, "a", encoding="utf-8") as f:
-            f.write(self._last_raw + ";")
-        messagebox.showinfo("Đã lưu", f"Đã thêm bản ghi vào:\n{path}")
+            for raw in self._last_lines:
+                f.write(raw + ";")
+        messagebox.showinfo("Đã lưu", f"Đã thêm {len(self._last_lines)} bản ghi vào:\n{path}")
 
 
 if __name__ == "__main__":
