@@ -1,12 +1,12 @@
 """
-core.py
+pipeline.py
 ====================
 Pipeline layer: FTP download + CSV export + the run_pipeline() orchestrator.
 
 Built on config.py (settings/paths) and decode.py (bulletin → dict decoding).
 GUI-only — not runnable standalone. gui.py calls config.apply_config_file() at
 startup, builds a cfg dict from its own form fields for every run, and calls
-core.run_pipeline() — never touching the FTP/decode internals directly.
+pipeline.run_pipeline() — never touching the FTP/decode internals directly.
 
 Every function that does work takes a required `log(level, msg)` callback —
 gui.py always passes its own (routing into the on-screen log widget); there is

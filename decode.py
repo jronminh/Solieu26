@@ -5,7 +5,7 @@ Pure decoding layer: turn one raw "Qt..." bulletin record (a string) into a
 nested dict, and one downloaded bulletin file into a list of such dicts.
 
 No file I/O beyond reading the bulletin files themselves, no FTP, no config —
-core.py's export step (flatten_record) is what turns this module's output
+pipeline.py's export step (flatten_record) is what turns this module's output
 into CSV rows.
 """
 
@@ -268,7 +268,7 @@ DISPATCH = {'1': h_temp, '2': h_dew, '7': h_weather, '8': h_cloud}
 
 
 def decode_indicators(indicators: list, tables: dict) -> dict:
-    """Only dispatches indicator groups flatten_record() (core.py) actually
+    """Only dispatches indicator groups flatten_record() (pipeline.py) actually
     turns into CSV columns (temperature/dewpoint/weather/cloud) — any other
     group code (e.g. '9'/'5'/'A' supplementary/pressure-tendency/regional
     sections) is ignored, since nothing downstream reads it."""

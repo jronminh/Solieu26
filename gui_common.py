@@ -15,7 +15,7 @@ from tkinter import messagebox
 
 
 # =============================================================================
-# LOG COLORS (Tkinter Text tags — see core.py for the shared level format)
+# LOG COLORS (Tkinter Text tags — see pipeline.py for the shared level format)
 # =============================================================================
 
 LOG_COLORS = {
@@ -59,7 +59,7 @@ ALL_STATIONS = "Tất cả các trạm"   # station-filter dropdown option that 
 HOURS = [f"{h:02d}" for h in range(24)]
 ALL_HOURS = "Tất cả các giờ"   # hour-filter dropdown option that disables filtering
 
-# Matches core.export_history_by_date()'s output filenames — one CSV per day.
+# Matches pipeline.export_history_by_date()'s output filenames — one CSV per day.
 # The viewer's Ngày dropdown lists dates found this way and picks which file to
 # load, rather than filtering rows within a single (now nonexistent) history.csv.
 HISTORY_CSV_RE = re.compile(r"^history_(\d{8})\.csv$")

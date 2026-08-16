@@ -50,6 +50,9 @@ ngắn gọn để không phải lục `git log` mỗi lần cần nhớ lại �
       CSV"; "Tự động truy vấn khi khởi động" mặc định bật.
 - [x] Dọn thư mục làm việc: bỏ `build/`, `dist/`, `__pycache__/`, `data/` cũ,
       và 2 bản `config.ini` chứa mật khẩu FTP thật còn sót lại ngoài repo.
+- [x] Đổi tên `core.py` → `pipeline.py` — tên "core" còn sót từ hồi chưa tách
+      module, không còn mô tả đúng vai trò (chỉ còn tầng FTP + xuất CSV +
+      `run_pipeline`, không phải "cái gì cũng có" như tên "core" gợi ý nữa).
 
 ## Quy ước cập nhật
 
