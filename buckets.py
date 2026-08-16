@@ -53,7 +53,9 @@ BUCKETS = {
     #    mỗi cửa rộng 2, bước 1:                                          #
     #      idx: 0=0-2  1=1-3  2=2-4  3=3-5  4=4-6  5=5-7  6=6-8  7=7-9    #
     #           8=8-10                                                    #
-    #    Quan trắc là MỘT SỐ 0-10 (KHÔNG bucket hóa).                     #
+    #    Quan trắc là MỘT SỐ NGUYÊN 0-10 (KHÔNG bucket hóa). Xác nhận với  #
+    #    anh Minh 2026-08-17 — khớp đúng decode.py._oktas_number() (int,   #
+    #    hoặc '/' nếu che khuất, xem "na" bên dưới).                       #
     #                                                                    #
     #    ±1 áp cho CỬA SỔ DỰ BÁO, không phải cho giá trị. Đúng khi số     #
     #    quan trắc rơi vào HỢP của cửa dự báo và 2 cửa kề:               #
@@ -151,7 +153,60 @@ BUCKETS = {
             "N_0":          "Không có hiện tượng (hoặc không thuộc 4 nhóm trên)",
         },
         "mega_tolerance": 0,            # khớp chính xác 100%
-        "groups": {},                   # mã ww -> mega: CHƯA gán, chờ chỉ định
+        # mã ww (2 ký tự, KHỚP KHÓA tables.py["ww"]) -> mega. Đã gán theo xác
+        # nhận với anh Minh 2026-08-16:
+        #   - 13 (chớp không sấm), 18 (tố), 19 (vòi rồng): báo hiệu/đi kèm dông
+        #     -> gộp dong_mua_rao.
+        #   - 04 (khói), 06 (bụi lơ lửng): lithometeor giảm tầm nhìn như mù khô
+        #     -> gộp mu_mu_kho.
+        #   - 66,67 (mưa đông kết), 68,69 (mưa+tuyết), 83-86 (rào lẫn
+        #     tuyết/tuyết rào): hiếm gặp VN -> N_0 hết, không tách riêng.
+        #   - 20-29 (hiện tượng "giờ trước"): TÍNH NHƯ hiện tượng hiện tại,
+        #     xếp theo loại (20,25,28,29 v.v.), không gộp hết vào N_0.
+        #
+        # >>> CẢNH BÁO KHỚP NHÃN: decode_weather() (decode.py:127) hiện chỉ trả
+        #     NHÃN tiếng Việt của ww, KHÔNG giữ mã gốc. Mã 64/65 ("Mưa to" =
+        #     mưa thường to -> mua_mua_phun) và mã 82 ("Mưa to" = mưa rào dữ
+        #     dội -> dong_mua_rao) có CÙNG NHÃN "Mưa to" nhưng KHÁC mega-bucket.
+        #     mega_of() ở đây dùng MÃ làm khóa nên tự nó đúng, nhưng nếu bên gọi
+        #     (decode.py) chỉ còn giữ nhãn thì không phân biệt được 2 trường hợp
+        #     này -> PHẢI sửa decode_weather() giữ lại mã gốc (vd trả thêm
+        #     "ww_code": token[1:3]) trước khi nối buckets.py vào pipeline chấm điểm.
+        "groups": {
+            # --- dong_mua_rao: dông, mưa rào, mưa đá rào, sau dông; chớp/tố/vòi
+            #     rồng gộp vào (báo hiệu/đi kèm dông) ---
+            **{c: "dong_mua_rao" for c in [
+                "13", "17", "18", "19", "25", "27", "29",
+                "80", "81", "82", "87", "88", "89", "90",
+                "91", "92", "93", "94", "95", "96", "97", "98", "99",
+            ]},
+            # --- mua_mua_phun: mưa phùn, mưa THƯỜNG (không phải mưa rào) ---
+            **{c: "mua_mua_phun" for c in [
+                "20", "21",
+                "50", "51", "52", "53", "54", "55", "56", "57", "58", "59",
+                "60", "61", "62", "63", "64", "65",
+            ]},
+            # --- suong_mu: sương mù (kể cả mỏng, giờ trước) ---
+            **{c: "suong_mu" for c in [
+                "11", "12", "28",
+                "40", "41", "42", "43", "44", "45", "46", "47", "48", "49",
+            ]},
+            # --- mu_mu_kho: mù, mù khô, khói, bụi lơ lửng ---
+            **{c: "mu_mu_kho" for c in ["04", "05", "06", "10"]},
+            # --- N_0: phần còn lại (mây tan/hình thành/không đổi, mưa xa chưa
+            #     tới trạm, tuyết/băng/mưa đông kết/hỗn hợp mưa-tuyết hiếm gặp
+            #     VN, bụi/lốc bụi/bão bụi-cát/tuyết cuốn) ---
+            **{c: "N_0" for c in [
+                "00", "01", "02", "03",
+                "07", "08", "09",
+                "14", "15", "16",
+                "22", "23", "24", "26",
+                "30", "31", "32", "33", "34", "35", "36", "37", "38", "39",
+                "66", "67", "68", "69",
+                "70", "71", "72", "73", "74", "75", "76", "77", "78", "79",
+                "83", "84", "85", "86",
+            ]},
+        },
         # --- TẦNG SUB: buổi trong ngày, ±1 kẹp mép ---
         "sub_buckets": ["toi", "dem", "sang", "trua", "chieu"],
         "sub_labels": {
