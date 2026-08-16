@@ -154,7 +154,6 @@ class App:
         self.last_cfg = None        # cfg dict from the last _on_run (carries the queried date)
         self.last_updated_at = None # datetime the last run finished (success or not)
         self._dialogs = {}          # keeps references to open dialogs (avoids reopening duplicates)
-        self.btn_open_csv = None    # "Mở thư mục CSV" button, lives in the Thiết lập dialog
         # Widgets below live in the "Tải số liệu" dialog — None until first opened
         # (see _open_advanced_dialog); every accessor guards for that with winfo_exists().
         self.start_date_entry = None
@@ -204,10 +203,9 @@ class App:
             "advanced_mode": tk.BooleanVar(value=False),
             "start_date":  tk.StringVar(value=today.strftime("%Y-%m-%d")),
             "end_date":    tk.StringVar(value=today.strftime("%Y-%m-%d")),
-            "delete_on_exit": tk.BooleanVar(value=bool(d.get("delete_on_exit", False))),
             "auto_value":  tk.StringVar(value=str(d.get("auto_query_value", 15))),
             "auto_unit":   tk.StringVar(value="Giờ" if d.get("auto_query_unit", "minutes") == "hours" else "Phút"),
-            "auto_on_startup": tk.BooleanVar(value=bool(d.get("auto_query_on_startup", False))),
+            "auto_on_startup": tk.BooleanVar(value=bool(d.get("auto_query_on_startup", True))),
         }
 
         # Read-only labels in the "Thông tin truy vấn" panel — recomputed by
@@ -386,20 +384,9 @@ class App:
         self._row(path_box, 1, "Thư mục xuất CSV", self.v["output_dir"])
         ttk.Button(path_box, text="Chọn...",
                    command=lambda: self._browse_output(parent=win)).grid(row=1, column=2, padx=4)
-        ttk.Checkbutton(path_box, text="Xóa file tải về sau khi xong",
-                        variable=self.v["delete_on_exit"],
-                        command=self._on_toggle_delete).grid(
-                        row=2, column=0, columnspan=3, sticky="w", pady=(6, 0))
-
-        open_row = ttk.Frame(path_box)
-        open_row.grid(row=3, column=0, columnspan=3, sticky="w", pady=(6, 0))
-        self.btn_open_csv = ttk.Button(open_row, text="Mở thư mục CSV",
-                                        command=self._on_open_folder)
-        self.btn_open_csv.pack(side="left")
-        self.btn_open_csv.config(state="normal" if (
-            self.last_output_dir and os.path.isdir(self.last_output_dir)) else "disabled")
-        ttk.Button(open_row, text="Mở thư mục data",
-                   command=self._on_open_data).pack(side="left", padx=(6, 0))
+        ttk.Button(path_box, text="Mở thư mục data",
+                   command=self._on_open_data).grid(
+                   row=2, column=0, sticky="w", pady=(6, 0))
 
         path_box.columnconfigure(1, weight=1)
 
@@ -442,7 +429,6 @@ class App:
             "ftp_pass":           self.v["ftp_pass"].get(),
             "remote_dir":         self.v["remote_dir"].get().strip(),
             "output_dir":         self.v["output_dir"].get().strip(),
-            "delete_on_exit":     "true" if self.v["delete_on_exit"].get() else "false",
             "auto_query_value":   str(v),
             "auto_query_unit":    unit_key,
             "auto_query_on_startup": "true" if self.v["auto_on_startup"].get() else "false",
@@ -454,7 +440,6 @@ class App:
                 "ftp_host": values["ftp_host"], "ftp_user": values["ftp_user"],
                 "ftp_pass": values["ftp_pass"], "remote_dir": values["remote_dir"],
                 "output_dir": values["output_dir"],
-                "delete_on_exit": self.v["delete_on_exit"].get(),
                 "auto_query_value": v, "auto_query_unit": unit_key,
                 "auto_query_on_startup": self.v["auto_on_startup"].get(),
             })
@@ -463,10 +448,6 @@ class App:
             self._log("ERR", f"Không lưu được thiết lập: {e}")
             messagebox.showerror("Lỗi", f"Không lưu được thiết lập:\n{e}")
         self._schedule_auto_tick()
-
-    def _on_toggle_delete(self):
-        state = "Bật" if self.v["delete_on_exit"].get() else "Tắt"
-        self._log("ACT", f"Tùy chọn 'Xóa file tải về sau khi xong': {state}")
 
     def _on_restore_defaults(self):
         """Overwrite config.ini with the hardcoded defaults (core.DEFAULT_CONFIG)
@@ -492,7 +473,6 @@ class App:
         self.v["ftp_pass"].set(d["ftp_pass"])
         self.v["remote_dir"].set(d["remote_dir"])
         self.v["output_dir"].set(d["output_dir"])
-        self.v["delete_on_exit"].set(bool(d["delete_on_exit"]))
         self.v["auto_value"].set(str(d["auto_query_value"]))
         self.v["auto_unit"].set("Giờ" if d["auto_query_unit"] == "hours" else "Phút")
         self.v["auto_on_startup"].set(bool(d["auto_query_on_startup"]))
@@ -520,16 +500,6 @@ class App:
             self._log("ERR", f"Không mở được{suffix}: {info}")
             if warn:
                 messagebox.showwarning("Không mở được", info)
-
-    def _set_open_csv_enabled(self, enabled: bool):
-        """Enable/disable the 'Mở thư mục CSV' button in the Thiết lập dialog.
-        A no-op if that dialog hasn't been opened yet (or was closed)."""
-        if self.btn_open_csv is not None and self.btn_open_csv.winfo_exists():
-            self.btn_open_csv.config(state="normal" if enabled else "disabled")
-
-    def _on_open_folder(self):
-        self._log("ACT", "Mở thư mục CSV")
-        self._report_open(*open_folder(self.last_output_dir), "thư mục CSV")
 
     def _on_open_data(self):
         self._log("ACT", "Mở thư mục data")
@@ -1120,7 +1090,6 @@ class App:
             "remote_dir": self.v["remote_dir"].get().strip() or "/Quantrac",
             "local_dir":  core.TEMP_DL_DIR,
             "output_dir": self.v["output_dir"].get().strip() or core.DEFAULT_OUTPUT_DIR,
-            "delete_on_exit": self.v["delete_on_exit"].get(),
         }
 
         if self.v["advanced_mode"].get():
@@ -1173,7 +1142,6 @@ class App:
                              f"{cfg['end_date']:%Y-%m-%d} ({days} ngày)")
         self.last_cfg = cfg
         self._set_actions_enabled(False)
-        self._set_open_csv_enabled(False)
         self.status.config(text="Đang chạy...")
 
         self.worker = threading.Thread(target=self._work, args=(cfg,), daemon=True)
@@ -1215,8 +1183,6 @@ class App:
     def _on_done(self, result: dict):
         self._set_actions_enabled(True)
         self.last_output_dir = result.get("output_dir")
-        if self.last_output_dir and os.path.isdir(self.last_output_dir):
-            self._set_open_csv_enabled(True)
 
         self.last_result = result
         self.last_updated_at = datetime.datetime.now()

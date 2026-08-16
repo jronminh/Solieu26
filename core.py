@@ -3,18 +3,16 @@ core.py
 ====================
 Core: fetch + decode surface weather observation bulletins (no UI, no tkinter).
 
-Runs standalone:
-    python core.py [config.ini path]
+GUI-only module — not runnable standalone. gui.py is a thin Tkinter wrapper
+around this module (`import core`): it calls core.apply_config_file() at
+startup, builds a cfg dict from its own form fields for every run, and calls
+core.run_pipeline() — never touching the FTP/decode internals directly.
 
 Uses the CONFIG dict defined below as defaults. If a config.ini file exists
-(next to the downloaded-data folder, or the path given on the command line),
-its keys override CONFIG — see "LOADING THE EXTERNAL CONFIG" below for the exact keys.
-Logs go through the callback log(level, msg); the default _console_log prints
-them to stdout as "HH:MM:SS  LEVEL  message".
-
-gui.py is a thin Tkinter wrapper around this module (`import core`) — it
-calls core.apply_config_file()/core.run_pipeline() and never touches the
-FTP/decode internals directly.
+(next to the downloaded-data folder), its keys override CONFIG — see
+"LOADING THE EXTERNAL CONFIG" below for the exact keys. Every function that
+does work takes a required `log(level, msg)` callback — gui.py always passes
+its own (routing into the on-screen log widget); there is no console fallback.
 """
 
 import csv
@@ -24,15 +22,6 @@ import os
 import sys
 import time
 from ftplib import FTP, error_perm, error_temp
-
-# Console output must survive non-UTF-8 terminals — Windows cmd.exe's default
-# codepage (cp1252/cp437) can't encode Vietnamese diacritics and would otherwise
-# crash the very first _console_log() call when running standalone.
-for _stream in (sys.stdout, sys.stderr):
-    try:
-        _stream.reconfigure(encoding="utf-8", errors="replace")
-    except (AttributeError, ValueError):
-        pass
 
 
 # =============================================================================
@@ -69,19 +58,14 @@ RETRY_WAIT  = 2                          # seconds to wait between retries
 # =============================================================================
 # LOGGING — SINGLE SHARED LOG FORMAT
 # -----------------------------------------------------------------------------
-# Every log line — from this module or from the GUI — goes through the callback
-# log(level, msg) and is rendered in exactly ONE format: "HH:MM:SS  LEVEL  message".
+# Every log line goes through the caller-supplied callback log(level, msg) and
+# is rendered by gui.py in exactly ONE format: "HH:MM:SS  LEVEL  message".
 # LEVEL is a fixed 4-char-wide code:
 #     INFO  general info            OK    success
 #     SKIP  skipped (already there) MISS  file missing on server
 #     WARN  warning                 ERR   error
 #     ACT   user action (button click, option change) — GUI only
-# Running headless (no GUI) → _console_log prints to console in the same format.
 # =============================================================================
-
-def _console_log(level: str, msg: str):
-    """Default log writer when running WITHOUT a GUI — prints to console, same format."""
-    print(f"{time.strftime('%H:%M:%S')}  {level.upper():<4}  {msg}")
 
 
 # =============================================================================
@@ -100,19 +84,14 @@ CONFIG = {
     "remote_dir": "Quantrac",
     "local_dir":  TEMP_DL_DIR,           # downloads go under the user folder
     "output_dir": DEFAULT_OUTPUT_DIR,
-    "delete_on_exit": False,
 
     "station_code": "k15",
-
-    "start_date": datetime.datetime(2026, 8, 10),
-    "end_date":   datetime.datetime(2026, 8, 10),
-    "end_hour":   23,        # last hour to fetch, ONLY when start_date == end_date
 
     "viewer_hidden_columns": [],         # GUI-only: columns hidden in the CSV viewer
 
     "auto_query_value": 15,              # GUI-only: auto-query interval (0 = disabled)
     "auto_query_unit":  "minutes",       # GUI-only: "minutes" or "hours" — unit for auto_query_value
-    "auto_query_on_startup": False,      # GUI-only: run once automatically right after launch
+    "auto_query_on_startup": True,       # GUI-only: run once automatically right after launch
 }
 
 # Pristine snapshot of the hardcoded defaults, taken before anything (loaded
@@ -136,9 +115,8 @@ CONFIG_SECTION  = "Solieu26"
 
 _STR_KEYS  = ("ftp_host", "ftp_user", "ftp_pass",
               "remote_dir", "output_dir", "station_code", "auto_query_unit")
-_INT_KEYS  = ("end_hour", "ftp_timeout", "retry_temp", "retry_wait",
-              "auto_query_value")
-_BOOL_KEYS = ("delete_on_exit", "auto_query_on_startup")
+_INT_KEYS  = ("ftp_timeout", "retry_temp", "retry_wait", "auto_query_value")
+_BOOL_KEYS = ("auto_query_on_startup",)
 
 
 def _to_bool(v: str):
@@ -150,7 +128,7 @@ def _to_bool(v: str):
     raise ValueError(v)
 
 
-def load_config_file(path: str, log=_console_log) -> dict:
+def load_config_file(path: str, log) -> dict:
     """Read INI → override dict. Missing/broken file → {} (with a warning).
 
     Every warning goes through `log`, same as the rest of the module — so a
@@ -188,12 +166,6 @@ def load_config_file(path: str, log=_console_log) -> dict:
                 out[k] = _to_bool(raw[k])
             except ValueError:
                 log("WARN", f"config '{k}' không phải true/false → bỏ qua")
-    for k in ("start_date", "end_date"):
-        if k in raw:
-            try:
-                out[k] = datetime.datetime.strptime(raw[k].strip(), "%Y-%m-%d")
-            except ValueError:
-                log("WARN", f"config '{k}' sai định dạng YYYY-MM-DD → bỏ qua")
     if "viewer_hidden_columns" in raw:
         val = raw["viewer_hidden_columns"].strip()
         out["viewer_hidden_columns"] = [c.strip() for c in val.split(",") if c.strip()]
@@ -214,25 +186,22 @@ def _default_config_lines() -> list:
         f"remote_dir = {d['remote_dir']}",
         f"output_dir = {d['output_dir']}",
         f"station_code = {d['station_code']}",
-        f"end_hour = {d['end_hour']}",
-        f"delete_on_exit = {'true' if d['delete_on_exit'] else 'false'}",
         f"auto_query_value = {d['auto_query_value']}",
         f"auto_query_unit = {d['auto_query_unit']}",
         f"auto_query_on_startup = {'true' if d['auto_query_on_startup'] else 'false'}",
     ]
 
 
-def write_default_config(path: str = None) -> str:
+def write_default_config(path: str) -> str:
     """Write a fresh config.ini from the hardcoded defaults (DEFAULT_CONFIG),
     overwriting whatever was there. Returns the path written."""
-    path = path or os.path.join(TEMP_DL_DIR, CONFIG_FILENAME)
     os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
     with open(path, "w", encoding="utf-8") as f:
         f.write("\n".join(_default_config_lines()) + "\n")
     return path
 
 
-def apply_config_file(path: str = None, log=_console_log):
+def apply_config_file(path: str, log):
     """
     Resolve the config path (argument > default alongside the data folder),
     auto-creating it from DEFAULT_CONFIG if it doesn't exist yet, then load it
@@ -243,7 +212,7 @@ def apply_config_file(path: str = None, log=_console_log):
     might sit under Program Files.
 
     `log` is forwarded to load_config_file() for its per-key WARNs — pass the
-    GUI's own log sink if one exists yet, otherwise it falls back to console.
+    GUI's own log sink (gui.py buffers calls made before its log widget exists yet).
     """
     path = path or os.path.join(TEMP_DL_DIR, CONFIG_FILENAME)
     os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
@@ -372,20 +341,19 @@ def parse_obs_dt(filename: str):
         return None
 
 
-def download_files(ftp: FTP, cfg: dict, log=_console_log, progress=None) -> dict:
+def download_files(ftp: FTP, cfg: dict, log, progress=None) -> dict:
     """
     Download hourly bulletin files into cfg['local_dir'], from cfg['start_date']
     through cfg['end_date'] (inclusive).
 
     Same day (start_date == end_date): fast path — cwd ONCE into that date's
-    remote directory and download [00:00 → cfg.get('end_hour', 23)]; if the
+    remote directory and download the full day [00:00 → 23:00]; if the
     directory is unreachable, bail out early.
 
     Different days: walks every hour from 00:00 of start_date through 23:00 of
     end_date. The remote directory is "<remote_dir>/YYYY/MM" per timestamp, so
     it cwd's again only when the year/month actually changes (a range can span
-    multiple months/years); end_hour is ignored — every day in a range is downloaded
-    in full.
+    multiple months/years).
 
     Returns a dict: {"files","downloaded","skipped","missing"}.
     """
@@ -401,8 +369,7 @@ def download_files(ftp: FTP, cfg: dict, log=_console_log, progress=None) -> dict
     origin = ftp.pwd()
 
     if start_date.date() == end_date.date():
-        end_hour = cfg.get("end_hour", 23)
-        hours = [start_date.replace(hour=h) for h in range(end_hour + 1)]
+        hours = [start_date.replace(hour=h) for h in range(24)]
         total = len(hours)
 
         target_dir = f"{remote_dir}/{start_date:%Y}/{start_date:%m}"
@@ -713,16 +680,14 @@ def h_cloud(t, out, tb):
         out["cloud"].append(layer)
 
 
-def h_group9(t, out, tb): out.setdefault("g9", []).append(t)
-def h_group5(t, out, tb): out.setdefault("g5", []).append(t)
-def h_groupA(t, out, tb): out.setdefault("gA", []).append(t)
-
-
-DISPATCH = {'1': h_temp, '2': h_dew, '7': h_weather, '8': h_cloud,
-            '9': h_group9, '5': h_group5, 'A': h_groupA}
+DISPATCH = {'1': h_temp, '2': h_dew, '7': h_weather, '8': h_cloud}
 
 
 def decode_indicators(indicators: list, tables: dict) -> dict:
+    """Only dispatches indicator groups flatten_record() actually turns into CSV
+    columns (temperature/dewpoint/weather/cloud) — any other group code (e.g.
+    '9'/'5'/'A' supplementary/pressure-tendency/regional sections) is ignored,
+    since nothing downstream reads it."""
     out = {"temperature": None, "dewpoint": None, "weather": None}
     for t in indicators:
         if not t:
@@ -730,8 +695,6 @@ def decode_indicators(indicators: list, tables: dict) -> dict:
         h = DISPATCH.get(t[0])
         if h:
             h(t, out, tables)
-        else:
-            out.setdefault("unknown", []).append(t)
     return out
 
 
@@ -928,11 +891,11 @@ def export_history_by_date(local_files: list, out_dir: str) -> dict:
 # ORCHESTRATOR
 # =============================================================================
 
-def run_pipeline(cfg: dict, log=_console_log, progress=None) -> dict:
+def run_pipeline(cfg: dict, log, progress=None) -> dict:
     """
     Run it end to end: connect FTP → download (into temp) → decode → export CSV.
-    Returns a result dict. Raises on FTP login/connect failure (the GUI catches
-    it to show a dialog; a headless caller can just let it propagate).
+    Returns a result dict. Raises on FTP login/connect failure — gui.py's worker
+    thread catches it and reports the error back to the main thread as an event.
     """
     result = {"ok": False, "files": [], "missing": [],
               "history_files": {}, "history_records": 0,
@@ -979,28 +942,3 @@ def run_pipeline(cfg: dict, log=_console_log, progress=None) -> dict:
             ftp.quit()
         except Exception:
             pass
-        if cfg.get("delete_on_exit"):
-            for f in files:
-                try:
-                    os.remove(f)
-                except OSError:
-                    pass
-
-
-# =============================================================================
-# CLI — run standalone, no GUI
-# =============================================================================
-
-def main():
-    # Allows: python core.py [config_ini_path]
-    config_path = sys.argv[1] if len(sys.argv) > 1 else None
-    path_used, overrides = apply_config_file(config_path)
-    if overrides:
-        _console_log("OK", f"Đã nạp {len(overrides)} thiết lập từ config: {path_used}")
-    else:
-        _console_log("INFO", f"Không thấy config ({path_used}) — dùng mặc định trong mã.")
-    run_pipeline(CONFIG, log=_console_log)
-
-
-if __name__ == "__main__":
-    main()
