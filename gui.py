@@ -229,7 +229,7 @@ class App:
             self._log("ACT", "Tự động truy vấn khi khởi động")
             self.root.after(300, self._on_run)   # small delay so the window renders first
 
-    # -----------------------------------------------------------------
+    # ----- UI construction ---------------------------------------------
     def _build_ui(self):
         frm = ttk.Frame(self.root, padding=10)
         frm.pack(fill="both", expand=True)
@@ -306,7 +306,7 @@ class App:
         self.root.update_idletasks()
         self.root.geometry("")
 
-    # -----------------------------------------------------------------
+    # ----- Logging -------------------------------------------------------
     def _log(self, level: str, msg: str):
         """Write one log line in the standard format:  HH:MM:SS  LEVEL  message.
 
@@ -332,7 +332,7 @@ class App:
         self.log.see("end")
         self.log.config(state="disabled")
 
-    # ----- Dialogs (Options) --------------------------------------
+    # ----- Dialog helpers (generic) ---------------------------------------
     def _make_dialog(self, key: str, title: str):
         """Create a singleton Toplevel: if already open, bring it to front and return None."""
         existing = self._dialogs.get(key)
@@ -354,6 +354,7 @@ class App:
         ww, wh = win.winfo_width(), win.winfo_height()
         win.geometry(f"+{max(rx + (rw - ww)//2, 0)}+{max(ry + (rh - wh)//3, 0)}")
 
+    # ----- Settings dialog ("Thiết lập") -----------------------------------
     def _open_settings_dialog(self):
         """Combined settings dialog: Kết nối / Đường dẫn / Tự động truy vấn, plus
         config.ini actions (restore-defaults at bottom-left, explicit save at bottom-right)."""
@@ -454,6 +455,78 @@ class App:
             self._log("ERR", f"Không lưu được thiết lập: {e}")
             messagebox.showerror("Lỗi", f"Không lưu được thiết lập:\n{e}")
         self._schedule_auto_tick()
+
+    def _on_toggle_delete(self):
+        state = "Bật" if self.v["delete_on_exit"].get() else "Tắt"
+        self._log("ACT", f"Tùy chọn 'Xóa file tải về sau khi xong': {state}")
+
+    def _on_restore_defaults(self):
+        """Overwrite config.ini with the hardcoded defaults (core.DEFAULT_CONFIG)
+        and reflect them back into the open Thiết lập dialog."""
+        self._log("ACT", "Khôi phục thiết lập mặc định")
+        if not messagebox.askyesno(
+                "Khôi phục mặc định",
+                "Toàn bộ thiết lập hiện tại sẽ bị ghi đè bằng mặc định trong "
+                "mã nguồn. Bạn có chắc muốn tiếp tục?"):
+            self._log("INFO", "Đã hủy khôi phục mặc định")
+            return
+        try:
+            path = core.write_default_config(self.cfg_path)
+        except OSError as e:
+            self._log("ERR", f"Không khôi phục được mặc định: {e}")
+            messagebox.showerror("Lỗi", f"Không khôi phục được mặc định:\n{e}")
+            return
+
+        d = core.DEFAULT_CONFIG
+        core.CONFIG.update(d)
+        self.v["ftp_host"].set(d["ftp_host"])
+        self.v["ftp_user"].set(d["ftp_user"])
+        self.v["ftp_pass"].set(d["ftp_pass"])
+        self.v["remote_dir"].set(d["remote_dir"])
+        self.v["output_dir"].set(d["output_dir"])
+        self.v["delete_on_exit"].set(bool(d["delete_on_exit"]))
+        self.v["auto_value"].set(str(d["auto_query_value"]))
+        self.v["auto_unit"].set("Hours" if d["auto_query_unit"] == "hours" else "Minutes")
+        self.v["auto_on_startup"].set(bool(d["auto_query_on_startup"]))
+        self._schedule_auto_tick()
+        self._log("OK", f"Đã khôi phục thiết lập mặc định vào config: {path}")
+
+    def _browse_output(self, parent=None):
+        self._log("ACT", "Chọn thư mục xuất CSV")
+        p = filedialog.askdirectory(title="Chọn thư mục xuất CSV",
+                                    parent=parent or self.root)
+        if p:
+            self.v["output_dir"].set(p)
+            self._log("OK", f"Thư mục xuất CSV: {p}")
+        else:
+            self._log("INFO", "Đã hủy chọn thư mục xuất")
+
+    def _report_open(self, ok: bool, info: str, what: str = None, warn: bool = False):
+        """Log the result of an open_folder()/open_in_editor() call in the standard
+        'Đã mở <what>: ...' / 'Không mở được <what>: ...' shape; optionally also
+        pop a warning dialog on failure."""
+        suffix = f" {what}" if what else ""
+        if ok:
+            self._log("OK", f"Đã mở{suffix}: {info}")
+        else:
+            self._log("ERR", f"Không mở được{suffix}: {info}")
+            if warn:
+                messagebox.showwarning("Không mở được", info)
+
+    def _set_open_csv_enabled(self, enabled: bool):
+        """Enable/disable the 'Mở thư mục CSV' button in the Thiết lập dialog.
+        A no-op if that dialog hasn't been opened yet (or was closed)."""
+        if self.btn_open_csv is not None and self.btn_open_csv.winfo_exists():
+            self.btn_open_csv.config(state="normal" if enabled else "disabled")
+
+    def _on_open_folder(self):
+        self._log("ACT", "Mở thư mục CSV")
+        self._report_open(*open_folder(self.last_output_dir), "thư mục CSV")
+
+    def _on_open_data(self):
+        self._log("ACT", "Mở thư mục data")
+        os.makedirs(core.TEMP_DL_DIR, exist_ok=True)   # create it upfront if never run before
+        self._report_open(*open_folder(core.TEMP_DL_DIR), "thư mục data")
 
     # ----- CSV viewing ----------------------------------------------------
     def _current_output_dir(self) -> str:
@@ -645,6 +718,11 @@ class App:
         self._log("ACT", f"Xem CSV — chế độ {'Raw' if win._mode == 'raw' else 'Số liệu'}")
         self._render_viewer(win)
 
+    def _open_csv_external(self, path: str):
+        """Open the CSV file with its default application (usually Excel on Windows)."""
+        self._log("ACT", f"Mở bằng Excel: {os.path.basename(path)}")
+        self._report_open(*open_in_editor(path), warn=True)
+
     def _on_station_filter_change(self, win):
         self._log("ACT", f"Lọc trạm: {win._station_filter.get()}")
         self._sync_hour_filter_for_station(win)
@@ -834,11 +912,7 @@ class App:
                                 f"{len(data)} dòng × {len(cols)} cột")
         win._toggle_btn.config(text="Xem số liệu" if mode == "raw" else "Xem raw")
 
-    def _open_csv_external(self, path: str):
-        """Open the CSV file with its default application (usually Excel on Windows)."""
-        self._log("ACT", f"Mở bằng Excel: {os.path.basename(path)}")
-        self._report_open(*open_in_editor(path), warn=True)
-
+    # ----- Advanced (date-range) dialog "Tải số liệu" ----------------------
     def _on_now(self):
         """'Về hiện tại' (dialog 'Tải số liệu'): force start_date/end_date to today."""
         now = datetime.datetime.now()
@@ -1019,78 +1093,7 @@ class App:
         except ValueError:
             return 0
 
-    def _on_toggle_delete(self):
-        state = "Bật" if self.v["delete_on_exit"].get() else "Tắt"
-        self._log("ACT", f"Tùy chọn 'Xóa file tải về sau khi xong': {state}")
-
-    def _report_open(self, ok: bool, info: str, what: str = None, warn: bool = False):
-        """Log the result of an open_folder()/open_in_editor() call in the standard
-        'Đã mở <what>: ...' / 'Không mở được <what>: ...' shape; optionally also
-        pop a warning dialog on failure."""
-        suffix = f" {what}" if what else ""
-        if ok:
-            self._log("OK", f"Đã mở{suffix}: {info}")
-        else:
-            self._log("ERR", f"Không mở được{suffix}: {info}")
-            if warn:
-                messagebox.showwarning("Không mở được", info)
-
-    def _set_open_csv_enabled(self, enabled: bool):
-        """Enable/disable the 'Mở thư mục CSV' button in the Thiết lập dialog.
-        A no-op if that dialog hasn't been opened yet (or was closed)."""
-        if self.btn_open_csv is not None and self.btn_open_csv.winfo_exists():
-            self.btn_open_csv.config(state="normal" if enabled else "disabled")
-
-    def _on_open_folder(self):
-        self._log("ACT", "Mở thư mục CSV")
-        self._report_open(*open_folder(self.last_output_dir), "thư mục CSV")
-
-    def _on_open_data(self):
-        self._log("ACT", "Mở thư mục data")
-        os.makedirs(core.TEMP_DL_DIR, exist_ok=True)   # create it upfront if never run before
-        self._report_open(*open_folder(core.TEMP_DL_DIR), "thư mục data")
-
-    def _on_restore_defaults(self):
-        """Overwrite config.ini with the hardcoded defaults (core.DEFAULT_CONFIG)
-        and reflect them back into the open Thiết lập dialog."""
-        self._log("ACT", "Khôi phục thiết lập mặc định")
-        if not messagebox.askyesno(
-                "Khôi phục mặc định",
-                "Toàn bộ thiết lập hiện tại sẽ bị ghi đè bằng mặc định trong "
-                "mã nguồn. Bạn có chắc muốn tiếp tục?"):
-            self._log("INFO", "Đã hủy khôi phục mặc định")
-            return
-        try:
-            path = core.write_default_config(self.cfg_path)
-        except OSError as e:
-            self._log("ERR", f"Không khôi phục được mặc định: {e}")
-            messagebox.showerror("Lỗi", f"Không khôi phục được mặc định:\n{e}")
-            return
-
-        d = core.DEFAULT_CONFIG
-        core.CONFIG.update(d)
-        self.v["ftp_host"].set(d["ftp_host"])
-        self.v["ftp_user"].set(d["ftp_user"])
-        self.v["ftp_pass"].set(d["ftp_pass"])
-        self.v["remote_dir"].set(d["remote_dir"])
-        self.v["output_dir"].set(d["output_dir"])
-        self.v["delete_on_exit"].set(bool(d["delete_on_exit"]))
-        self.v["auto_value"].set(str(d["auto_query_value"]))
-        self.v["auto_unit"].set("Hours" if d["auto_query_unit"] == "hours" else "Minutes")
-        self.v["auto_on_startup"].set(bool(d["auto_query_on_startup"]))
-        self._schedule_auto_tick()
-        self._log("OK", f"Đã khôi phục thiết lập mặc định vào config: {path}")
-
-    def _browse_output(self, parent=None):
-        self._log("ACT", "Chọn thư mục xuất CSV")
-        p = filedialog.askdirectory(title="Chọn thư mục xuất CSV",
-                                    parent=parent or self.root)
-        if p:
-            self.v["output_dir"].set(p)
-            self._log("OK", f"Thư mục xuất CSV: {p}")
-        else:
-            self._log("INFO", "Đã hủy chọn thư mục xuất")
-
+    # ----- Run pipeline ("Làm mới" / "Bắt đầu") ----------------------------
     def _build_cfg(self) -> dict:
         """Read the form → cfg dict; local_dir/timeout/retry come from core's fixed constants.
 
@@ -1136,7 +1139,6 @@ class App:
         self.refresh_btn.config(state="normal" if enabled else "disabled")
         self._refresh_advanced_controls_state()
 
-    # -----------------------------------------------------------------
     def _on_run(self) -> bool:
         """Returns True iff a worker thread was actually started — False if
         skipped (a run is already in progress) or rejected (bad input). Callers
