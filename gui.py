@@ -1,10 +1,18 @@
 """
 gui.py
 ===================
-Tkinter GUI wrapping core.py (imported as `core`).
+Tkinter GUI entry point + the App class (the spine): main window, worker
+thread, run-pipeline glue, logging, auto-query timer, info panel.
+
+The three heavier UI pieces live in their own modules as standalone classes —
+history_viewer.HistoryViewer ("Xem số liệu"), dialogs.SettingsDialog
+("Thiết lập") and dialogs.AdvancedDialog ("Tải số liệu") — each constructed
+once in App.__init__ and holding the `app` instance so it can reach back into
+shared state (self.app.v, self.app._log, self.app._dialogs, ...).
 
 Run:  python gui.py [config.ini path]
-Requires core.py in the same folder.
+Requires config.py/decode.py/core.py/gui_common.py/history_viewer.py/dialogs.py
+in the same folder.
 
 Anti-freeze architecture: heavy work (FTP + decode + CSV export, all in core)
 runs on a worker thread that never touches widgets — it only pushes ('log' /
@@ -14,131 +22,20 @@ polls the queue every 100ms via root.after() and applies the UI updates itself.
 Tác giả: congminh9981 (congminh9981@gmail.com); Claude (Anthropic) — đồng tác giả.
 """
 
-import csv
 import datetime
 import os
 import queue
-import re
-import subprocess
 import sys
 import threading
 
 import tkinter as tk
-from tkinter import ttk, filedialog, messagebox, scrolledtext
+from tkinter import ttk, messagebox, scrolledtext
 
+import config
 import core
-
-
-# =============================================================================
-# LOG COLORS (Tkinter Text tags — see core.py for the shared level format)
-# =============================================================================
-
-LOG_COLORS = {
-    "INFO": "#374151",   # dark gray
-    "OK":   "#15803d",   # green
-    "SKIP": "#6b7280",   # gray
-    "MISS": "#b45309",   # amber
-    "WARN": "#b45309",   # amber
-    "ERR":  "#b91c1c",   # red
-    "ACT":  "#1d4ed8",   # blue
-}
-
-
-# =============================================================================
-# STATION LIST (code → name)
-# -----------------------------------------------------------------------------
-# Feeds the station filter dropdown in the "Xem lịch sử" viewer (each history_*.csv
-# holds every station already — the dropdown just filters rows client-side, it no
-# longer drives what gets downloaded/decoded). Add/remove a station by editing this table.
-# =============================================================================
-STATIONS = {
-    "k31": "Yên Bái",    "k21": "Nội Bài",     "k27": "Kép",
-    "k33": "Kiến An",    "k16": "Hòa Lạc",     "k18": "Gia Lâm",
-    "k23": "Thọ Xuân",   "k05": "Vinh",        "k25": "Đà Nẵng",
-    "k26": "Chu Lai",    "k66": "Plâycu",      "k40": "Phù Cát",
-    "k30": "Tuy Hòa",    "k15": "Phan Thiết",  "k20": "Phan Rang",
-    "k35": "Biên Hòa",   "k03": "T.S.Nhất",    "k36": "Cần Thơ",
-    "k92": "Trường Sa",  "k93": "Thuyền Chài",
-}
-
-# Names feed the dropdown — order KEPT the same as the STATIONS table above;
-# also builds the reverse lookup name → code.
-STATION_NAMES = list(STATIONS.values())
-NAME_TO_CODE  = {name: code for code, name in STATIONS.items()}
-
-ALL_STATIONS = "Tất cả các trạm"   # station-filter dropdown option that disables filtering
-
-# Hours feed the hour-filter dropdown in the "Xem lịch sử" viewer — each
-# history_*.csv's "hour" column is a zero-padded string ("00".."23"), so the
-# dropdown values match.
-HOURS = [f"{h:02d}" for h in range(24)]
-ALL_HOURS = "Tất cả các giờ"   # hour-filter dropdown option that disables filtering
-
-# Matches core.export_history_by_date()'s output filenames — one CSV per day.
-# The viewer's Ngày dropdown lists dates found this way and picks which file to
-# load, rather than filtering rows within a single (now nonexistent) history.csv.
-HISTORY_CSV_RE = re.compile(r"^history_(\d{8})\.csv$")
-
-
-# Numeric columns in the CSV viewer — right-aligned + compared as NUMBERS when
-# sorting (instead of as strings). *_hshs columns are numeric too but their names
-# aren't fixed (cloud_1_hshs, cloud_2_hshs...) so they're detected by suffix instead
-# of being listed here.
-NUMERIC_VIEWER_COLUMNS = {
-    "lat", "lon", "visibility_km", "total_cloud_N", "wind_dd_deg",
-    "wind_ff", "temperature_c", "dewpoint_c", "pressure_hpa",
-    "cloud_layers", "hour",
-}
-
-# Columns that never appear in the CSV viewer — not shown in either mode, and
-# not offered in the "Hiển thị" picker either, so they can't be toggled back on
-# from the GUI. They stay in the exported CSV file untouched; the only way to
-# see them is opening a history_*.csv file directly (e.g. in Excel).
-ALWAYS_HIDDEN_VIEWER_COLUMNS = {
-    "date", "hour", "source_file", "station_code", "lat", "lon", "cloud_layers",
-}
-
-
-def _is_numeric_viewer_column(col: str) -> bool:
-    """*_hshs columns are numeric too, but their names aren't fixed
-    (cloud_1_hshs, cloud_2_hshs...), so they're matched by suffix instead of
-    being listed in NUMERIC_VIEWER_COLUMNS."""
-    return col in NUMERIC_VIEWER_COLUMNS or col.endswith("_hshs")
-
-
-def _os_open(path: str):
-    """Hand `path` to the OS's default handler — file manager for a folder, the
-    associated app for a file. Returns (ok: bool, reason/path)."""
-    try:
-        if os.name == "nt":
-            os.startfile(path)                       # Windows
-        elif sys.platform == "darwin":
-            subprocess.Popen(["open", path])         # macOS
-        else:
-            subprocess.Popen(["xdg-open", path])     # Linux
-        return True, path
-    except Exception as e:
-        return False, str(e)
-
-
-def open_folder(path: str):
-    """Open a folder with the OS's file manager. Returns (ok: bool, reason/path)."""
-    if not path:
-        return False, "chưa có thư mục xuất (cần chạy thành công ít nhất một lần)"
-    path = os.path.abspath(path)                      # './x' → absolute (Windows dislikes relative paths)
-    if not os.path.isdir(path):
-        return False, f"thư mục không tồn tại: {path}"
-    return _os_open(path)
-
-
-def open_in_editor(path: str):
-    """Open a FILE with its default application (for editing). Returns (ok, reason/path)."""
-    if not path:
-        return False, "chưa có đường dẫn file"
-    path = os.path.abspath(path)
-    if not os.path.isfile(path):
-        return False, f"file không tồn tại: {path}"
-    return _os_open(path)
+from gui_common import LOG_COLORS
+from history_viewer import HistoryViewer
+from dialogs import SettingsDialog, AdvancedDialog
 
 
 class App:
@@ -146,7 +43,7 @@ class App:
         self.root = root
         self.q = queue.Queue()
         self.worker = None
-        self._run_in_progress = False  # mirrors _set_actions_enabled — feeds _refresh_advanced_controls_state
+        self._run_in_progress = False  # mirrors _set_actions_enabled — feeds advanced_dialog.refresh_controls_state
         self.last_output_dir = None
         self.auto_job = None        # root.after() id for the pending auto-query tick
         self.auto_next_run = None   # datetime of the next scheduled auto-query tick (None = off)
@@ -154,29 +51,19 @@ class App:
         self.last_cfg = None        # cfg dict from the last _on_run (carries the queried date)
         self.last_updated_at = None # datetime the last run finished (success or not)
         self._dialogs = {}          # keeps references to open dialogs (avoids reopening duplicates)
-        # Widgets below live in the "Tải số liệu" dialog — None until first opened
-        # (see _open_advanced_dialog); every accessor guards for that with winfo_exists().
-        self.start_date_entry = None
-        self.end_date_entry = None
-        self.now_btn = None
-        self.start_btn = None
 
         # Load the external config (if any) BEFORE prefilling the form. The log
         # widget doesn't exist yet at this point, so buffer any per-key WARNs
         # (bad config.ini values) and flush them into it once _build_ui() runs
-        # below — otherwise they'd only reach core._console_log's stdout, which
-        # a windowed build (console=False) has no visible console for at all.
+        # below — otherwise they'd only reach stdout, which a windowed build
+        # (console=False) has no visible console for at all.
         config_log_buffer = []
-        self.cfg_path, self.cfg_overrides = core.apply_config_file(
+        self.cfg_path, self.cfg_overrides = config.apply_config_file(
             config_path, log=lambda level, msg: config_log_buffer.append((level, msg)))
-
-        # Columns hidden in the CSV viewer — shared across all viewer windows
-        # (every history_*.csv has the same schema); loaded from config, saved back on change.
-        self.hidden_cols = set(core.CONFIG.get("viewer_hidden_columns", []))
 
         root.title("Solieu26")
         root.minsize(200, 150)   # temporary low floor, replaced below once real content is laid out
-        icon_path = os.path.join(core.SCRIPT_DIR, "icon.ico")
+        icon_path = os.path.join(config.SCRIPT_DIR, "icon.ico")
         if os.path.isfile(icon_path):
             try:
                 root.iconbitmap(icon_path)
@@ -189,7 +76,7 @@ class App:
         style.configure("Treeview", rowheight=22)
         style.configure("Treeview.Heading", font=("Segoe UI", 9, "bold"))
 
-        d = core.CONFIG
+        d = config.CONFIG
         today = datetime.date.today()
 
         self.v = {
@@ -197,7 +84,7 @@ class App:
             "ftp_user":    tk.StringVar(value=d.get("ftp_user", "")),
             "ftp_pass":    tk.StringVar(value=d.get("ftp_pass", "")),
             "remote_dir":  tk.StringVar(value=d.get("remote_dir", "/Quantrac")),
-            "output_dir":  tk.StringVar(value=d.get("output_dir") or core.DEFAULT_OUTPUT_DIR),
+            "output_dir":  tk.StringVar(value=d.get("output_dir") or config.DEFAULT_OUTPUT_DIR),
             # Advanced mode (date-range query) — off by default; normal mode always
             # queries "today", no date field shown.
             "advanced_mode": tk.BooleanVar(value=False),
@@ -216,6 +103,13 @@ class App:
             "auto_status":   tk.StringVar(value="—"),
             "missing":       tk.StringVar(value="—"),
         }
+
+        # The 3 heavier UI pieces — constructed once and kept for the app's
+        # lifetime, so each one's own state (HistoryViewer.hidden_cols,
+        # AdvancedDialog's widget refs...) survives across open/close cycles.
+        self.history_viewer = HistoryViewer(self)
+        self.settings_dialog = SettingsDialog(self)
+        self.advanced_dialog = AdvancedDialog(self)
 
         self._build_ui()
         self._fit_window_to_content()
@@ -271,11 +165,11 @@ class App:
         self.refresh_btn = ttk.Button(btn_col, text="Làm mới", command=self._on_run)
         self.refresh_btn.pack(fill="x")
         ttk.Button(btn_col, text="Tải số liệu",
-                  command=self._open_advanced_dialog).pack(fill="x", pady=(4, 0))
+                  command=self.advanced_dialog.open).pack(fill="x", pady=(4, 0))
         ttk.Button(btn_col, text="Xem số liệu",
-                  command=self._open_history_viewer).pack(fill="x", pady=(4, 0))
+                  command=self.history_viewer.open_latest).pack(fill="x", pady=(4, 0))
         ttk.Button(btn_col, text="Thiết lập...",
-                  command=self._open_settings_dialog).pack(fill="x", pady=(4, 0))
+                  command=self.settings_dialog.open).pack(fill="x", pady=(4, 0))
 
         # --- Status bar at the BOTTOM ---
         statusbar = ttk.Frame(frm)
@@ -294,17 +188,7 @@ class App:
         for lvl, color in LOG_COLORS.items():                    # level
             self.log.tag_config("lvl_" + lvl, foreground=color)
 
-        self._refresh_advanced_controls_state()
-
-    def _row(self, parent, r, label, var, width=None, show=None):
-        ttk.Label(parent, text=label).grid(row=r, column=0, sticky="w", padx=6, pady=3)
-        e = ttk.Entry(parent, textvariable=var, show=show)
-        if width:
-            e.config(width=width)
-            e.grid(row=r, column=1, sticky="w", padx=6, pady=3)
-        else:
-            e.grid(row=r, column=1, sticky="ew", padx=6, pady=3)
-        return e
+        self.advanced_dialog.refresh_controls_state()
 
     def _fit_window_to_content(self):
         """Shrink/grow the main window to fit its currently packed widgets (e.g. after
@@ -339,6 +223,9 @@ class App:
         self.log.config(state="disabled")
 
     # ----- Dialog helpers (generic) ---------------------------------------
+    # Shared by history_viewer.HistoryViewer and dialogs.SettingsDialog/AdvancedDialog
+    # via self.app._make_dialog(...)/self.app._center_over_root(...) — App owns
+    # self._dialogs (the singleton registry), so it owns the generic helpers too.
     def _make_dialog(self, key: str, title: str):
         """Create a singleton Toplevel: if already open, bring it to front and return None."""
         existing = self._dialogs.get(key)
@@ -359,631 +246,6 @@ class App:
         rw, rh = self.root.winfo_width(), self.root.winfo_height()
         ww, wh = win.winfo_width(), win.winfo_height()
         win.geometry(f"+{max(rx + (rw - ww)//2, 0)}+{max(ry + (rh - wh)//3, 0)}")
-
-    # ----- Settings dialog ("Thiết lập") -----------------------------------
-    def _open_settings_dialog(self):
-        """Combined settings dialog: Kết nối / Đường dẫn / Tự động truy vấn, plus
-        config.ini actions (restore-defaults at bottom-left, explicit save at bottom-right)."""
-        self._log("ACT", "Mở hộp thoại Thiết lập")
-        win = self._make_dialog("settings", "Thiết lập")
-        if win is None:
-            return
-        frm = ttk.Frame(win, padding=12)
-        frm.pack(fill="both", expand=True)
-
-        conn_box = ttk.LabelFrame(frm, text="Kết nối", padding=8)
-        conn_box.pack(fill="x")
-        self._row(conn_box, 0, "Host",     self.v["ftp_host"])
-        self._row(conn_box, 1, "User",     self.v["ftp_user"])
-        self._row(conn_box, 2, "Password", self.v["ftp_pass"], show="*")
-        conn_box.columnconfigure(1, weight=1)
-
-        path_box = ttk.LabelFrame(frm, text="Đường dẫn", padding=8)
-        path_box.pack(fill="x", pady=(8, 0))
-        self._row(path_box, 0, "Thư mục server",  self.v["remote_dir"])
-        self._row(path_box, 1, "Thư mục xuất CSV", self.v["output_dir"])
-        ttk.Button(path_box, text="Chọn...",
-                   command=lambda: self._browse_output(parent=win)).grid(row=1, column=2, padx=4)
-        ttk.Button(path_box, text="Mở thư mục data",
-                   command=self._on_open_data).grid(
-                   row=2, column=0, sticky="w", pady=(6, 0))
-
-        path_box.columnconfigure(1, weight=1)
-
-        # Auto-query: re-runs the pipeline on a timer (system time → "Về hiện tại" →
-        # "Làm mới"). 0 = tắt tự động truy vấn.
-        auto_box = ttk.LabelFrame(frm, text="Tự động truy vấn", padding=8)
-        auto_box.pack(fill="x", pady=(8, 0))
-        auto_entry = ttk.Entry(auto_box, textvariable=self.v["auto_value"], width=6)
-        auto_entry.grid(row=0, column=0, padx=(0, 4))
-        auto_entry.bind("<FocusOut>", self._on_auto_change)
-        auto_entry.bind("<Return>", self._on_auto_change)
-        auto_unit = ttk.Combobox(auto_box, textvariable=self.v["auto_unit"],
-                                 values=["Phút", "Giờ"], state="readonly", width=8)
-        auto_unit.grid(row=0, column=1)
-        auto_unit.bind("<<ComboboxSelected>>", self._on_auto_change)
-        ttk.Label(auto_box, text="(0 = tắt)").grid(row=0, column=2, padx=(8, 0))
-        ttk.Checkbutton(auto_box, text="Tự động truy vấn khi khởi động",
-                        variable=self.v["auto_on_startup"]).grid(
-                        row=1, column=0, columnspan=3, sticky="w", pady=(6, 0))
-
-        btn_bar = ttk.Frame(frm)
-        btn_bar.pack(fill="x", pady=(12, 0))
-        ttk.Button(btn_bar, text="Khôi phục mặc định",
-                   command=self._on_restore_defaults).pack(side="left")
-        ttk.Button(btn_bar, text="Lưu thiết lập",
-                   command=self._on_save_settings).pack(side="right")
-
-        win.minsize(420, 0)
-        self._center_over_root(win)
-
-    def _on_save_settings(self):
-        """Persist every field in the Thiết lập dialog to config.ini in one shot."""
-        self._log("ACT", "Lưu thiết lập")
-        v = self._auto_effective_value()
-        self.v["auto_value"].set(str(v))
-        unit_key = "hours" if self.v["auto_unit"].get() == "Giờ" else "minutes"
-        values = {
-            "ftp_host":           self.v["ftp_host"].get().strip(),
-            "ftp_user":           self.v["ftp_user"].get().strip(),
-            "ftp_pass":           self.v["ftp_pass"].get(),
-            "remote_dir":         self.v["remote_dir"].get().strip(),
-            "output_dir":         self.v["output_dir"].get().strip(),
-            "auto_query_value":   str(v),
-            "auto_query_unit":    unit_key,
-            "auto_query_on_startup": "true" if self.v["auto_on_startup"].get() else "false",
-        }
-        try:
-            for key, value in values.items():
-                core.update_ini_key(self.cfg_path, core.CONFIG_SECTION, key, value)
-            core.CONFIG.update({
-                "ftp_host": values["ftp_host"], "ftp_user": values["ftp_user"],
-                "ftp_pass": values["ftp_pass"], "remote_dir": values["remote_dir"],
-                "output_dir": values["output_dir"],
-                "auto_query_value": v, "auto_query_unit": unit_key,
-                "auto_query_on_startup": self.v["auto_on_startup"].get(),
-            })
-            self._log("OK", f"Đã lưu thiết lập vào config: {self.cfg_path}")
-        except OSError as e:
-            self._log("ERR", f"Không lưu được thiết lập: {e}")
-            messagebox.showerror("Lỗi", f"Không lưu được thiết lập:\n{e}")
-        self._schedule_auto_tick()
-
-    def _on_restore_defaults(self):
-        """Overwrite config.ini with the hardcoded defaults (core.DEFAULT_CONFIG)
-        and reflect them back into the open Thiết lập dialog."""
-        self._log("ACT", "Khôi phục thiết lập mặc định")
-        if not messagebox.askyesno(
-                "Khôi phục mặc định",
-                "Toàn bộ thiết lập hiện tại sẽ bị ghi đè bằng mặc định trong "
-                "mã nguồn. Bạn có chắc muốn tiếp tục?"):
-            self._log("INFO", "Đã hủy khôi phục mặc định")
-            return
-        try:
-            path = core.write_default_config(self.cfg_path)
-        except OSError as e:
-            self._log("ERR", f"Không khôi phục được mặc định: {e}")
-            messagebox.showerror("Lỗi", f"Không khôi phục được mặc định:\n{e}")
-            return
-
-        d = core.DEFAULT_CONFIG
-        core.CONFIG.update(d)
-        self.v["ftp_host"].set(d["ftp_host"])
-        self.v["ftp_user"].set(d["ftp_user"])
-        self.v["ftp_pass"].set(d["ftp_pass"])
-        self.v["remote_dir"].set(d["remote_dir"])
-        self.v["output_dir"].set(d["output_dir"])
-        self.v["auto_value"].set(str(d["auto_query_value"]))
-        self.v["auto_unit"].set("Giờ" if d["auto_query_unit"] == "hours" else "Phút")
-        self.v["auto_on_startup"].set(bool(d["auto_query_on_startup"]))
-        self._schedule_auto_tick()
-        self._log("OK", f"Đã khôi phục thiết lập mặc định vào config: {path}")
-
-    def _browse_output(self, parent=None):
-        self._log("ACT", "Chọn thư mục xuất CSV")
-        p = filedialog.askdirectory(title="Chọn thư mục xuất CSV",
-                                    parent=parent or self.root)
-        if p:
-            self.v["output_dir"].set(p)
-            self._log("OK", f"Thư mục xuất CSV: {p}")
-        else:
-            self._log("INFO", "Đã hủy chọn thư mục xuất")
-
-    def _report_open(self, ok: bool, info: str, what: str = None, warn: bool = False):
-        """Log the result of an open_folder()/open_in_editor() call in the standard
-        'Đã mở <what>: ...' / 'Không mở được <what>: ...' shape; optionally also
-        pop a warning dialog on failure."""
-        suffix = f" {what}" if what else ""
-        if ok:
-            self._log("OK", f"Đã mở{suffix}: {info}")
-        else:
-            self._log("ERR", f"Không mở được{suffix}: {info}")
-            if warn:
-                messagebox.showwarning("Không mở được", info)
-
-    def _on_open_data(self):
-        self._log("ACT", "Mở thư mục data")
-        os.makedirs(core.TEMP_DL_DIR, exist_ok=True)   # create it upfront if never run before
-        self._report_open(*open_folder(core.TEMP_DL_DIR), "thư mục data")
-
-    # ----- CSV viewing ----------------------------------------------------
-    def _current_output_dir(self) -> str:
-        """Directory holding the CSVs: prefers where the last run wrote to, else the form."""
-        if self.last_output_dir:
-            return self.last_output_dir
-        return os.path.abspath(self.v["output_dir"].get().strip() or core.DEFAULT_OUTPUT_DIR)
-
-    def _available_history_files(self) -> dict:
-        """Scan the current output dir for history_YYYYMMDD.csv files (one per
-        day, written by core.export_history_by_date). Returns {"YYYY-MM-DD": path},
-        sorted by nothing in particular — callers sort the keys as needed."""
-        out_dir = self._current_output_dir()
-        found = {}
-        try:
-            names = os.listdir(out_dir)
-        except OSError:
-            return found
-        for name in names:
-            m = HISTORY_CSV_RE.match(name)
-            if m:
-                ymd = m.group(1)
-                date_key = f"{ymd[0:4]}-{ymd[4:6]}-{ymd[6:8]}"
-                found[date_key] = os.path.join(out_dir, name)
-        return found
-
-    def _open_history_viewer(self):
-        """'Xem số liệu' — opens the history viewer showing the MOST RECENT day
-        available on disk. core.export_history_by_date() writes one
-        history_YYYYMMDD.csv per day, so a multi-day advanced query leaves several
-        files behind — the 'Ngày' dropdown inside the viewer switches between them."""
-        history_files = self._available_history_files()
-        if not history_files:
-            self._log("WARN", "Xem số liệu: chưa có file lịch sử nào — hãy 'Làm mới' trước")
-            messagebox.showwarning("Chưa có dữ liệu",
-                                   "Chưa có file lịch sử nào.\n\nHãy bấm 'Làm mới' để tạo file trước.")
-            return
-        self._show_history_date(max(history_files))
-
-    def _show_history_date(self, date_key: str):
-        """Open the (single, shared) history viewer window on history_YYYYMMDD.csv
-        for `date_key`, or switch its content to that date if it's already open."""
-        history_files = self._available_history_files()
-        path = history_files.get(date_key)
-        filename = f"history_{date_key.replace('-', '')}.csv"
-        self._log("ACT", f"Xem {filename}")
-        if not path or not os.path.isfile(path):
-            self._log("ERR", f"Chưa có {filename} trong {self._current_output_dir()} — hãy Làm mới trước")
-            messagebox.showwarning(
-                "Chưa có file",
-                f"Không có dữ liệu ngày {date_key}.\n\nHãy bấm 'Làm mới' để tạo file trước.")
-            return
-
-        key = "view_history"
-        existing = self._dialogs.get(key)
-        if existing is not None and existing.winfo_exists():
-            existing.deiconify(); existing.lift(); existing.focus_set()
-            existing.title(filename)
-            existing._path = path
-            existing._date_filter.set(date_key)   # triggers _on_date_filter_change → reloads
-            return
-
-        win = tk.Toplevel(self.root)
-        win.title(filename)
-        win.transient(self.root)
-        win.geometry("1040x480")
-        win.minsize(480, 240)
-        self._dialogs[key] = win
-        win._path = path
-        win._mode = "data"          # "data" (hides raw) | "raw" (identity cols + raw only)
-        win._header, win._data = [], []
-        win._sort_col, win._sort_reverse = None, False   # column currently sorted & direction
-
-        # Toolbar
-        bar = ttk.Frame(win, padding=(8, 6))
-        bar.pack(fill="x")
-        win._toggle_btn = ttk.Button(bar, text="Xem raw",
-                                     command=lambda: self._toggle_viewer_mode(win))
-        win._toggle_btn.pack(side="left")
-        ttk.Button(bar, text="Làm mới",
-                   command=lambda: self._load_csv_into_viewer(win, win._path)).pack(side="left", padx=6)
-        ttk.Button(bar, text="Mở bằng Excel",
-                   command=lambda: self._open_csv_external(win._path)).pack(side="left")
-        ttk.Button(bar, text="Hiển thị",
-                   command=lambda: self._open_column_picker(win)).pack(side="left", padx=6)
-
-        # Station filter — post-process filter over the loaded day's file (which
-        # already holds every station); default to the station_code configured
-        # in config.ini.
-        default_code = (core.CONFIG.get("station_code") or "").strip()
-        default_name = STATIONS.get(default_code, ALL_STATIONS)
-        win._station_filter = tk.StringVar(value=default_name)
-        ttk.Label(bar, text="Trạm:").pack(side="left", padx=(12, 2))
-        ttk.Combobox(bar, textvariable=win._station_filter,
-                    values=[ALL_STATIONS] + STATION_NAMES, state="readonly",
-                    width=16).pack(side="left")
-        win._station_filter.trace_add("write", lambda *_: self._on_station_filter_change(win))
-
-        # Hour filter — same post-process idea as the station filter above, but over
-        # the "hour" column (always present, just hidden from the rendered table).
-        # Its OWN options are derived from the station filter (see
-        # _sync_hour_filter_for_station): a specific station locks giờ to "Tất cả
-        # các giờ" (one station's whole history), while "Tất cả các trạm" hides that
-        # option and forces a specific giờ (otherwise the table would be every
-        # station × every hour at once).
-        win._hour_filter = tk.StringVar(value=ALL_HOURS)
-        ttk.Label(bar, text="Giờ:").pack(side="left", padx=(12, 2))
-        win._hour_combo = ttk.Combobox(bar, textvariable=win._hour_filter,
-                    values=[ALL_HOURS] + HOURS, state="readonly",
-                    width=8)
-        win._hour_combo.pack(side="left")
-        win._hour_filter.trace_add("write", lambda *_: self._on_hour_filter_change(win))
-
-        self._sync_hour_filter_for_station(win)
-
-        # Date filter — NOT a row filter: each history_YYYYMMDD.csv is already one
-        # day, so picking a date here SWITCHES WHICH FILE is loaded (see
-        # _on_date_filter_change / _available_history_files), same idea as a file
-        # picker rather than a post-process filter like Trạm/Giờ above.
-        win._date_filter = tk.StringVar(value=date_key)
-        ttk.Label(bar, text="Ngày:").pack(side="left", padx=(12, 2))
-        win._date_combo = ttk.Combobox(bar, textvariable=win._date_filter,
-                    values=sorted(history_files), state="readonly", width=12)
-        win._date_combo.pack(side="left")
-        win._date_filter.trace_add("write", lambda *_: self._on_date_filter_change(win))
-
-        win._status = ttk.Label(bar, text="")
-        win._status.pack(side="right")
-
-        # Table + two scrollbars
-        tf = ttk.Frame(win, padding=(8, 0, 8, 8))
-        tf.pack(fill="both", expand=True)
-        tree = ttk.Treeview(tf, show="headings")
-        vsb = ttk.Scrollbar(tf, orient="vertical", command=tree.yview)
-        hsb = ttk.Scrollbar(tf, orient="horizontal", command=tree.xview)
-        tree.configure(yscrollcommand=vsb.set, xscrollcommand=hsb.set)
-        tree.grid(row=0, column=0, sticky="nsew")
-        vsb.grid(row=0, column=1, sticky="ns")
-        hsb.grid(row=1, column=0, sticky="ew")
-        tf.rowconfigure(0, weight=1)
-        tf.columnconfigure(0, weight=1)
-        win._tree = tree
-        # Zebra striping — tags live on the widget, so this only needs setting once.
-        tree.tag_configure("odd", background="#f3f4f6")
-        tree.tag_configure("even", background="#ffffff")
-
-        self._center_over_root(win)
-        self._load_csv_into_viewer(win, path)
-
-    def _load_csv_into_viewer(self, win, path: str):
-        """Read the CSV into the viewer window's memory, then draw it in the current mode."""
-        try:
-            with open(path, newline="", encoding="utf-8-sig") as f:
-                rows = list(csv.reader(f))
-        except OSError as e:
-            win._status.config(text=f"Lỗi đọc file: {e}")
-            self._log("ERR", f"Không đọc được {os.path.basename(path)}: {e}")
-            return
-
-        self._refresh_date_filter_options(win)
-
-        if not rows:
-            win._header, win._data = [], []
-            win._tree.delete(*win._tree.get_children())
-            win._tree["columns"] = ()
-            win._status.config(text="File rỗng")
-            return
-
-        win._header, win._data = rows[0], rows[1:]
-        self._apply_sort(win)         # keep the current sort (if any) after reloading
-        self._render_viewer(win)
-        self._log("OK", f"Đã hiển thị {os.path.basename(path)} ({len(win._data)} dòng)")
-
-    def _refresh_date_filter_options(self, win):
-        """Rebuild the Ngày dropdown's values from the history_*.csv files currently
-        on disk (one file = one day, unlike STATIONS/HOURS which are a fixed table).
-        Picks up new days written since the window was opened (e.g. a fresh 'Làm
-        mới'). Falls back to the most recent date if the current selection's file
-        is gone."""
-        history_files = self._available_history_files()
-        dates = sorted(history_files)
-        win._date_combo["values"] = dates
-        if win._date_filter.get() not in dates and dates:
-            win._date_filter.set(dates[-1])
-
-    def _toggle_viewer_mode(self, win):
-        """Switch between Data mode (hides raw) and Raw mode (identity cols + raw)."""
-        win._mode = "raw" if win._mode == "data" else "data"
-        self._log("ACT", f"Xem CSV — chế độ {'Raw' if win._mode == 'raw' else 'Số liệu'}")
-        self._render_viewer(win)
-
-    def _open_csv_external(self, path: str):
-        """Open the CSV file with its default application (usually Excel on Windows)."""
-        self._log("ACT", f"Mở bằng Excel: {os.path.basename(path)}")
-        self._report_open(*open_in_editor(path), warn=True)
-
-    def _on_station_filter_change(self, win):
-        self._log("ACT", f"Lọc trạm: {win._station_filter.get()}")
-        self._sync_hour_filter_for_station(win)
-        self._render_viewer(win)
-
-    def _on_hour_filter_change(self, win):
-        self._log("ACT", f"Lọc giờ: {win._hour_filter.get()}")
-        self._render_viewer(win)
-
-    def _on_date_filter_change(self, win):
-        """Ngày dropdown = file picker now (each history_YYYYMMDD.csv is one day),
-        so changing it loads a different file instead of filtering the loaded one."""
-        date_key = win._date_filter.get()
-        history_files = self._available_history_files()
-        path = history_files.get(date_key)
-        if not path or not os.path.isfile(path):
-            self._log("ERR", f"Chọn ngày: không có dữ liệu cho {date_key}")
-            win._status.config(text=f"Không có dữ liệu ngày {date_key}")
-            return
-        self._log("ACT", f"Chọn ngày: {date_key}")
-        win._path = path
-        win.title(os.path.basename(path))
-        self._load_csv_into_viewer(win, path)
-
-    def _sync_hour_filter_for_station(self, win):
-        """Giờ filter's OWN options depend on the trạm filter: chọn một trạm cụ thể
-        khóa giờ về 'Tất cả các giờ' (chỉ có ý nghĩa xem toàn bộ giờ của trạm đó);
-        chọn 'Tất cả các trạm' thì ẩn 'Tất cả các giờ' đi, bắt buộc chọn một giờ cụ
-        thể (tránh bảng hiện toàn bộ trạm × toàn bộ giờ cùng lúc)."""
-        if win._station_filter is None or win._hour_filter is None:
-            return
-        if win._station_filter.get() == ALL_STATIONS:
-            win._hour_combo["values"] = HOURS
-            win._hour_combo["state"] = "readonly"
-            if win._hour_filter.get() == ALL_HOURS:
-                win._hour_filter.set(HOURS[0])
-        else:
-            win._hour_combo["values"] = [ALL_HOURS]
-            win._hour_combo["state"] = "disabled"
-            if win._hour_filter.get() != ALL_HOURS:
-                win._hour_filter.set(ALL_HOURS)
-
-    # ----- Column sorting --------------------------------------------
-    def _apply_sort(self, win):
-        """Sort win._data in place by the current win._sort_col/_sort_reverse (if set)."""
-        col = win._sort_col
-        if not col or col not in win._header:
-            return
-        idx = win._header.index(col)
-        numeric = _is_numeric_viewer_column(col)
-
-        def key(row):
-            v = row[idx] if idx < len(row) else ""
-            if numeric:
-                try:
-                    return (0, float(v))
-                except ValueError:
-                    return (1, 0.0)          # empty/non-numeric → sorted last
-            return (0, v) if v else (1, "")
-
-        win._data.sort(key=key, reverse=win._sort_reverse)
-
-    def _sort_viewer(self, win, col):
-        """Click a column header: new column → ascending; same column again → reverses."""
-        if not win._header or col not in win._header:
-            return
-        if win._sort_col == col:
-            win._sort_reverse = not win._sort_reverse
-        else:
-            win._sort_col, win._sort_reverse = col, False
-        self._log("ACT", f"Sắp xếp theo '{col}' ({'giảm dần' if win._sort_reverse else 'tăng dần'})")
-        self._apply_sort(win)
-        self._render_viewer(win)
-
-    # ----- Column visibility --------------------------------------------
-    def _open_column_picker(self, win):
-        """Open a checkbox dialog to pick visible columns (shared across all viewer windows)."""
-        self._log("ACT", "Mở hộp thoại Chọn cột hiển thị")
-        dlg = self._make_dialog("columns", "Chọn cột hiển thị")
-        if dlg is None:
-            return
-        frm = ttk.Frame(dlg, padding=12)
-        frm.pack(fill="both", expand=True)
-
-        header = [c for c in (win._header or []) if c not in ALWAYS_HIDDEN_VIEWER_COLUMNS]
-        col_vars = {}
-        ncols = 3
-        for i, c in enumerate(header):
-            var = tk.BooleanVar(value=c not in self.hidden_cols)
-            col_vars[c] = var
-            r, cpos = divmod(i, ncols)
-            ttk.Checkbutton(frm, text=c, variable=var).grid(
-                row=r, column=cpos, sticky="w", padx=6, pady=2)
-
-        btn_row = (max(len(header), 1) - 1) // ncols + 1
-        btns = ttk.Frame(frm)
-        btns.grid(row=btn_row, column=0, columnspan=ncols, sticky="e", pady=(12, 0))
-        ttk.Button(btns, text="Đóng", command=dlg.destroy).pack(side="right")
-        ttk.Button(btns, text="Áp dụng",
-                   command=lambda: self._apply_column_selection(col_vars)).pack(
-                   side="right", padx=6)
-
-        dlg.minsize(360, 0)
-        self._center_over_root(dlg)
-
-    def _apply_column_selection(self, col_vars: dict):
-        """Read checkbox states → update self.hidden_cols, redraw every open viewer, save to config."""
-        self.hidden_cols = {c for c, v in col_vars.items() if not v.get()}
-        self._log("ACT", f"Áp dụng hiển thị cột — ẩn {len(self.hidden_cols)} cột")
-        for key, w in self._dialogs.items():
-            if key.startswith("view_") and w.winfo_exists():
-                self._render_viewer(w)
-        self._save_hidden_columns_to_config()
-
-    def _save_hidden_columns_to_config(self):
-        value = ",".join(sorted(self.hidden_cols))
-        try:
-            core.update_ini_key(self.cfg_path, core.CONFIG_SECTION, "viewer_hidden_columns", value)
-            core.CONFIG["viewer_hidden_columns"] = sorted(self.hidden_cols)
-            self._log("OK", f"Đã lưu lựa chọn cột vào config: {self.cfg_path}")
-        except OSError as e:
-            self._log("ERR", f"Không lưu được lựa chọn cột vào config: {e}")
-
-    def _render_viewer(self, win):
-        """Rebuild the table from win._mode + self.hidden_cols, using the loaded win._header/_data."""
-        tree, header, data, mode = win._tree, win._header, win._data, win._mode
-        if not header:
-            return
-
-        if win._station_filter is not None and "station_code" in header:
-            name = win._station_filter.get()
-            if name != ALL_STATIONS:
-                code = NAME_TO_CODE.get(name)
-                sc_idx = header.index("station_code")
-                data = [r for r in data if sc_idx < len(r) and r[sc_idx] == code]
-
-        if win._hour_filter is not None and "hour" in header:
-            hour = win._hour_filter.get()
-            if hour != ALL_HOURS:
-                h_idx = header.index("hour")
-                data = [r for r in data if h_idx < len(r) and r[h_idx] == hour]
-
-        # No date filter here — win._date_filter now picks WHICH FILE is loaded
-        # (see _on_date_filter_change), not a row filter within it.
-
-        if mode == "raw":
-            # Just obs_time + raw, to read the original bulletin per station.
-            prefer = ["obs_time", "raw"]
-            cols = [c for c in prefer if c in header]
-        else:
-            cols = [c for c in header if c != "raw"]   # data mode: all columns, minus raw
-        # ALWAYS_HIDDEN_VIEWER_COLUMNS are dropped in both modes — they stay in the
-        # CSV file, just never rendered here (see the constant's docstring above).
-        cols = [c for c in cols
-                if c not in ALWAYS_HIDDEN_VIEWER_COLUMNS and c not in self.hidden_cols]
-
-        idx = {c: header.index(c) for c in cols}
-
-        tree.delete(*tree.get_children())
-        tree["columns"] = cols
-        # Width from the ACTUAL DATA, not the header text — a header like
-        # "temperature_c" is much longer than any value it holds, so sizing off
-        # the header (the old behavior) left short numeric columns wide and sparse.
-        # Falls back to the header length only when a column has no data to sample
-        # (e.g. cloud_2_* with no station reporting a 2nd layer at all).
-        sample_rows = data[:300]
-        for c in cols:
-            is_sorted = (c == win._sort_col)
-            arrow = "" if not is_sorted else (" ▼" if win._sort_reverse else " ▲")
-            tree.heading(c, text=c + arrow, command=lambda c=c: self._sort_viewer(win, c))
-            if c == "raw":
-                tree.column(c, width=560, stretch=True, anchor="w")
-            else:
-                i = idx[c]
-                vals = [len(r[i]) for r in sample_rows if i < len(r) and r[i]]
-                longest = max(vals) if vals else len(c)
-                w = max(50, min(200, (longest + 2) * 7))
-                anchor = "e" if _is_numeric_viewer_column(c) else "w"
-                tree.column(c, width=w, stretch=False, anchor=anchor)
-
-        for i, r in enumerate(data):
-            tree.insert("", "end", tags=("odd" if i % 2 else "even",),
-                        values=[r[idx[c]] if idx[c] < len(r) else "" for c in cols])
-
-        tree.xview_moveto(0)
-        win._status.config(text=f"Chế độ: {'Raw' if mode == 'raw' else 'Số liệu'} — "
-                                f"{len(data)} dòng × {len(cols)} cột")
-        win._toggle_btn.config(text="Xem số liệu" if mode == "raw" else "Xem raw")
-
-    # ----- Advanced (date-range) dialog "Tải số liệu" ----------------------
-    def _on_now(self):
-        """'Về hiện tại' (dialog 'Tải số liệu'): force start_date/end_date to today."""
-        now = datetime.datetime.now()
-        self.v["start_date"].set(now.strftime("%Y-%m-%d"))
-        self.v["end_date"].set(now.strftime("%Y-%m-%d"))
-        self._log("ACT", f"Về hiện tại: ngày {now:%Y-%m-%d}")
-
-    def _on_advanced_mode_changed(self):
-        """Pauses/resumes auto-query to match self.v["advanced_mode"] (mutually
-        exclusive — a background auto tick shouldn't re-fire a date-range fetch
-        the user is busy configuring), then refreshes the date-range controls
-        and info panel. advanced_mode now simply tracks whether the 'Tải số
-        liệu' dialog is open — see _open_advanced_dialog / _on_advanced_dialog_close."""
-        if self.v["advanced_mode"].get():
-            if self.auto_job is not None:
-                self.root.after_cancel(self.auto_job)
-                self.auto_job = None
-            self.auto_next_run = None
-        else:
-            self._schedule_auto_tick()   # resume per the settings already in config/mã nguồn
-        self._refresh_advanced_controls_state()
-        self._refresh_info_panel()
-
-    def _refresh_advanced_controls_state(self):
-        """'Bắt đầu' bị khóa khi đang có tác vụ chạy; ngày bắt đầu/kết thúc +
-        'Về hiện tại' luôn bật vì dialog 'Tải số liệu' chỉ tồn tại khi đang ở chế
-        độ tải số liệu. No-op nếu dialog chưa từng mở (hoặc đã bị đóng) — các
-        widget bên dưới chỉ tồn tại từ lúc _open_advanced_dialog dựng chúng."""
-        if self.start_date_entry is None or not self.start_date_entry.winfo_exists():
-            return
-        self.start_date_entry.config(state="normal")
-        self.end_date_entry.config(state="normal")
-        self.now_btn.config(state="normal")
-        self.start_btn.config(state="disabled" if self._run_in_progress else "normal")
-
-    def _open_advanced_dialog(self):
-        """'Tải số liệu' button (next to 'Xem số liệu'): opens a Toplevel holding
-        the date-range query UI (Ngày bắt đầu/kết thúc + Bắt đầu/Về hiện tại).
-        Opening it turns advanced (date-range) mode on and pauses auto-query;
-        closing it (nút X) turns advanced mode back off and resumes auto-query
-        — see _on_advanced_dialog_close."""
-        win = self._make_dialog("advanced", "Tải số liệu")
-        if win is None:
-            return
-        self._log("ACT", "Mở hộp thoại Tải số liệu — tạm dừng tự động truy vấn")
-
-        frm = ttk.Frame(win, padding=12)
-        frm.pack(fill="both", expand=True)
-
-        date_box = ttk.Frame(frm)
-        date_box.pack(fill="x")
-
-        ttk.Label(date_box, text="Ngày bắt đầu:").grid(row=0, column=0, sticky="w", padx=6, pady=2)
-        self.start_date_entry = ttk.Entry(date_box, textvariable=self.v["start_date"], width=12)
-        self.start_date_entry.grid(row=0, column=1, sticky="w", padx=6, pady=2)
-
-        ttk.Label(date_box, text="Ngày kết thúc:").grid(row=1, column=0, sticky="w", padx=6, pady=2)
-        self.end_date_entry = ttk.Entry(date_box, textvariable=self.v["end_date"], width=12)
-        self.end_date_entry.grid(row=1, column=1, sticky="w", padx=6, pady=2)
-
-        # "Bắt đầu" chạy truy vấn tải số liệu rồi đóng luôn dialog này; "Về hiện
-        # tại" nằm cạnh.
-        btn_row = ttk.Frame(frm)
-        self.start_btn = ttk.Button(btn_row, text="Bắt đầu", command=self._on_advanced_start)
-        self.start_btn.pack(side="left", padx=(0, 6))
-        self.now_btn = ttk.Button(btn_row, text="Về hiện tại", command=self._on_now)
-        self.now_btn.pack(side="left")
-        btn_row.pack(pady=(8, 0))
-
-        win.protocol("WM_DELETE_WINDOW", self._on_advanced_dialog_close)
-
-        self.v["advanced_mode"].set(True)
-        self._on_advanced_mode_changed()
-        win.minsize(260, 0)
-        self._center_over_root(win)
-
-    def _on_advanced_dialog_close(self):
-        """WM_DELETE_WINDOW cho dialog 'Tải số liệu': đóng cửa sổ rồi tắt chế độ
-        tải số liệu (date-range) và tiếp tục tự động truy vấn."""
-        self._dialogs["advanced"].destroy()
-        self.v["advanced_mode"].set(False)
-        self._on_advanced_mode_changed()
-        self._log("ACT", "Đóng hộp thoại Tải số liệu — tiếp tục tự động truy vấn")
-
-    def _on_advanced_start(self):
-        """'Bắt đầu' trong dialog 'Tải số liệu': chạy truy vấn theo khoảng ngày
-        đã nhập, rồi đóng dialog — NHƯNG chỉ khi truy vấn thực sự bắt đầu được.
-        _on_run() build cfg từ start_date/end_date trước khi dialog đóng, nên
-        khoảng ngày vẫn đúng (đóng trước sẽ tắt advanced_mode → cfg rơi về "hôm
-        nay"). Nếu ngày nhập sai hoặc đang có tác vụ chạy, _on_run() trả về False
-        và dialog vẫn mở để người dùng sửa."""
-        if self._on_run():
-            self._on_advanced_dialog_close()
 
     # ----- Info panel ("Thông tin truy vấn") --------------------------
     def _refresh_info_panel(self):
@@ -1073,7 +335,7 @@ class App:
 
     # ----- Run pipeline ("Làm mới" / "Bắt đầu") ----------------------------
     def _build_cfg(self) -> dict:
-        """Read the form → cfg dict; local_dir/timeout/retry come from core's fixed constants.
+        """Read the form → cfg dict; local_dir/timeout/retry come from config's fixed constants.
 
         Always sets start_date/end_date — core.download_files() takes the fast
         single-day path when they're equal. Normal mode: always "today", no date
@@ -1084,12 +346,12 @@ class App:
             "ftp_host": self.v["ftp_host"].get().strip(),
             "ftp_user": self.v["ftp_user"].get().strip(),
             "ftp_pass": self.v["ftp_pass"].get(),
-            "ftp_timeout": core.CONFIG.get("ftp_timeout", core.FTP_TIMEOUT),
-            "retry_temp": core.CONFIG.get("retry_temp", core.RETRY_TEMP),
-            "retry_wait": core.CONFIG.get("retry_wait", core.RETRY_WAIT),
+            "ftp_timeout": config.CONFIG.get("ftp_timeout", config.FTP_TIMEOUT),
+            "retry_temp": config.CONFIG.get("retry_temp", config.RETRY_TEMP),
+            "retry_wait": config.CONFIG.get("retry_wait", config.RETRY_WAIT),
             "remote_dir": self.v["remote_dir"].get().strip() or "/Quantrac",
-            "local_dir":  core.TEMP_DL_DIR,
-            "output_dir": self.v["output_dir"].get().strip() or core.DEFAULT_OUTPUT_DIR,
+            "local_dir":  config.TEMP_DL_DIR,
+            "output_dir": self.v["output_dir"].get().strip() or config.DEFAULT_OUTPUT_DIR,
         }
 
         if self.v["advanced_mode"].get():
@@ -1111,16 +373,17 @@ class App:
     def _set_actions_enabled(self, enabled: bool):
         """Toggle 'Làm mới' — locked while a run is in progress. 'Bắt đầu' (trong
         dialog 'Tải số liệu', nếu đang mở) khóa/mở theo cùng trạng thái qua
-        _refresh_advanced_controls_state."""
+        advanced_dialog.refresh_controls_state()."""
         self._run_in_progress = not enabled
         self.refresh_btn.config(state="normal" if enabled else "disabled")
-        self._refresh_advanced_controls_state()
+        self.advanced_dialog.refresh_controls_state()
 
     def _on_run(self) -> bool:
         """Returns True iff a worker thread was actually started — False if
         skipped (a run is already in progress) or rejected (bad input). Callers
-        that need to know whether the query truly started (e.g. _on_advanced_start,
-        to decide whether to close the 'Tải số liệu' dialog) check this."""
+        that need to know whether the query truly started (e.g.
+        AdvancedDialog._on_advanced_start, to decide whether to close the 'Tải
+        số liệu' dialog) check this."""
         if self.worker and self.worker.is_alive():
             self._log("WARN", "Bỏ qua: một tác vụ đang chạy")
             return False
