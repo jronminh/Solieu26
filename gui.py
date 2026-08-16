@@ -155,6 +155,12 @@ class App:
         self.last_updated_at = None # datetime the last run finished (success or not)
         self._dialogs = {}          # keeps references to open dialogs (avoids reopening duplicates)
         self.btn_open_csv = None    # "Mở thư mục CSV" button, lives in the Thiết lập dialog
+        # Widgets below live in the "Tải số liệu" dialog — None until first opened
+        # (see _open_advanced_dialog); every accessor guards for that with winfo_exists().
+        self.start_date_entry = None
+        self.end_date_entry = None
+        self.now_btn = None
+        self.start_btn = None
 
         # Load the external config (if any) BEFORE prefilling the form
         self.cfg_path, self.cfg_overrides = core.apply_config_file(config_path)
@@ -207,7 +213,6 @@ class App:
             "missing":       tk.StringVar(value="—"),
         }
 
-        self._build_menu()
         self._build_ui()
         self._fit_window_to_content()
         # Floor = the natural size with every field + the log shown.
@@ -225,48 +230,18 @@ class App:
             self.root.after(300, self._on_run)   # small delay so the window renders first
 
     # -----------------------------------------------------------------
-    def _build_menu(self):
-        """Single menu bar entry, 'Tùy chọn' — every action (run / toggles /
-        settings) lives here. Xem số liệu is a button on the main screen now,
-        not a menu item — see _build_ui. Folder-opening actions live inside the
-        Thiết lập dialog (see _open_settings_dialog), not this menu."""
-        menubar = tk.Menu(self.root)
-
-        # --- Tùy chọn --- grouped: run → settings
-        opt_menu = tk.Menu(menubar, tearoff=0)
-
-        opt_menu.add_command(label="Làm mới", command=self._on_run)
-        opt_menu.add_separator()
-
-        # Thiết lập... opens the combined Kết nối / Đường dẫn / Tự động truy vấn
-        # dialog, with config.ini actions at its bottom.
-        opt_menu.add_command(label="Thiết lập...", command=self._open_settings_dialog)
-        opt_menu.add_separator()
-
-        opt_menu.add_command(label="Thoát", command=self._on_exit)
-
-        menubar.add_cascade(label="Tùy chọn", menu=opt_menu)
-        self.opt_menu = opt_menu   # lets us enable/disable entries by state ("Làm mới" while running)
-
-        self.root.config(menu=menubar)
-
-    # -----------------------------------------------------------------
     def _build_ui(self):
         frm = ttk.Frame(self.root, padding=10)
         frm.pack(fill="both", expand=True)
 
-        # --- Truy vấn nâng cao: checkbox chỉ đổi CHẾ ĐỘ truy vấn (ngày đơn ↔
-        # khoảng ngày) và tạm dừng/tiếp tục tự động truy vấn. Chế độ thường (bỏ
-        # tick, mặc định) luôn truy vấn "hôm nay".
-        self.adv_check = ttk.Checkbutton(frm, text="Nâng cao",
-                                         variable=self.v["advanced_mode"],
-                                         command=self._on_toggle_advanced)
-        self.adv_check.pack(anchor="w")
+        # --- Hàng nội dung chính: Thông tin truy vấn (trái) + cột nút (phải) ---
+        content_row = ttk.Frame(frm)
+        content_row.pack(fill="x")
 
         # --- Thông tin truy vấn --- (read-only status; recomputed by _refresh_info_panel)
-        # No LabelFrame border — laid directly on frm.
-        top = ttk.Frame(frm)
-        top.pack(fill="x", pady=(8, 0))
+        # No LabelFrame border — laid directly on content_row.
+        top = ttk.Frame(content_row)
+        top.pack(side="left", fill="both", expand=True)
 
         def info_row(r, caption, var=None, widget=None):
             """One grid row: caption label + either a read-only value (var, as a
@@ -276,37 +251,25 @@ class App:
             cap.grid(row=r, column=0, sticky="w", padx=6, pady=2)
             val.grid(row=r, column=1, sticky="ew" if widget is not None else "w", padx=6, pady=2)
 
-        # Ngày bắt đầu/kết thúc + 2 nút điều khiển chỉ THẬT SỰ dùng được khi
-        # "Truy vấn nâng cao" được tick — _refresh_advanced_controls_state() giữ
-        # chúng ở trạng thái disabled khi chưa tick.
-        self.start_date_entry = ttk.Entry(top, textvariable=self.v["start_date"], width=12)
-        info_row(0, "Ngày bắt đầu:", widget=self.start_date_entry)
-
-        self.end_date_entry = ttk.Entry(top, textvariable=self.v["end_date"], width=12)
-        info_row(1, "Ngày kết thúc:", widget=self.end_date_entry)
-
-        # "Bắt đầu" chạy truy vấn nâng cao ngay tại chỗ; "Về hiện tại" nằm cạnh —
-        # cả hai căn giữa trên dòng riêng ngay dưới Ngày kết thúc.
-        btn_row = ttk.Frame(top)
-        self.start_btn = ttk.Button(btn_row, text="Bắt đầu", command=self._on_run)
-        self.start_btn.pack(side="left", padx=(0, 6))
-        self.now_btn = ttk.Button(btn_row, text="Về hiện tại", command=self._on_now)
-        self.now_btn.pack(side="left")
-        btn_row.grid(row=2, column=0, columnspan=2, pady=(2, 4))
-
-        info_row(3, "Máy chủ:", self.v["ftp_host"])
-        info_row(4, "Xuất CSV:", self.info["csv_result"])
-        info_row(5, "Dữ liệu:", self.info["data_status"])
-        info_row(6, "Tự động:", self.info["auto_status"])
-        info_row(7, "File thiếu:", self.info["missing"])
+        info_row(0, "Máy chủ:", self.v["ftp_host"])
+        info_row(1, "Xuất CSV:", self.info["csv_result"])
+        info_row(2, "Dữ liệu:", self.info["data_status"])
+        info_row(3, "Tự động:", self.info["auto_status"])
+        info_row(4, "File thiếu:", self.info["missing"])
         top.columnconfigure(1, weight=1)
 
-        # --- Xem số liệu — ngay dưới trường dữ liệu, căn giữa. pack() không
-        # fill/expand → tự căn giữa theo chiều ngang trong frm.
-        view_row = ttk.Frame(frm)
-        view_row.pack(pady=(8, 0))
-        ttk.Button(view_row, text="Xem số liệu",
-                  command=self._open_history_viewer).pack(side="left")
+        # --- Cột nút, bên phải khung Thông tin truy vấn, xếp dọc theo thứ tự:
+        # Làm mới, Tải số liệu, Xem số liệu, Thiết lập.
+        btn_col = ttk.Frame(content_row)
+        btn_col.pack(side="left", padx=(12, 0))
+        self.refresh_btn = ttk.Button(btn_col, text="Làm mới", command=self._on_run)
+        self.refresh_btn.pack(fill="x")
+        ttk.Button(btn_col, text="Tải số liệu",
+                  command=self._open_advanced_dialog).pack(fill="x", pady=(4, 0))
+        ttk.Button(btn_col, text="Xem số liệu",
+                  command=self._open_history_viewer).pack(fill="x", pady=(4, 0))
+        ttk.Button(btn_col, text="Thiết lập...",
+                  command=self._open_settings_dialog).pack(fill="x", pady=(4, 0))
 
         # --- Status bar at the BOTTOM ---
         statusbar = ttk.Frame(frm)
@@ -491,11 +454,6 @@ class App:
             self._log("ERR", f"Không lưu được thiết lập: {e}")
             messagebox.showerror("Lỗi", f"Không lưu được thiết lập:\n{e}")
         self._schedule_auto_tick()
-
-    # ----- Exit ------------------------------------------------------
-    def _on_exit(self):
-        self._log("ACT", "Thoát chương trình")
-        self.root.destroy()
 
     # ----- CSV viewing ----------------------------------------------------
     def _current_output_dir(self) -> str:
@@ -882,18 +840,19 @@ class App:
         self._report_open(*open_in_editor(path), warn=True)
 
     def _on_now(self):
-        """'Về hiện tại' (Nâng cao frame): force start_date/end_date to today."""
+        """'Về hiện tại' (dialog 'Tải số liệu'): force start_date/end_date to today."""
         now = datetime.datetime.now()
         self.v["start_date"].set(now.strftime("%Y-%m-%d"))
         self.v["end_date"].set(now.strftime("%Y-%m-%d"))
         self._log("ACT", f"Về hiện tại: ngày {now:%Y-%m-%d}")
 
-    def _on_toggle_advanced(self):
-        """Toggle 'Truy vấn nâng cao': switches query mode (ngày đơn ↔ khoảng ngày),
-        pauses/resumes auto-query (mutually exclusive with advanced mode), and
-        enables/disables the date-range fields + 'Bắt đầu'/'Về hiện tại'."""
-        on = self.v["advanced_mode"].get()
-        if on:
+    def _on_advanced_mode_changed(self):
+        """Pauses/resumes auto-query to match self.v["advanced_mode"] (mutually
+        exclusive — a background auto tick shouldn't re-fire a date-range fetch
+        the user is busy configuring), then refreshes the date-range controls
+        and info panel. advanced_mode now simply tracks whether the 'Tải số
+        liệu' dialog is open — see _open_advanced_dialog / _on_advanced_dialog_close."""
+        if self.v["advanced_mode"].get():
             if self.auto_job is not None:
                 self.root.after_cancel(self.auto_job)
                 self.auto_job = None
@@ -902,17 +861,77 @@ class App:
             self._schedule_auto_tick()   # resume per the settings already in config/mã nguồn
         self._refresh_advanced_controls_state()
         self._refresh_info_panel()
-        self._log("ACT", f"Truy vấn nâng cao: {'Bật' if on else 'Tắt'}")
 
     def _refresh_advanced_controls_state(self):
-        """Ngày bắt đầu/kết thúc + 'Về hiện tại' theo đúng trạng thái tick của
-        'Truy vấn nâng cao'; 'Bắt đầu' còn bị khóa thêm khi đang có tác vụ chạy."""
-        on = self.v["advanced_mode"].get()
-        field_state = "normal" if on else "disabled"
-        self.start_date_entry.config(state=field_state)
-        self.end_date_entry.config(state=field_state)
-        self.now_btn.config(state=field_state)
-        self.start_btn.config(state="normal" if (on and not self._run_in_progress) else "disabled")
+        """'Bắt đầu' bị khóa khi đang có tác vụ chạy; ngày bắt đầu/kết thúc +
+        'Về hiện tại' luôn bật vì dialog 'Tải số liệu' chỉ tồn tại khi đang ở chế
+        độ tải số liệu. No-op nếu dialog chưa từng mở (hoặc đã bị đóng) — các
+        widget bên dưới chỉ tồn tại từ lúc _open_advanced_dialog dựng chúng."""
+        if self.start_date_entry is None or not self.start_date_entry.winfo_exists():
+            return
+        self.start_date_entry.config(state="normal")
+        self.end_date_entry.config(state="normal")
+        self.now_btn.config(state="normal")
+        self.start_btn.config(state="disabled" if self._run_in_progress else "normal")
+
+    def _open_advanced_dialog(self):
+        """'Tải số liệu' button (next to 'Xem số liệu'): opens a Toplevel holding
+        the date-range query UI (Ngày bắt đầu/kết thúc + Bắt đầu/Về hiện tại).
+        Opening it turns advanced (date-range) mode on and pauses auto-query;
+        closing it (nút X) turns advanced mode back off and resumes auto-query
+        — see _on_advanced_dialog_close."""
+        win = self._make_dialog("advanced", "Tải số liệu")
+        if win is None:
+            return
+        self._log("ACT", "Mở hộp thoại Tải số liệu — tạm dừng tự động truy vấn")
+
+        frm = ttk.Frame(win, padding=12)
+        frm.pack(fill="both", expand=True)
+
+        date_box = ttk.Frame(frm)
+        date_box.pack(fill="x")
+
+        ttk.Label(date_box, text="Ngày bắt đầu:").grid(row=0, column=0, sticky="w", padx=6, pady=2)
+        self.start_date_entry = ttk.Entry(date_box, textvariable=self.v["start_date"], width=12)
+        self.start_date_entry.grid(row=0, column=1, sticky="w", padx=6, pady=2)
+
+        ttk.Label(date_box, text="Ngày kết thúc:").grid(row=1, column=0, sticky="w", padx=6, pady=2)
+        self.end_date_entry = ttk.Entry(date_box, textvariable=self.v["end_date"], width=12)
+        self.end_date_entry.grid(row=1, column=1, sticky="w", padx=6, pady=2)
+
+        # "Bắt đầu" chạy truy vấn tải số liệu rồi đóng luôn dialog này; "Về hiện
+        # tại" nằm cạnh.
+        btn_row = ttk.Frame(frm)
+        self.start_btn = ttk.Button(btn_row, text="Bắt đầu", command=self._on_advanced_start)
+        self.start_btn.pack(side="left", padx=(0, 6))
+        self.now_btn = ttk.Button(btn_row, text="Về hiện tại", command=self._on_now)
+        self.now_btn.pack(side="left")
+        btn_row.pack(pady=(8, 0))
+
+        win.protocol("WM_DELETE_WINDOW", self._on_advanced_dialog_close)
+
+        self.v["advanced_mode"].set(True)
+        self._on_advanced_mode_changed()
+        win.minsize(260, 0)
+        self._center_over_root(win)
+
+    def _on_advanced_dialog_close(self):
+        """WM_DELETE_WINDOW cho dialog 'Tải số liệu': đóng cửa sổ rồi tắt chế độ
+        tải số liệu (date-range) và tiếp tục tự động truy vấn."""
+        self._dialogs["advanced"].destroy()
+        self.v["advanced_mode"].set(False)
+        self._on_advanced_mode_changed()
+        self._log("ACT", "Đóng hộp thoại Tải số liệu — tiếp tục tự động truy vấn")
+
+    def _on_advanced_start(self):
+        """'Bắt đầu' trong dialog 'Tải số liệu': chạy truy vấn theo khoảng ngày
+        đã nhập, rồi đóng dialog — NHƯNG chỉ khi truy vấn thực sự bắt đầu được.
+        _on_run() build cfg từ start_date/end_date trước khi dialog đóng, nên
+        khoảng ngày vẫn đúng (đóng trước sẽ tắt advanced_mode → cfg rơi về "hôm
+        nay"). Nếu ngày nhập sai hoặc đang có tác vụ chạy, _on_run() trả về False
+        và dialog vẫn mở để người dùng sửa."""
+        if self._on_run():
+            self._on_advanced_dialog_close()
 
     # ----- Info panel ("Thông tin truy vấn") --------------------------
     def _refresh_info_panel(self):
@@ -941,7 +960,7 @@ class App:
             self.info["data_status"].set("Chưa có dữ liệu")
 
         if self.v["advanced_mode"].get():
-            self.info["auto_status"].set("Tạm dừng trong truy vấn nâng cao")
+            self.info["auto_status"].set("Tạm dừng — đang tải số liệu")
             return
 
         if self._auto_effective_minutes() <= 0:
@@ -1077,8 +1096,8 @@ class App:
 
         Always sets start_date/end_date — core.download_files() takes the fast
         single-day path when they're equal. Normal mode: always "today", no date
-        field to read. Advanced mode (self.v["advanced_mode"]): reads them from
-        the Nâng cao form instead.
+        field to read. Advanced mode (self.v["advanced_mode"], on while the "Tải
+        số liệu" dialog is open): reads them from that dialog's fields instead.
         """
         cfg = {
             "ftp_host": self.v["ftp_host"].get().strip(),
@@ -1110,22 +1129,23 @@ class App:
         return cfg
 
     def _set_actions_enabled(self, enabled: bool):
-        """Toggle 'Làm mới' and 'Truy vấn nâng cao' — locked while a run is in
-        progress (advanced mode can't change the query mid-run). 'Bắt đầu' follows
-        via _refresh_advanced_controls_state, which also re-applies the checkbox's
-        own on/off state to the date fields."""
+        """Toggle 'Làm mới' — locked while a run is in progress. 'Bắt đầu' (trong
+        dialog 'Tải số liệu', nếu đang mở) khóa/mở theo cùng trạng thái qua
+        _refresh_advanced_controls_state."""
         self._run_in_progress = not enabled
-        state = "normal" if enabled else "disabled"
-        self.opt_menu.entryconfig("Làm mới", state=state)
-        self.adv_check.config(state=state)
+        self.refresh_btn.config(state="normal" if enabled else "disabled")
         self._refresh_advanced_controls_state()
 
     # -----------------------------------------------------------------
-    def _on_run(self):
+    def _on_run(self) -> bool:
+        """Returns True iff a worker thread was actually started — False if
+        skipped (a run is already in progress) or rejected (bad input). Callers
+        that need to know whether the query truly started (e.g. _on_advanced_start,
+        to decide whether to close the 'Tải số liệu' dialog) check this."""
         self._log("ACT", "Bắt đầu truy vấn")
         if self.worker and self.worker.is_alive():
             self._log("WARN", "Bỏ qua: một tác vụ đang chạy")
-            return
+            return False
         try:
             cfg = self._build_cfg()
             if not cfg["ftp_host"]:
@@ -1133,7 +1153,7 @@ class App:
         except ValueError as e:
             self._log("ERR", f"Nhập sai: {e}")
             messagebox.showerror("Nhập sai", str(e))
-            return
+            return False
 
         self._divider()
         if cfg["start_date"].date() == cfg["end_date"].date():
@@ -1149,6 +1169,7 @@ class App:
 
         self.worker = threading.Thread(target=self._work, args=(cfg,), daemon=True)
         self.worker.start()
+        return True
 
     def _work(self, cfg):
         """Worker thread — only pushes events onto the queue, never touches widgets."""
