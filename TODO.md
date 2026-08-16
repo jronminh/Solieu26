@@ -26,6 +26,41 @@ ngắn gọn để không phải lục `git log` mỗi lần cần nhớ lại �
       Chưa là vấn đề ở quy mô hiện tại (1 ngày ~ vài trăm dòng); để ý nếu sau
       này hỗ trợ xem nhiều ngày/nhiều trạm cùng lúc.
 
+## Chương trình riêng — Chấm điểm dự báo (`buckets.py`)
+
+`buckets.py` là bảng bucket + engine chấm điểm (dự báo so với quan trắc) cho 6
+trường: tổng lượng mây, độ cao màn mây (trần), hiện tượng, hướng gió, tốc độ
+gió, tầm nhìn. Đây là chương trình con tách biệt với phần decode/encode/
+pipeline hiện có của Solieu26 — `buckets.py` chưa được import ở đâu khác trong
+repo. Việc cần làm trước khi dùng thật:
+
+- [ ] Gán bảng `hien_tuong["groups"]` (mã ww → mega-nhóm) trong `buckets.py` —
+      hiện đang để trống `{}`, chặn cứng `score_phenomenon()`.
+- [ ] Xác nhận các mốc còn đánh dấu `KIỂM:` trong `buckets.py`: mép 6000m
+      (trần), mép 10km (tầm nhìn), đơn vị tốc độ gió/tầm nhìn, cơ sở ngưỡng
+      lặng gió (tính theo tốc độ quan trắc hay dự báo).
+- [ ] Viết adapter đổi tên key mây cho `solve_ceiling()`: `decode_cloud()`
+      trả `{"cloud_C","cloud_Ns","cloud_hshs"}`, còn `solve_ceiling` cần
+      `{"type","amount","height"}` — chưa có lớp chuyển đổi nào nối 2 bên.
+- [ ] Ép `VV` (tầm nhìn, `vv_value()` trả chuỗi) thành số km trước khi đưa
+      vào `bucket_of` — hàm này hiện cần số, không nhận chuỗi.
+- [ ] Viết hàm quy đổi hướng gió từ độ (`decode_wind()` trả 0–360°) sang chỉ
+      số 1 trong 16 hướng (0–15) mà `huong_gio` trong `buckets.py` cần —
+      chưa có hàm này ở đâu trong repo.
+- [ ] Chuẩn hoá đơn vị tốc độ gió (`wind_ff`) về m/s thống nhất giữa các
+      trạm (decode.py hiện không đảm bảo đơn vị đồng nhất) trước khi đưa
+      vào `toc_do_gio`.
+- [ ] Thiết kế UI/cấu trúc dữ liệu cho dự báo viên chọn bucket ở cả 6 trường
+      — hiện `gui.py`/`dialogs.py` chưa có khái niệm "bucket"/"dự báo"/"chấm
+      điểm" nào.
+- [ ] Thiết kế kho lưu `forecasts`/`observations`/`scores` khoá theo trạm +
+      giờ (SQLite hay khác) — hiện chưa có lớp lưu trữ nào ngoài `config.ini`
+      và CSV xuất.
+- [ ] Viết matcher ghép cặp dự báo ↔ quan trắc (chính sách ghép trạm/giờ, xử
+      lý trường hợp không tìm được cặp khớp).
+- [ ] Viết test cho `buckets.py` (`tests/test_buckets.py` — chưa có).
+- [ ] Nối `buckets.py` vào pipeline khi các mục trên xong.
+
 ## Backlog khác (chưa ưu tiên)
 
 - [x] Chưa có test nào trong repo. `decode.py` giờ đã tách thuần (không I/O
