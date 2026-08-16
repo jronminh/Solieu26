@@ -67,6 +67,16 @@ NAME_TO_CODE  = {name: code for code, name in STATIONS.items()}
 
 ALL_STATIONS = "Tất cả các trạm"   # station-filter dropdown option that disables filtering
 
+# Hours feed the hour-filter dropdown in the "Xem lịch sử" viewer — history.csv's
+# "hour" column is a zero-padded string ("00".."23"), so the dropdown values match.
+HOURS = [f"{h:02d}" for h in range(24)]
+ALL_HOURS = "Tất cả các giờ"   # hour-filter dropdown option that disables filtering
+
+# Date-filter dropdown option that disables filtering. Unlike HOURS/STATIONS, the
+# actual date VALUES aren't a fixed table — they're whatever "date" ("YYYY-MM-DD")
+# values are present in the loaded history.csv, populated in _load_csv_into_viewer.
+ALL_DATES = "Tất cả các ngày"
+
 
 # Numeric columns in the CSV viewer — right-aligned + compared as NUMBERS when
 # sorting (instead of as strings). *_hshs columns are numeric too but their names
@@ -241,8 +251,8 @@ class App:
     # -----------------------------------------------------------------
     def _build_menu(self):
         """Single menu bar entry, 'Tùy chọn' — every action (run / toggles /
-        settings / file ops) lives here. Xem gần nhất/Xem lịch sử are buttons on
-        the main screen now, not menu items — see _build_ui."""
+        settings / file ops) lives here. Xem số liệu is a button on the main
+        screen now, not a menu item — see _build_ui."""
         menubar = tk.Menu(self.root)
 
         # --- Tùy chọn --- grouped: run → toggles/settings → file ops
@@ -334,17 +344,15 @@ class App:
         info_row(8, "File thiếu:", self.info["missing"], advanced_only=True)
         top.columnconfigure(1, weight=1)
 
-        # --- Xem gần nhất / Xem lịch sử — luôn hiển thị (cả Cơ bản lẫn Nâng cao),
-        # ngay dưới trường dữ liệu, xếp ngang và căn giữa. pack() không fill/expand
-        # → tự căn giữa theo chiều ngang trong frm.
+        # --- Xem số liệu — luôn hiển thị (cả Cơ bản lẫn Nâng cao), ngay dưới trường
+        # dữ liệu, căn giữa. pack() không fill/expand → tự căn giữa theo chiều ngang
+        # trong frm.
         view_row = ttk.Frame(frm)
         view_row.pack(pady=(8, 0))
-        ttk.Button(view_row, text="Xem gần nhất",
-                  command=lambda: self._open_csv_viewer("latest.csv", "latest.csv")
-                  ).pack(side="left", padx=(0, 6))
-        ttk.Button(view_row, text="Xem lịch sử",
+        ttk.Button(view_row, text="Xem số liệu",
                   command=lambda: self._open_csv_viewer(
-                      "history.csv", "history.csv", with_station_filter=True)
+                      "history.csv", "history.csv", with_station_filter=True,
+                      with_hour_filter=True, with_date_filter=True)
                   ).pack(side="left")
 
         # --- Status bar at the BOTTOM: display-mode toggle at bottom-left, status
@@ -539,7 +547,8 @@ class App:
             return self.last_output_dir
         return os.path.abspath(self.v["output_dir"].get().strip() or core.DEFAULT_OUTPUT_DIR)
 
-    def _open_csv_viewer(self, filename: str, title: str, with_station_filter: bool = False):
+    def _open_csv_viewer(self, filename: str, title: str, with_station_filter: bool = False,
+                          with_hour_filter: bool = False, with_date_filter: bool = False):
         """Open a dedicated window to view a CSV file as a table (read-only)."""
         self._log("ACT", f"Xem {filename}")
         path = os.path.join(self._current_output_dir(), filename)
@@ -595,6 +604,40 @@ class App:
         else:
             win._station_filter = None
 
+        # Hour filter — same post-process idea as the station filter above, but over
+        # the "hour" column (always present, just hidden from the rendered table).
+        # Its OWN options are derived from the station filter (see
+        # _sync_hour_filter_for_station): a specific station locks giờ to "Tất cả
+        # các giờ" (one station's whole history), while "Tất cả các trạm" hides that
+        # option and forces a specific giờ (otherwise the table would be every
+        # station × every hour at once).
+        if with_hour_filter:
+            win._hour_filter = tk.StringVar(value=ALL_HOURS)
+            ttk.Label(bar, text="Giờ:").pack(side="left", padx=(12, 2))
+            win._hour_combo = ttk.Combobox(bar, textvariable=win._hour_filter,
+                        values=[ALL_HOURS] + HOURS, state="readonly",
+                        width=8)
+            win._hour_combo.pack(side="left")
+            win._hour_filter.trace_add("write", lambda *_: self._on_hour_filter_change(win))
+        else:
+            win._hour_filter = None
+
+        if with_station_filter and with_hour_filter:
+            self._sync_hour_filter_for_station(win)
+
+        # Date filter — same post-process idea, but the dropdown's values are data-
+        # driven (whatever dates are actually present), refreshed on every load in
+        # _load_csv_into_viewer rather than fixed up front like STATIONS/HOURS.
+        if with_date_filter:
+            win._date_filter = tk.StringVar(value=ALL_DATES)
+            ttk.Label(bar, text="Ngày:").pack(side="left", padx=(12, 2))
+            win._date_combo = ttk.Combobox(bar, textvariable=win._date_filter,
+                        values=[ALL_DATES], state="readonly", width=12)
+            win._date_combo.pack(side="left")
+            win._date_filter.trace_add("write", lambda *_: self._on_date_filter_change(win))
+        else:
+            win._date_filter = None
+
         win._status = ttk.Label(bar, text="")
         win._status.pack(side="right")
 
@@ -632,13 +675,30 @@ class App:
             win._header, win._data = [], []
             win._tree.delete(*win._tree.get_children())
             win._tree["columns"] = ()
+            if win._date_filter is not None:
+                win._date_combo["values"] = [ALL_DATES]
+                win._date_filter.set(ALL_DATES)
             win._status.config(text="File rỗng")
             return
 
         win._header, win._data = rows[0], rows[1:]
+        self._sync_date_filter_values(win)
         self._apply_sort(win)         # keep the current sort (if any) after reloading
         self._render_viewer(win)
         self._log("OK", f"Đã hiển thị {os.path.basename(path)} ({len(win._data)} dòng)")
+
+    def _sync_date_filter_values(self, win):
+        """Rebuild the Ngày dropdown's values from the dates actually present in the
+        just-loaded win._data (dates aren't a fixed table like STATIONS/HOURS). Falls
+        back to 'Tất cả các ngày' if the previously selected date is gone (e.g. a
+        Làm mới that no longer includes it)."""
+        if win._date_filter is None or "date" not in win._header:
+            return
+        idx = win._header.index("date")
+        dates = sorted({r[idx] for r in win._data if idx < len(r) and r[idx]})
+        win._date_combo["values"] = [ALL_DATES] + dates
+        if win._date_filter.get() not in win._date_combo["values"]:
+            win._date_filter.set(ALL_DATES)
 
     def _toggle_viewer_mode(self, win):
         """Switch between Data mode (hides raw) and Raw mode (identity cols + raw)."""
@@ -648,7 +708,34 @@ class App:
 
     def _on_station_filter_change(self, win):
         self._log("ACT", f"Lọc trạm: {win._station_filter.get()}")
+        self._sync_hour_filter_for_station(win)
         self._render_viewer(win)
+
+    def _on_hour_filter_change(self, win):
+        self._log("ACT", f"Lọc giờ: {win._hour_filter.get()}")
+        self._render_viewer(win)
+
+    def _on_date_filter_change(self, win):
+        self._log("ACT", f"Lọc ngày: {win._date_filter.get()}")
+        self._render_viewer(win)
+
+    def _sync_hour_filter_for_station(self, win):
+        """Giờ filter's OWN options depend on the trạm filter: chọn một trạm cụ thể
+        khóa giờ về 'Tất cả các giờ' (chỉ có ý nghĩa xem toàn bộ giờ của trạm đó);
+        chọn 'Tất cả các trạm' thì ẩn 'Tất cả các giờ' đi, bắt buộc chọn một giờ cụ
+        thể (tránh bảng hiện toàn bộ trạm × toàn bộ giờ cùng lúc)."""
+        if win._station_filter is None or win._hour_filter is None:
+            return
+        if win._station_filter.get() == ALL_STATIONS:
+            win._hour_combo["values"] = HOURS
+            win._hour_combo["state"] = "readonly"
+            if win._hour_filter.get() == ALL_HOURS:
+                win._hour_filter.set(HOURS[0])
+        else:
+            win._hour_combo["values"] = [ALL_HOURS]
+            win._hour_combo["state"] = "disabled"
+            if win._hour_filter.get() != ALL_HOURS:
+                win._hour_filter.set(ALL_HOURS)
 
     # ----- Column sorting --------------------------------------------
     def _apply_sort(self, win):
@@ -743,6 +830,18 @@ class App:
                 code = NAME_TO_CODE.get(name)
                 sc_idx = header.index("station_code")
                 data = [r for r in data if sc_idx < len(r) and r[sc_idx] == code]
+
+        if win._hour_filter is not None and "hour" in header:
+            hour = win._hour_filter.get()
+            if hour != ALL_HOURS:
+                h_idx = header.index("hour")
+                data = [r for r in data if h_idx < len(r) and r[h_idx] == hour]
+
+        if win._date_filter is not None and "date" in header:
+            date = win._date_filter.get()
+            if date != ALL_DATES:
+                d_idx = header.index("date")
+                data = [r for r in data if d_idx < len(r) and r[d_idx] == date]
 
         if mode == "raw":
             # Just a few identity columns + raw, to read the original bulletin per station.
