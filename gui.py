@@ -174,6 +174,12 @@ class App:
 
         root.title("Solieu26")
         root.minsize(200, 150)   # temporary low floor, replaced below once real content is laid out
+        icon_path = os.path.join(core.SCRIPT_DIR, "icon.ico")
+        if os.path.isfile(icon_path):
+            try:
+                root.iconbitmap(icon_path)
+            except tk.TclError:
+                pass   # e.g. platform without .ico support — window just keeps the default icon
 
         # CSV viewer Treeview look — taller rows + bold headings read better than
         # the ttk defaults across the many columns flatten_record() produces.
