@@ -17,7 +17,7 @@ for a live sanity preview. "Lưu vào file..." appends the generated records
 to a .txt file, so you can feed it into the same decode pipeline used for
 real downloads to sanity-check against a hand-built time series.
 
-Standalone — does not import gui.py/csv_pipeline.py/config.py, does not touch FTP
+Standalone — does not import gui.py/pipeline_csv.py/config.py, does not touch FTP
 or the app's config. Run:  python bulletin_generator.py
 """
 

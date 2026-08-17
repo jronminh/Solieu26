@@ -1,5 +1,5 @@
 """
-forecast_bucket_logic.py
+pipeline_forecast.py
 ====================
 Micro-database cho các bản ghi dự báo đã chọn bucket: CRUD trong bộ nhớ
 (add/remove/edit_record), import/export CSV, và tra nhãn hiển thị cho từng

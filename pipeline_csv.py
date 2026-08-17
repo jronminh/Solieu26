@@ -1,8 +1,8 @@
 """
-csv_pipeline.py
+pipeline_csv.py
 ====================
 CSV-export pipeline: FTP download + CSV export + the run_pipeline()
-orchestrator. Named "csv_pipeline" (not just "pipeline") to stay distinct from
+orchestrator. Named "pipeline_csv" (not just "pipeline") to stay distinct from
 the forecast-scoring pipeline planned in score_tables.py/scorer.py — this
 module produces the display-oriented CSV export only, unaffected by the type
 coercion decode.py does for score_tables.py's benefit.
@@ -10,7 +10,7 @@ coercion decode.py does for score_tables.py's benefit.
 Built on config.py (settings/paths) and decode.py (bulletin → dict decoding).
 GUI-only — not runnable standalone. gui.py calls config.apply_config_file() at
 startup, builds a cfg dict from its own form fields for every run, and calls
-csv_pipeline.run_pipeline() — never touching the FTP/decode internals directly.
+pipeline_csv.run_pipeline() — never touching the FTP/decode internals directly.
 
 Every function that does work takes a required `log(level, msg)` callback —
 gui.py always passes its own (routing into the on-screen log widget); there is

@@ -1,7 +1,7 @@
 """
-test_csv_pipeline.py
+test_pipeline_csv.py
 ====================
-Unit tests for the CSV-export half of csv_pipeline.py (flatten_record,
+Unit tests for the CSV-export half of pipeline_csv.py (flatten_record,
 cloud_layers_needed, write_csv, export_history_by_date) plus the small
 filename<->datetime helpers. The FTP download layer (download_files,
 run_pipeline) needs a live/mocked server and isn't covered here.
@@ -11,7 +11,7 @@ import csv
 import os
 
 from bulletin.decode import decode_qt_file
-from csv_pipeline import (
+from pipeline_csv import (
     cloud_layers_needed,
     export_history_by_date,
     flatten_record,

@@ -11,10 +11,10 @@ once in App.__init__ and holding the `app` instance so it can reach back into
 shared state (self.app.v, self.app._log, self.app._dialogs, ...).
 
 Run:  python gui.py [config.ini path]
-Requires config.py/decode.py/csv_pipeline.py/gui_common.py/history_viewer.py/dialogs.py
-in the same folder.
+Requires config.py/pipeline_csv.py/gui_common.py/history_viewer.py/dialogs.py,
+plus the bulletin/ and utils/ packages, in the same folder.
 
-Anti-freeze architecture: heavy work (FTP + decode + CSV export, all in csv_pipeline.py)
+Anti-freeze architecture: heavy work (FTP + decode + CSV export, all in pipeline_csv.py)
 runs on a worker thread that never touches widgets — it only pushes ('log' /
 'progress' / 'done' / 'error') events onto a queue.Queue(); the main thread
 polls the queue every 100ms via root.after() and applies the UI updates itself.
@@ -32,7 +32,7 @@ import tkinter as tk
 from tkinter import ttk, messagebox, scrolledtext
 
 import config
-import csv_pipeline
+import pipeline_csv
 from gui_common import LOG_COLORS
 from history_viewer import HistoryViewer
 from dialogs import SettingsDialog, AdvancedDialog
@@ -336,7 +336,7 @@ class App:
     def _build_cfg(self) -> dict:
         """Read the form → cfg dict; local_dir/timeout/retry come from config's fixed constants.
 
-        Always sets start_date/end_date — csv_pipeline.download_files() takes the fast
+        Always sets start_date/end_date — pipeline_csv.download_files() takes the fast
         single-day path when they're equal. Normal mode: always "today", no date
         field to read. Advanced mode (self.v["advanced_mode"], on while the "Tải
         số liệu" dialog is open): reads them from that dialog's fields instead.
@@ -416,7 +416,7 @@ class App:
         def log(level, msg): q.put(("log", level, msg))
         def progress(done, total, status): q.put(("progress", done, total))
         try:
-            result = csv_pipeline.run_pipeline(cfg, log=log, progress=progress)
+            result = pipeline_csv.run_pipeline(cfg, log=log, progress=progress)
             q.put(("done", result))
         except Exception as e:
             q.put(("error", f"{type(e).__name__}: {e}"))

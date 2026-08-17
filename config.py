@@ -4,7 +4,7 @@ config.py
 Path/FTP constants + the CONFIG dict + config.ini load/save.
 
 No FTP calls, no decoding — this is the settings layer everything else
-(decode.py, csv_pipeline.py, gui.py) reads from. gui.py is the only writer: it calls
+(decode.py, pipeline_csv.py, gui.py) reads from. gui.py is the only writer: it calls
 apply_config_file() once at startup and write_default_config() whenever the
 user restores default settings from the "Thiết lập" dialog (saving individual
 keys goes through utils.ini_utils.update_ini_key() instead).

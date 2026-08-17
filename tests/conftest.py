@@ -5,7 +5,7 @@ Shared pytest fixtures for the test suite.
 
 FIXTURES_DIR/qt_files holds a small, hand-picked set of REAL raw bulletin
 files copied verbatim from a live download (~/solieu26_dl/data) — not
-synthetic data — so decode.py/csv_pipeline.py get exercised against the actual
+synthetic data — so decode.py/pipeline_csv.py get exercised against the actual
 byte-for-byte format the FTP server sends, edge cases included (see the
 docstring on each fixture file below for why it was picked).
 """
@@ -57,7 +57,7 @@ def all_qt_files():
 
 # A full, uninterrupted day (all 24 hourly files, 2026-08-10, 20 stations
 # each) — the 4 single-hour fixtures above can't catch bugs in how
-# csv_pipeline.py stitches a continuous run of hours together (missing/duplicate
+# pipeline_csv.py stitches a continuous run of hours together (missing/duplicate
 # hours, wrong sort order, wrong per-hour record counts); this can.
 FULL_DAY_DIR = os.path.join(FIXTURES_DIR, "full_day_20260810")
 

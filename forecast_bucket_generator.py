@@ -33,7 +33,7 @@ import os
 import tkinter as tk
 from tkinter import ttk, messagebox, filedialog
 
-from forecast_bucket_logic import (
+from pipeline_forecast import (
     forecast_db,
     FIELD_ORDER, FIELD_LABELS, FIELD_DEFAULTS,
     HUONG_GIO_LABELS, PHENOMENON_MEGA_KEYS, PHENOMENON_MEGA_LABEL_TEXT,
