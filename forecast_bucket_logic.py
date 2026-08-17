@@ -8,7 +8,7 @@ bucket theo cấu hình BUCKETS.
 
 import csv
 
-from score_tables import BUCKETS
+from scoring.score_tables import BUCKETS
 
 # Micro-database: TOÀN BỘ chương trình chỉ có 1 danh sách bản ghi dự báo,
 # mỗi bản ghi là 1 dict với đúng 4 khóa:

@@ -21,73 +21,19 @@ no console fallback. LEVEL is a fixed 4-char-wide code:
     ACT   user action (button click, option change) — GUI only
 """
 
-import csv
 import datetime
 import os
-import time
 from ftplib import FTP, error_perm, error_temp
 
 from config import DEFAULT_OUTPUT_DIR, FTP_TIMEOUT
-from decode import decode_history
+from bulletin.decode import decode_history
+from utils.csv_utils import write_csv
+from utils.ftp_utils import fetch_and_bucket
 
 
 # =============================================================================
 # FTP LAYER — FILE DOWNLOAD  (log/progress via callback)
 # =============================================================================
-
-def _download_one(ftp: FTP, filename: str, local_path: str,
-                  retry_temp: int = 0, retry_wait: int = 2) -> int:
-    """
-    Download ONE file (bare name) from the FTP's current directory to local.
-    Uses a '.part' temp file + atomic os.replace → no half-written file left behind.
-
-    0 success · 1 already exists · 2 could not download.
-    """
-    if os.path.isfile(local_path):
-        return 1
-
-    tmp = local_path + ".part"
-    attempts = retry_temp + 1
-    for attempt in range(attempts):
-        try:
-            with open(tmp, "wb") as f:
-                ftp.retrbinary(f"RETR {filename}", f.write)
-        except error_temp:
-            if os.path.exists(tmp):
-                os.remove(tmp)
-            if attempt < attempts - 1:
-                time.sleep(retry_wait)
-                continue
-            return 2
-        except (error_perm, OSError, EOFError):
-            if os.path.exists(tmp):
-                os.remove(tmp)
-            return 2
-        else:
-            os.replace(tmp, local_path)
-            return 0
-
-    return 2
-
-
-def _fetch_and_bucket(ftp: FTP, filename: str, local_dir: str, retry_temp: int, retry_wait: int,
-                      log, buckets: dict) -> int:
-    """Download one file, log the outcome, and sort it into the right bucket
-    (buckets = {"files","downloaded","skipped","missing"}, each a list — shared
-    across the whole batch). Returns the raw status for the progress callback."""
-    local_path = os.path.join(local_dir, filename)
-    status = _download_one(ftp, filename, local_path, retry_temp=retry_temp, retry_wait=retry_wait)
-    if status == 0:
-        log("OK", f"Tải về          {filename}")
-        buckets["files"].append(local_path); buckets["downloaded"].append(filename)
-    elif status == 1:
-        log("SKIP", f"Đã có sẵn       {filename}")
-        buckets["files"].append(local_path); buckets["skipped"].append(filename)
-    else:
-        log("MISS", f"Server chưa có  {filename}")
-        buckets["missing"].append(filename)
-    return status
-
 
 def quantrac_filename_at(dt: datetime.datetime) -> str:
     """Qt<YY><MM><DD><HH>.txt — e.g. datetime(2026,4,1,13) → 'Qt26040113.txt'."""
@@ -150,7 +96,7 @@ def download_files(ftp: FTP, cfg: dict, log, progress=None) -> dict:
         try:
             for i, ts in enumerate(hours):
                 filename = quantrac_filename_at(ts)
-                status = _fetch_and_bucket(ftp, filename, local_dir, retry_temp, retry_wait, log, buckets)
+                status = fetch_and_bucket(ftp, filename, local_dir, retry_temp, retry_wait, log, buckets)
                 if progress:
                     progress(i + 1, total, status)
         finally:
@@ -184,7 +130,7 @@ def download_files(ftp: FTP, cfg: dict, log, progress=None) -> dict:
                         progress(i + 1, total, 2)
                     continue
 
-            status = _fetch_and_bucket(ftp, filename, local_dir, retry_temp, retry_wait, log, buckets)
+            status = fetch_and_bucket(ftp, filename, local_dir, retry_temp, retry_wait, log, buckets)
             if progress:
                 progress(i + 1, total, status)
     finally:
@@ -294,15 +240,6 @@ def cloud_layers_needed(records: list, cap: int = 4) -> int:
     always-empty cloud_2_*/cloud_3_*/cloud_4_* columns into the CSV/viewer."""
     longest = max((len(r.get("cloud") or []) for r in records), default=0)
     return max(1, min(longest, cap))
-
-
-def write_csv(file_path: str, rows: list):
-    if not rows:
-        return
-    with open(file_path, "w", newline="", encoding="utf-8-sig") as f:
-        writer = csv.DictWriter(f, fieldnames=rows[0].keys())
-        writer.writeheader()
-        writer.writerows(rows)
 
 
 def export_history_by_date(local_files: list, out_dir: str) -> dict:

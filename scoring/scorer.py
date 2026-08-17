@@ -16,7 +16,7 @@ Mọi hàm score_* trả về True/False, hoặc None nếu bỏ cặp (thiếu 
 
 from bisect import bisect_left, bisect_right
 
-from score_tables import BUCKETS, NO_CEILING
+from .score_tables import BUCKETS, NO_CEILING
 
 
 # ====================================================================== #

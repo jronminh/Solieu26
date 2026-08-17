@@ -12,7 +12,7 @@ here, so the reverse (encoding) direction can share them without importing
 this whole module.
 """
 
-from tables import TABLES
+from .code_tables import TABLES
 
 
 # =============================================================================

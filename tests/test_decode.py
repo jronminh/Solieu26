@@ -5,7 +5,7 @@ Unit tests for decode.py's pure functions, plus integration checks against
 the real bulletin files under tests/fixtures/qt_files/.
 """
 
-from decode import (
+from bulletin.decode import (
     decode_cloud,
     decode_head,
     decode_history,
@@ -23,7 +23,7 @@ from decode import (
     split_record,
     vv_value,
 )
-from tables import TABLES
+from bulletin.code_tables import TABLES
 
 
 # =============================================================================

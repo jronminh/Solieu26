@@ -19,6 +19,7 @@ from tkinter import ttk, filedialog, messagebox
 
 import config
 from gui_common import open_folder, report_open
+from utils.ini_utils import update_ini_key
 
 
 class SettingsDialog:
@@ -111,7 +112,7 @@ class SettingsDialog:
         }
         try:
             for key, value in values.items():
-                config.update_ini_key(app.cfg_path, config.CONFIG_SECTION, key, value)
+                update_ini_key(app.cfg_path, config.CONFIG_SECTION, key, value)
             config.CONFIG.update({
                 "ftp_host": values["ftp_host"], "ftp_user": values["ftp_user"],
                 "ftp_pass": values["ftp_pass"], "remote_dir": values["remote_dir"],

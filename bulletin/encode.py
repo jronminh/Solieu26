@@ -4,18 +4,19 @@ encode.py
 Pure encoding layer: the reverse of decode.py — turn human-entered values
 into raw "Qt..." bulletin tokens and assemble one record string.
 
-Imports TABLES from tables.py (the same tables decode.py decodes with) so
-the two modules can't drift out of sync. Where a decode.py table/formula is
-NOT a clean bijection (N_oktas, ww, W1W2, cloud_type all map several codes to
-the same decoded value; VV and cloud_hshs are piecewise and lossy), encode.py
-takes the raw CODE as input rather than trying to invert the decoded value —
-callers (e.g. a GUI) should let the user pick the code, showing decode.py's
-own output as a live preview instead of pretending the inverse is unambiguous.
+Imports TABLES from code_tables.py (the same tables decode.py decodes with)
+so the two modules can't drift out of sync. Where a decode.py table/formula
+is NOT a clean bijection (N_oktas, ww, W1W2, cloud_type all map several codes
+to the same decoded value; VV and cloud_hshs are piecewise and lossy),
+encode.py takes the raw CODE as input rather than trying to invert the
+decoded value — callers (e.g. a GUI) should let the user pick the code,
+showing decode.py's own output as a live preview instead of pretending the
+inverse is unambiguous.
 
 No file I/O, no Tkinter.
 """
 
-from tables import TABLES
+from .code_tables import TABLES
 
 
 def _reverse_table(table: dict) -> dict:

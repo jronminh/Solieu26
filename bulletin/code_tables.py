@@ -1,5 +1,5 @@
 """
-tables.py
+code_tables.py
 ====================
 Lookup tables shared by decode.py (decoding) and encode.py (the reverse) —
 the single source of truth for every code -> human-readable-value mapping

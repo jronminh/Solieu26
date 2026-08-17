@@ -10,7 +10,7 @@ run_pipeline) needs a live/mocked server and isn't covered here.
 import csv
 import os
 
-from decode import decode_qt_file
+from bulletin.decode import decode_qt_file
 from csv_pipeline import (
     cloud_layers_needed,
     export_history_by_date,

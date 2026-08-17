@@ -27,9 +27,9 @@ import os
 import tkinter as tk
 from tkinter import ttk, messagebox, filedialog
 
-from decode import decode_record, vv_value, hshs_value
-from encode import encode_record
-from tables import TABLES
+from bulletin.decode import decode_record, vv_value, hshs_value
+from bulletin.encode import encode_record
+from bulletin.code_tables import TABLES
 
 
 def _code_desc_values(table: dict) -> list:

@@ -19,7 +19,7 @@ Lược đồ mỗi trường:
   unit        : đơn vị của giá trị đã giải (để khỏi lệch đơn vị)
   tolerance   : số bucket lệch vẫn tính đúng. 1 = luật ±1; 0 = phải khớp đúng bucket.
   na          : các giá trị coi là "không chấm" -> scorer BỎ CẶP ở trường này
-  source_table: bảng trong tables.py mà giá trị này giải ra từ đó
+  source_table: bảng trong bulletin/code_tables.py mà giá trị này giải ra từ đó
 
   linear thêm : bounds (ngưỡng TRONG, tăng dần; n ngưỡng -> n+1 bucket)
                 side ("right": [dưới, trên); "left": (dưới, trên])

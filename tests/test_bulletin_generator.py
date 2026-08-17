@@ -25,8 +25,8 @@ from bulletin_generator import (
     _merge_at_hour,
     _row_value_str,
 )
-from decode import decode_record
-from tables import TABLES
+from bulletin.decode import decode_record
+from bulletin.code_tables import TABLES
 
 
 def _row(start, end, field, value, _id=1):

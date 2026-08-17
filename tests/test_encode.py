@@ -9,8 +9,8 @@ encoder raises for out-of-range input.
 
 import pytest
 
-from decode import decode_record
-from encode import (
+from bulletin.decode import decode_record
+from bulletin.encode import (
     encode_pressure,
     encode_record,
     encode_tail,
@@ -55,7 +55,7 @@ def test_encode_decode_roundtrip_against_real_fixture(qt_00):
     """Re-encode the hand-verified Yên Bái record's decoded values and check
     it decodes back to the same numbers — ties encode.py to the same real
     data decode.py is tested against."""
-    from decode import decode_qt_file
+    from bulletin.decode import decode_qt_file
 
     original = decode_qt_file(qt_00)[0]
     raw = encode_record(

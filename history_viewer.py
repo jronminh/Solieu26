@@ -24,6 +24,7 @@ from gui_common import (
     HOURS, ALL_HOURS, HISTORY_CSV_RE, ALWAYS_HIDDEN_VIEWER_COLUMNS,
     _is_numeric_viewer_column, open_in_editor, report_open,
 )
+from utils.ini_utils import update_ini_key
 
 
 class HistoryViewer:
@@ -345,7 +346,7 @@ class HistoryViewer:
     def _save_hidden_columns_to_config(self):
         value = ",".join(sorted(self.hidden_cols))
         try:
-            config.update_ini_key(self.app.cfg_path, config.CONFIG_SECTION, "viewer_hidden_columns", value)
+            update_ini_key(self.app.cfg_path, config.CONFIG_SECTION, "viewer_hidden_columns", value)
             config.CONFIG["viewer_hidden_columns"] = sorted(self.hidden_cols)
             self.app._log("OK", f"Đã lưu lựa chọn cột vào config: {self.app.cfg_path}")
         except OSError as e:
