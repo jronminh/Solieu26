@@ -218,8 +218,6 @@ def flatten_record(record: dict, source_file: str = None,
       - lat/lon coordinates are DECIMAL DEGREES (already converted upstream).
       - Column names carry their UNIT; drops the duplicate 'iii' column and the
         debug column 'pressure_raw'.
-      - 'total_cloud_N' replaces the old 'wind_N' (it's actually total cloud
-        amount N, not a wind quantity).
       - *_hshs columns stay PURELY NUMERIC (rare qualitative values → left blank).
       - 'raw' is pushed to the END (for lookup only, not mixed into clean data).
 
@@ -228,12 +226,13 @@ def flatten_record(record: dict, source_file: str = None,
     cloud_2_*/cloud_3_*/cloud_4_* columns) — the default of 4 here only
     applies when flatten_record is called on its own.
     """
-    location = record.get("location") or {}
-    head     = record.get("head") or {}
-    wind     = record.get("wind") or {}
-    weather  = record.get("weather") or {}
-    storm    = record.get("storm") or {}
-    pressure = record.get("pressure") or {}
+    location    = record.get("location") or {}
+    head        = record.get("head") or {}
+    total_cloud = record.get("total_cloud") or {}
+    wind        = record.get("wind") or {}
+    weather     = record.get("weather") or {}
+    storm       = record.get("storm") or {}
+    pressure    = record.get("pressure") or {}
 
     obs_dt   = parse_obs_dt(source_file)
 
@@ -252,7 +251,7 @@ def flatten_record(record: dict, source_file: str = None,
 
         # --- Visibility / wind ---
         "visibility_km":  _num_or_none(head.get("VV")),
-        "total_cloud_N":  wind.get("wind_N"),    # total cloud amount (oktas)
+        "total_cloud_N":  total_cloud.get("total_cloud_N"),  # total cloud amount (tenths)
         "wind_dd_deg":    wind.get("wind_dd"),   # wind direction (degrees)
         "wind_ff":        wind.get("wind_ff"),   # wind speed (unit per station)
 

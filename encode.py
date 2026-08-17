@@ -67,13 +67,16 @@ def encode_tail(station_code: str, lat: float, lon: float) -> str:
     return f"{station_code}{lat_d:02d}{lat_m:02d}{lon_d:03d}{lon_m:02d}"
 
 
-def encode_wind(N_oktas_code: str, dd_deg: float, ff: float) -> str:
-    """N_oktas_code: raw digit/'/' as used in TABLES['N_oktas'] (the CODE,
-    not the decoded oktas value). dd_deg: wind direction in whole degrees
-    (rounded to the nearest 10, since the token only stores tens)."""
+def encode_total_cloud_wind(total_cloud_N_code: str, dd_deg: float, ff: float) -> str:
+    """total_cloud_N_code: raw digit/'/' as used in TABLES['N_oktas'] (the
+    CODE, not the decoded value). dd_deg: wind direction in whole degrees
+    (rounded to the nearest 10, since the token only stores tens). One
+    bulletin token combines total cloud amount + wind, so this encodes all
+    three together — the reverse of decode.py's decode_total_cloud() +
+    decode_wind(), which split back into two dicts."""
     dd_code = round(dd_deg / 10) % 100
     ff_code = round(ff) % 100
-    return f"{N_oktas_code}{dd_code:02d}{ff_code:02d}"
+    return f"{total_cloud_N_code}{dd_code:02d}{ff_code:02d}"
 
 
 def _encode_temp_like(indicator: str, value_c: float) -> str:
@@ -128,7 +131,7 @@ def encode_name(name: str) -> str:
 # =============================================================================
 
 def encode_record(*, station_code: str, lat: float, lon: float, vv_code: str,
-                   wind_N_code: str, wind_dd: float, wind_ff: float,
+                   total_cloud_N_code: str, wind_dd: float, wind_ff: float,
                    temp_c: float = None, dew_c: float = None,
                    ww_code: str = None, w1_code: str = "/", w2_code: str = "/",
                    clouds: list = None, pressure_mmhg: float = None,
@@ -140,7 +143,7 @@ def encode_record(*, station_code: str, lat: float, lon: float, vv_code: str,
     reported layer (decode.py keeps up to however many '8...' tokens appear).
     """
     tokens = [encode_head(station_code, vv_code),
-              encode_wind(wind_N_code, wind_dd, wind_ff)]
+              encode_total_cloud_wind(total_cloud_N_code, wind_dd, wind_ff)]
     if temp_c is not None:
         tokens.append(encode_temp(temp_c))
     if dew_c is not None:

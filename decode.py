@@ -16,7 +16,7 @@ from tables import TABLES
 
 
 # =============================================================================
-# DECODING
+# RECORD STRUCTURE (raw record -> raw token slots)
 # =============================================================================
 
 def is_pressure_token(t: str) -> bool:
@@ -56,6 +56,10 @@ def split_record(record: str) -> dict:
             "pressure": pressure, "name": name, "tail": tail}
 
 
+# =============================================================================
+# VALUE COERCION HELPERS (shared by token decoders and live UI previews)
+# =============================================================================
+
 def _temp_value(token: str):
     if len(token) < 5 or token[0] not in ('1', '2') or token[1] not in ('0', '1'):
         return None
@@ -83,8 +87,10 @@ def hshs_value(code: str, tables: dict):
 
 
 def vv_value(vv_code: str, tables: dict):
-    """Public: also used elsewhere for a live visibility preview while the
-    user types a VV code."""
+    """Visibility in km (float), decoded from the raw VV code. Public: also
+    used elsewhere for a live visibility preview while the user types a VV
+    code — piecewise/lossy, see encode.py for why the reverse direction
+    takes the raw code instead of trying to invert this."""
     if len(vv_code) < 2:
         return None
     try:
@@ -92,60 +98,54 @@ def vv_value(vv_code: str, tables: dict):
     except ValueError:
         return None
     if vv < 51:
-        return f"{vv_code[0]}.{vv_code[1]}"
-    if vv <= 55:
+        s = f"{vv_code[0]}.{vv_code[1]}"
+    elif vv <= 55:
         return None
-    if vv <= 80:
-        return str(vv - 50)
-    if vv <= 89:
-        return str(vv - 40)
-    return tables["VV_special"].get(vv_code)
-
-
-def _vv_km(vv: str):
-    """Coerce vv_value()'s display string (e.g. '3.0', '8') into a float km.
-    Kept separate from vv_value() itself since that function also feeds a
-    live UI preview, where changing the return type would be a visible
-    regression."""
-    if vv is None:
-        return None
+    elif vv <= 80:
+        s = str(vv - 50)
+    elif vv <= 89:
+        s = str(vv - 40)
+    else:
+        s = tables["VV_special"].get(vv_code)
     try:
-        return float(vv)
-    except (ValueError, TypeError):
+        return float(s)
+    except (TypeError, ValueError):
         return None
 
 
-def _oktas_number(coded: str):
-    """Coerce an N_oktas-table value (e.g. '10', '8', or the obscured-sky
-    sentinel '/') into an int 0-10, passing '/' through unchanged as a
-    not-applicable sentinel. Kept separate from decode_wind()/decode_cloud()'s
-    existing string fields since those also feed a live UI preview."""
-    if coded is None or coded == "/":
-        return coded
-    try:
-        return int(coded)
-    except (ValueError, TypeError):
-        return None
-
+# =============================================================================
+# TOKEN DECODERS (one bulletin group -> its decoded dict)
+# =============================================================================
 
 def decode_head(token: str, tables: dict):
     if not token or not token.startswith('k'):
         return None
-    vv = vv_value(token[3:], tables)
-    return {"iii": token[:3], "VV": vv, "VV_km": _vv_km(vv)}
+    return {"iii": token[:3], "VV": vv_value(token[3:], tables)}
 
 
-def decode_wind(token: str, tables: dict):
+def decode_total_cloud(token: str, tables: dict):
+    """N (total cloud amount, tenths 0-10) — the first char of the combined
+    total-cloud+wind token. Split from decode_wind() since it isn't a wind
+    quantity at all (see TODO.md)."""
     if not token or len(token) < 5:
         return None
     N = tables["N_oktas"].get(token[0])
-    N_num = _oktas_number(N)
+    try:
+        N = N if N in (None, "/") else int(N)
+    except ValueError:
+        N = None
+    return {"total_cloud_N": N}
+
+
+def decode_wind(token: str):
+    if not token or len(token) < 5:
+        return None
     try:
         dd = int(token[1:3]) * 10
         ff = int(token[3:5])
     except ValueError:
-        return {"wind_N": N, "wind_N_num": N_num, "wind_dd": None, "wind_ff": None}
-    return {"wind_N": N, "wind_N_num": N_num, "wind_dd": dd, "wind_ff": ff}
+        return {"wind_dd": None, "wind_ff": None}
+    return {"wind_dd": dd, "wind_ff": ff}
 
 
 def decode_weather(token: str, tables: dict):
@@ -159,7 +159,12 @@ def decode_weather(token: str, tables: dict):
 def decode_cloud(token: str, tables: dict):
     if len(token) < 5:
         return None
-    return {"cloud_Ns": tables["N_oktas"].get(token[1]),
+    Ns = tables["N_oktas"].get(token[1])
+    try:
+        Ns = Ns if Ns in (None, "/") else int(Ns)
+    except ValueError:
+        Ns = None
+    return {"cloud_Ns": Ns,
             "cloud_C":  tables["cloud_type"].get(token[2]),
             "cloud_hshs": hshs_value(token[3:5], tables)}
 
@@ -215,42 +220,50 @@ def decode_tail(token: str):
         return None
 
 
-def h_temp(t, out, tb):    out["temperature"] = _temp_value(t)
-def h_dew(t, out, tb):     out["dewpoint"]    = _temp_value(t)
-def h_weather(t, out, tb): out["weather"]     = decode_weather(t, tb)
-def h_storm(t, out, tb):   out["storm"]       = decode_storm(t, tb)
-
-
-def h_cloud(t, out, tb):
-    out.setdefault("cloud", [])
-    layer = decode_cloud(t, tb)
-    if layer:
-        out["cloud"].append(layer)
-
-
-DISPATCH = {'1': h_temp, '2': h_dew, '7': h_weather, '8': h_cloud, 'A': h_storm}
-
+# =============================================================================
+# INDICATOR TOKENS (variable multiset after wind — 0..n tokens, any order)
+# =============================================================================
 
 def decode_indicators(indicators: list, tables: dict) -> dict:
-    """Only dispatches indicator groups that end up as CSV columns
+    """Only decodes indicator groups that end up as CSV columns
     (temperature/dewpoint/weather/cloud/storm) — other group codes (e.g.
     '9'/'5' supplementary/pressure-tendency sections) are ignored, since
-    nothing downstream reads them. See TODO.md for the pending indicators."""
+    nothing downstream reads them. See TODO.md for the pending indicators.
+
+    Only '8' (cloud) can repeat (0-4 layers per record) — every other group
+    appears at most once, so those are assigned directly instead of through
+    a repeat-handling dispatch.
+    """
     out = {"temperature": None, "dewpoint": None, "weather": None, "storm": None}
     for t in indicators:
         if not t:
             continue
-        h = DISPATCH.get(t[0])
-        if h:
-            h(t, out, tables)
+        if t[0] == '1':
+            out["temperature"] = _temp_value(t)
+        elif t[0] == '2':
+            out["dewpoint"] = _temp_value(t)
+        elif t[0] == '7':
+            out["weather"] = decode_weather(t, tables)
+        elif t[0] == 'A':
+            out["storm"] = decode_storm(t, tables)
+        elif t[0] == '8':
+            out.setdefault("cloud", [])
+            layer = decode_cloud(t, tables)
+            if layer:
+                out["cloud"].append(layer)
     return out
 
+
+# =============================================================================
+# RECORD ASSEMBLY
+# =============================================================================
 
 def decode_record(record: str, tables: dict = TABLES) -> dict:
     p = split_record(record)
     out = {"raw": record}
-    out["head"]     = decode_head(p["head"], tables) if p["head"] else None
-    out["wind"]     = decode_wind(p["wind"], tables) if p["wind"] else None
+    out["head"]        = decode_head(p["head"], tables) if p["head"] else None
+    out["total_cloud"] = decode_total_cloud(p["wind"], tables) if p["wind"] else None
+    out["wind"]        = decode_wind(p["wind"]) if p["wind"] else None
     out.update(decode_indicators(p["indicators"], tables))
     out["pressure"] = decode_pressure(p["pressure"]) if p["pressure"] else None
     out["station"]  = decode_name(p["name"])

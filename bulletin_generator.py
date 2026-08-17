@@ -255,7 +255,7 @@ def _encode_state(state: dict, station_code: str, lat: float, lon: float, statio
     return encode_record(
         station_code=station_code, lat=lat, lon=lon,
         vv_code=state.get("vv", "00"),
-        wind_N_code=state.get("N_total", "0"),
+        total_cloud_N_code=state.get("N_total", "0"),
         wind_dd=state.get("wind_dd", 0.0),
         wind_ff=state.get("wind_ff", 0.0),
         temp_c=state.get("temp"),
