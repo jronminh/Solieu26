@@ -18,7 +18,7 @@ import os
 import tkinter as tk
 from tkinter import ttk, messagebox
 
-import config
+from utils import config_utils as config
 from gui_common import (
     STATIONS, STATION_NAMES, NAME_TO_CODE, ALL_STATIONS,
     HOURS, ALL_HOURS, HISTORY_CSV_RE, ALWAYS_HIDDEN_VIEWER_COLUMNS,

@@ -30,7 +30,7 @@ python bulletin_generator.py
 | `dialogs.py` | Các hộp thoại độc lập: `SettingsDialog` (Thiết lập), `AdvancedDialog` (Tải số liệu) |
 | `history_viewer.py` | Cửa sổ "Xem số liệu" |
 | `gui_common.py` | Hằng số/tiện ích dùng chung cho UI |
-| `config.py` | Đường dẫn, hằng số FTP, đọc/ghi `config.ini` |
+| `utils/config_utils.py` | Đường dẫn, hằng số FTP, đọc/ghi `config.ini` |
 | `csv_pipeline.py` | Tải FTP + xuất CSV + điều phối `run_pipeline()` |
 | `decode.py` | Giải mã một bản ghi `Qt...` thành dict (thuần, không I/O ngoài đọc file) |
 | `encode.py` | Chiều ngược lại của `decode.py` — dựng bản ghi `Qt...` từ giá trị |

@@ -1,5 +1,5 @@
 """
-config.py
+config_utils.py
 ====================
 Path/FTP constants + the CONFIG dict + config.ini load/save.
 
@@ -25,7 +25,9 @@ if getattr(sys, "frozen", False):
     SCRIPT_DIR = os.path.dirname(os.path.abspath(sys.executable))
 else:
     try:
-        SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+        # This module lives one folder below the project root (utils/), so go
+        # up one level to land back on the root the exe/script sits in.
+        SCRIPT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     except NameError:
         SCRIPT_DIR = os.path.abspath(".")
 

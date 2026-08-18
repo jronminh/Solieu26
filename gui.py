@@ -11,7 +11,7 @@ once in App.__init__ and holding the `app` instance so it can reach back into
 shared state (self.app.v, self.app._log, self.app._dialogs, ...).
 
 Run:  python gui.py [config.ini path]
-Requires config.py/pipeline_fetch.py/pipeline_csv.py/gui_common.py/
+Requires utils/config_utils.py/pipeline_fetch.py/pipeline_csv.py/gui_common.py/
 history_viewer.py/dialogs.py, plus the bulletin/ and utils/ packages, in the
 same folder.
 
@@ -40,7 +40,7 @@ import threading
 import tkinter as tk
 from tkinter import ttk, messagebox, scrolledtext
 
-import config
+from utils import config_utils as config
 import pipeline_fetch
 from gui_common import LOG_COLORS
 from history_viewer import HistoryViewer

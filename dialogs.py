@@ -17,7 +17,7 @@ import os
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox
 
-import config
+from utils import config_utils as config
 from gui_common import report_open
 from utils.file_utils import open_folder
 from utils.ini_utils import update_ini_key

@@ -10,7 +10,7 @@ stay distinct from the forecast-scoring pipeline in score_tables.py/scorer.py
 — this module produces the display-oriented CSV export only, unaffected by
 the type coercion decode.py does for score_tables.py's benefit.
 
-Built on decode.py (bulletin → dict decoding) only — no config.py dependency,
+Built on decode.py (bulletin → dict decoding) only — no config_utils.py dependency,
 no log(level, msg) callback (unlike pipeline_fetch.py, nothing here reports
 progress; a caller that wants per-step logging does it around these calls).
 GUI-only — not runnable standalone. gui.py imports this module lazily (right
