@@ -11,13 +11,22 @@ once in App.__init__ and holding the `app` instance so it can reach back into
 shared state (self.app.v, self.app._log, self.app._dialogs, ...).
 
 Run:  python gui.py [config.ini path]
-Requires config.py/pipeline_csv.py/gui_common.py/history_viewer.py/dialogs.py,
-plus the bulletin/ and utils/ packages, in the same folder.
+Requires config.py/pipeline_fetch.py/pipeline_csv.py/gui_common.py/
+history_viewer.py/dialogs.py, plus the bulletin/ and utils/ packages, in the
+same folder.
 
-Anti-freeze architecture: heavy work (FTP + decode + CSV export, all in pipeline_csv.py)
-runs on a worker thread that never touches widgets — it only pushes ('log' /
-'progress' / 'done' / 'error') events onto a queue.Queue(); the main thread
-polls the queue every 100ms via root.after() and applies the UI updates itself.
+Anti-freeze architecture: heavy work runs on a worker thread that never
+touches widgets — it only pushes events onto a queue.Queue(); the main thread
+polls the queue every 100ms via root.after() and applies the UI updates
+itself. The worker (_work()) is the ONLY place that ties the 2 independent
+pipeline modules together — pipeline_fetch.py (FTP download) and
+pipeline_csv.py (decode + CSV export) don't import each other and neither
+knows about the other; a decode failure can't take down a download already in
+progress or gui.py's own startup. It runs them as 2 stages and reports them
+as 2 separate outcomes: 'fetch_done' (always, once download finishes) then
+either 'export_done' or 'export_error' (only if there were files to process) —
+on top of the always-available 'log' / 'progress' / 'error' (connect/login
+failure) events.
 
 Tác giả: congminh9981 (congminh9981@gmail.com); Claude (Anthropic) — đồng tác giả.
 """
@@ -32,7 +41,7 @@ import tkinter as tk
 from tkinter import ttk, messagebox, scrolledtext
 
 import config
-import pipeline_csv
+import pipeline_fetch
 from gui_common import LOG_COLORS
 from history_viewer import HistoryViewer
 from dialogs import SettingsDialog, AdvancedDialog
@@ -336,7 +345,7 @@ class App:
     def _build_cfg(self) -> dict:
         """Read the form → cfg dict; local_dir/timeout/retry come from config's fixed constants.
 
-        Always sets start_date/end_date — pipeline_csv.download_files() takes the fast
+        Always sets start_date/end_date — pipeline_fetch.download_files() takes the fast
         single-day path when they're equal. Normal mode: always "today", no date
         field to read. Advanced mode (self.v["advanced_mode"], on while the "Tải
         số liệu" dialog is open): reads them from that dialog's fields instead.
@@ -411,15 +420,39 @@ class App:
         return True
 
     def _work(self, cfg):
-        """Worker thread — only pushes events onto the queue, never touches widgets."""
+        """
+        Worker thread — only pushes events onto the queue, never touches widgets.
+
+        2 giai đoạn ĐỘC LẬP, khớp với việc pipeline_fetch.py và pipeline_csv.py
+        không import lẫn nhau: fetch (luôn chạy, không phụ thuộc gì ở khối 2)
+        rồi export (chỉ cần biết khối 1 có để lại file hay không, không quan
+        tâm khối 1 "thành công" theo nghĩa nào khác). pipeline_csv được import
+        TRỄ, ngay ở đây — một lỗi decode (import lỗi hay exception lúc chạy)
+        chỉ làm hỏng giai đoạn export, không đụng tới giai đoạn fetch đã báo
+        xong lẫn việc gui.py tự khởi động.
+        """
         q = self.q
         def log(level, msg): q.put(("log", level, msg))
         def progress(done, total, status): q.put(("progress", done, total))
+
         try:
-            result = pipeline_csv.run_pipeline(cfg, log=log, progress=progress)
-            q.put(("done", result))
+            dl = pipeline_fetch.fetch_files(cfg, log=log, progress=progress)
         except Exception as e:
             q.put(("error", f"{type(e).__name__}: {e}"))
+            return
+
+        q.put(("fetch_done", dl))
+        if not dl["files"]:
+            return
+
+        try:
+            import pipeline_csv
+            output_dir = os.path.abspath(cfg.get("output_dir") or config.DEFAULT_OUTPUT_DIR)
+            os.makedirs(output_dir, exist_ok=True)
+            history_files = pipeline_csv.export_history_by_date(sorted(dl["files"]), output_dir)
+            q.put(("export_done", {"output_dir": output_dir, "history_files": history_files}))
+        except Exception as e:
+            q.put(("export_error", f"{type(e).__name__}: {e}"))
 
     def _poll(self):
         try:
@@ -431,8 +464,12 @@ class App:
                 elif kind == "progress":
                     _, done, total = item
                     self.status.config(text=f"Tải {done}/{total}")
-                elif kind == "done":
-                    self._on_done(item[1])
+                elif kind == "fetch_done":
+                    self._on_fetch_done(item[1])
+                elif kind == "export_done":
+                    self._on_export_done(item[1])
+                elif kind == "export_error":
+                    self._on_export_error(item[1])
                 elif kind == "error":
                     self._log("ERR", item[1])
                     self.status.config(text="Lỗi")
@@ -442,26 +479,47 @@ class App:
             pass
         self.root.after(100, self._poll)
 
-    def _on_done(self, result: dict):
-        self._set_actions_enabled(True)
-        self.last_output_dir = result.get("output_dir")
-
-        self.last_result = result
+    def _on_fetch_done(self, dl: dict):
+        """Giai đoạn 1 (fetch) xong — LUÔN cập nhật files/missing bất kể giai
+        đoạn 2 sau đó thế nào. Giữ đúng hình dạng dict cũ (ok/history_files/
+        history_records) để _refresh_info_panel() không phải sửa; _on_export_done()/
+        _on_export_error() sẽ cập nhật tiếp lên self.last_result này."""
+        self.last_result = {"ok": False, "files": dl["files"], "missing": dl["missing"],
+                             "history_files": {}, "history_records": 0}
         self.last_updated_at = datetime.datetime.now()
         self._refresh_info_panel()
 
-        if not result.get("ok"):
+        miss = dl.get("missing") or []
+        if miss:
+            self._log("WARN", f"Thiếu {len(miss)} file trên server")
+
+        if not dl["files"]:
+            self._set_actions_enabled(True)
             self.status.config(text="Không có dữ liệu")
-            miss = result.get("missing") or []
-            if miss:
-                self._log("WARN", f"Thiếu {len(miss)} file trên server")
-            return
+
+    def _on_export_done(self, info: dict):
+        self._set_actions_enabled(True)
+        self.last_output_dir = info["output_dir"]
+
+        history_files = info["history_files"]
+        self.last_result.update(
+            ok=True, output_dir=info["output_dir"], history_files=history_files,
+            history_records=sum(v["records"] for v in history_files.values()))
+        self.last_updated_at = datetime.datetime.now()
+        self._refresh_info_panel()
 
         self.status.config(text="Hoàn tất")
-        history_files = result.get("history_files") or {}
-        parts = [f"{os.path.basename(info['csv'])} ({info['records']} record)"
-                 for _, info in sorted(history_files.items())]
+        parts = [f"{os.path.basename(hinfo['csv'])} ({hinfo['records']} record)"
+                 for _, hinfo in sorted(history_files.items())]
         self._log("OK", "Hoàn tất — đã xuất: " + (", ".join(parts) if parts else "(không có)"))
+
+    def _on_export_error(self, msg: str):
+        """Khối 1 đã xong (self.last_result đã có files/missing từ _on_fetch_done)
+        — lỗi ở đây chỉ là khối 2 (xử lý readable), không xoá kết quả tải đã có."""
+        self._set_actions_enabled(True)
+        self._log("ERR", f"Xử lý số liệu thất bại (đã tải xong file, chỉ bước xử lý lỗi): {msg}")
+        self.status.config(text="Tải xong, xử lý lỗi")
+        messagebox.showerror("Lỗi xử lý", msg)
 
 
 def main():

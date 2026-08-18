@@ -1,12 +1,13 @@
 """
 test_pipeline_csv.py
 ====================
-Unit tests for the CSV-export half of pipeline_csv.py (flatten_record,
-cloud_layers_needed, write_csv, export_history_by_date). The filename<->
-datetime helpers (quantrac_filename_at/parse_obs_dt) live in
-bulletin/filename.py now — see test_filename.py. The FTP download layer
-(download_files, run_pipeline) needs a live/mocked server and isn't covered
-here.
+Unit tests for pipeline_csv.py (flatten_record, cloud_layers_needed,
+write_csv, export_history_by_date) — the "xử lý số liệu thành readable"
+block, independent from FTP. The filename<->datetime helpers
+(quantrac_filename_at/parse_obs_dt) live in bulletin/filename.py now — see
+test_filename.py. The FTP layer (pipeline_fetch.py's download_files/
+fetch_files) and gui.py's _work() orchestration need a live/mocked server
+(and a mocked worker-thread/queue) and aren't covered here.
 """
 
 import csv

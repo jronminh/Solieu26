@@ -1,123 +1,28 @@
 """
 pipeline_csv.py
 ====================
-CSV-export pipeline: FTP download + CSV export + the run_pipeline()
-orchestrator. Named "pipeline_csv" (not just "pipeline") to stay distinct from
-the forecast-scoring pipeline planned in score_tables.py/scorer.py — this
-module produces the display-oriented CSV export only, unaffected by the type
-coercion decode.py does for score_tables.py's benefit.
+Khối 2 (xử lý số liệu thành readable) — decode file bulletin đã có sẵn trên
+đĩa (`bulletin/decode.py`) rồi làm phẳng thành CSV. Nhận thẳng 1 list đường
+dẫn file cục bộ; không biết gì về FTP (khối 1, xem `pipeline_fetch.py`) và
+không import module đó — độc lập hoàn toàn, module này vỡ không ảnh hưởng
+khối lấy file, và ngược lại. Named "pipeline_csv" (not just "pipeline") to
+stay distinct from the forecast-scoring pipeline in score_tables.py/scorer.py
+— this module produces the display-oriented CSV export only, unaffected by
+the type coercion decode.py does for score_tables.py's benefit.
 
-Built on config.py (settings/paths) and decode.py (bulletin → dict decoding).
-GUI-only — not runnable standalone. gui.py calls config.apply_config_file() at
-startup, builds a cfg dict from its own form fields for every run, and calls
-pipeline_csv.run_pipeline() — never touching the FTP/decode internals directly.
-
-Every function that does work takes a required `log(level, msg)` callback —
-gui.py always passes its own (routing into the on-screen log widget); there is
-no console fallback. LEVEL is a fixed 4-char-wide code:
-    INFO  general info            OK    success
-    SKIP  skipped (already there) MISS  file missing on server
-    WARN  warning                 ERR   error
-    ACT   user action (button click, option change) — GUI only
+Built on decode.py (bulletin → dict decoding) only — no config.py dependency,
+no log(level, msg) callback (unlike pipeline_fetch.py, nothing here reports
+progress; a caller that wants per-step logging does it around these calls).
+GUI-only — not runnable standalone. gui.py imports this module lazily (right
+where export_history_by_date() is called) so a decode-layer failure here
+can't take down the fetch step or gui.py's own startup — see gui.py::_work().
 """
 
-import datetime
 import os
-from ftplib import FTP, error_perm, error_temp
 
-from config import DEFAULT_OUTPUT_DIR, FTP_TIMEOUT
 from bulletin.decode import decode_history
-from bulletin.filename import parse_obs_dt, quantrac_filename_at
+from bulletin.filename import parse_obs_dt
 from utils.csv_utils import write_csv
-from utils.ftp_utils import fetch_and_bucket
-
-
-# =============================================================================
-# FTP LAYER — FILE DOWNLOAD  (log/progress via callback)
-# =============================================================================
-
-def download_files(ftp: FTP, cfg: dict, log, progress=None) -> dict:
-    """
-    Download hourly bulletin files into cfg['local_dir'], from cfg['start_date']
-    through cfg['end_date'] (inclusive).
-
-    Same day (start_date == end_date): fast path — cwd ONCE into that date's
-    remote directory and download the full day [00:00 → 23:00]; if the
-    directory is unreachable, bail out early.
-
-    Different days: walks every hour from 00:00 of start_date through 23:00 of
-    end_date. The remote directory is "<remote_dir>/YYYY/MM" per timestamp, so
-    it cwd's again only when the year/month actually changes (a range can span
-    multiple months/years).
-
-    Returns a dict: {"files","downloaded","skipped","missing"}.
-    """
-    start_date = cfg["start_date"]
-    end_date   = cfg["end_date"]
-    remote_dir = cfg["remote_dir"].rstrip("/")
-    local_dir  = cfg["local_dir"]
-    retry_temp = cfg.get("retry_temp", 0)
-    retry_wait = cfg.get("retry_wait", 2)
-    os.makedirs(local_dir, exist_ok=True)
-
-    buckets = {"files": [], "downloaded": [], "skipped": [], "missing": []}
-    origin = ftp.pwd()
-
-    if start_date.date() == end_date.date():
-        hours = [start_date.replace(hour=h) for h in range(24)]
-        total = len(hours)
-
-        target_dir = f"{remote_dir}/{start_date:%Y}/{start_date:%m}"
-        try:
-            ftp.cwd(target_dir)
-        except (error_perm, error_temp) as e:
-            log("ERR", f"Không truy cập được thư mục {target_dir}: {e}")
-            return buckets
-
-        try:
-            for i, ts in enumerate(hours):
-                filename = quantrac_filename_at(ts)
-                status = fetch_and_bucket(ftp, filename, local_dir, retry_temp, retry_wait, log, buckets)
-                if progress:
-                    progress(i + 1, total, status)
-        finally:
-            ftp.cwd(origin)
-        return buckets
-
-    hours = []
-    day = start_date.replace(hour=0, minute=0, second=0, microsecond=0)
-    last_day = end_date.replace(hour=0, minute=0, second=0, microsecond=0)
-    while day <= last_day:
-        for hour in range(24):
-            hours.append(day.replace(hour=hour))
-        day += datetime.timedelta(days=1)
-    total = len(hours)
-
-    current_dir = None
-    try:
-        for i, ts in enumerate(hours):
-            target_dir = f"{remote_dir}/{ts:%Y}/{ts:%m}"
-            filename   = quantrac_filename_at(ts)
-
-            if target_dir != current_dir:
-                try:
-                    ftp.cwd(target_dir)
-                    current_dir = target_dir
-                except (error_perm, error_temp) as e:
-                    log("ERR", f"Không truy cập được thư mục {target_dir}: {e}")
-                    current_dir = target_dir   # avoid retrying cwd for every hour in this month
-                    buckets["missing"].append(filename)
-                    if progress:
-                        progress(i + 1, total, 2)
-                    continue
-
-            status = fetch_and_bucket(ftp, filename, local_dir, retry_temp, retry_wait, log, buckets)
-            if progress:
-                progress(i + 1, total, status)
-    finally:
-        ftp.cwd(origin)
-
-    return buckets
 
 
 # =============================================================================
@@ -251,60 +156,3 @@ def export_history_by_date(local_files: list, out_dir: str) -> dict:
         write_csv(out_path, rows)
         exported[date_key] = {"csv": out_path, "records": len(rows)}
     return exported
-
-
-# =============================================================================
-# ORCHESTRATOR
-# =============================================================================
-
-def run_pipeline(cfg: dict, log, progress=None) -> dict:
-    """
-    Run it end to end: connect FTP → download (into temp) → decode → export CSV.
-    Returns a result dict. Raises on FTP login/connect failure — gui.py's worker
-    thread catches it and reports the error back to the main thread as an event.
-    """
-    result = {"ok": False, "files": [], "missing": [],
-              "history_files": {}, "history_records": 0,
-              "output_dir": cfg.get("output_dir", DEFAULT_OUTPUT_DIR)}
-
-    log("INFO", f"Thư mục tải tạm: {cfg.get('local_dir')}")
-    log("INFO", "Đang kết nối FTP…")
-    ftp = FTP(cfg["ftp_host"], timeout=cfg.get("ftp_timeout", FTP_TIMEOUT))
-    ftp.login(cfg["ftp_user"], cfg["ftp_pass"])
-    log("OK", "Đăng nhập FTP thành công")
-
-    files = []
-    try:
-        dl = download_files(ftp, cfg, log=log, progress=progress)
-        files = dl["files"]
-        result["files"]   = files
-        result["missing"] = dl["missing"]
-
-        if not files:
-            log("WARN", "Không tải được file nào")
-            return result
-
-        files = sorted(files)
-        log("INFO", f"Tổng số file có sẵn: {len(files)}")
-
-        output_dir = os.path.abspath(cfg.get("output_dir") or DEFAULT_OUTPUT_DIR)
-        os.makedirs(output_dir, exist_ok=True)
-        result["output_dir"] = output_dir
-
-        history_files = export_history_by_date(files, output_dir)
-        result["history_files"] = history_files
-        result["history_records"] = sum(v["records"] for v in history_files.values())
-        log("INFO", f"Lịch sử đầy đủ: {result['history_records']} record "
-                    f"(mọi trạm, mọi giờ, {len(history_files)} ngày)")
-        for date_key in sorted(history_files):
-            info = history_files[date_key]
-            log("OK", f"Đã xuất lịch sử {date_key}: {info['csv']} ({info['records']} record)")
-
-        result["ok"] = True
-        return result
-
-    finally:
-        try:
-            ftp.quit()
-        except Exception:
-            pass
