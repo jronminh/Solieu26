@@ -5,28 +5,26 @@ Cấu hình bucket cho 6 trường dự báo được chấm điểm: tổng lư
 màn mây (trần), hiện tượng, hướng gió, tốc độ gió, tầm nhìn.
 
 Chỉ chứa dữ liệu (BUCKETS + hằng số NO_CEILING) — không có hàm chấm điểm ở
-đây; bộ máy chấm nằm ở module riêng, chỉ import BUCKETS/NO_CEILING từ đây.
+đây; mỗi trường có 1 hàm chấm riêng trong scorer.py, tự đọc đúng entry của
+mình (không có field chung nào điều khiển cách đọc bảng).
 
 Mô hình chung: dự báo viên chọn thẳng 1 bucket (không nhập số); quan trắc là
-1 giá trị vô hướng, được quy về dạng so được tùy kind rồi so lệch với bucket
-dự báo trong phạm vi tolerance của trường đó.
+1 giá trị vô hướng, được quy về dạng so được rồi so lệch với bucket dự báo
+trong phạm vi tolerance của trường đó.
 
 Vài mốc nghiệp vụ (đơn vị gió/tầm nhìn, mép 6000m/10km) còn chờ xác nhận —
 xem TODO.md.
 
-Lược đồ mỗi trường:
-  kind        : "linear" | "circular" | "categorical" | "forecast_window"
-  unit        : đơn vị của giá trị đã giải (để khỏi lệch đơn vị)
-  tolerance   : số bucket lệch vẫn tính đúng. 1 = luật ±1; 0 = phải khớp đúng bucket.
-  na          : các giá trị coi là "không chấm" -> scorer BỎ CẶP ở trường này
-  source_table: bảng trong bulletin/code_tables.py mà giá trị này giải ra từ đó
-
-  linear thêm : bounds (ngưỡng TRONG, tăng dần; n ngưỡng -> n+1 bucket)
-                side ("right": [dưới, trên); "left": (dưới, trên])
-  circular thêm: n (số hướng), labels (nhãn từng hướng). Giá trị là CHỈ SỐ hướng
-                 0..n-1 (hoặc nhãn), KHÔNG phải độ; ±1 cuộn vòng.
-  categorical thêm: groups (mã -> nhóm), ordered (False -> không có trục -> tolerance=0)
-  forecast_window thêm: windows [(lo,hi),...] cửa sổ chồng nhau (quan trắc so trực tiếp)
+Lược đồ mỗi trường (field nào có thì scorer.py mới cần, không phải trường
+nào cũng có đủ):
+  tolerance : số bucket lệch vẫn tính đúng. 1 = luật ±1; 0 = phải khớp đúng bucket.
+  na        : các giá trị coi là "không chấm" -> scorer BỎ CẶP ở trường này
+  bounds    : ngưỡng TRONG, tăng dần; n ngưỡng -> n+1 bucket (trường tuyến tính)
+  side      : "right": [dưới, trên); "left": (dưới, trên]
+  n, labels : số hướng, nhãn từng hướng (trường vòng). Giá trị là CHỈ SỐ hướng
+              0..n-1 (hoặc nhãn), KHÔNG phải độ; ±1 cuộn vòng.
+  groups    : mã quan trắc -> nhóm (trường so nhóm)
+  windows   : [(lo,hi),...] cửa sổ chồng nhau (quan trắc so trực tiếp, không bucket hóa)
 """
 
 # Sentinel cho trạng thái "không có trần" (trường do_cao_man_may) — là một
@@ -47,18 +45,13 @@ BUCKETS = {
     #    dải chấp nhận là hợp của cửa i-1, i, i+1 (kẹp mép ở idx 0 và 8).  #
     #    VD: dự báo "2-4" (idx 2) -> đúng nếu số thực rơi trong [1,5].     #
     #                                                                    #
-    #    Chấm bằng is_hit_window(), không dùng bucket_of/is_hit chung —   #
-    #    trường này không có bounds/side.                                 #
+    #    Chấm bằng score_tong_luong_may() — trường này không có bounds/side.#
     # ------------------------------------------------------------------ #
     "tong_luong_may": {
-        "kind": "forecast_window",
-        "unit": "phần bầu trời (0-10)",
-        "source_table": "N_oktas",
         # (lo, hi) mỗi cửa sổ, inclusive hai đầu. Index = lựa chọn dự báo viên.
         "windows": [(0, 2), (1, 3), (2, 4), (3, 5), (4, 6),
                     (5, 7), (6, 8), (7, 9), (8, 10)],
         "tolerance": 1,          # ±1 CỬA SỔ dự báo (không phải ±1 giá trị)
-        "value_range": (0, 10),
         "na": ["/"],             # quan trắc che khuất -> bỏ cặp (thực tế hiếm)
     },
 
@@ -77,10 +70,6 @@ BUCKETS = {
     #    thể gặp trong dữ liệu — side quyết định bucket của chúng.        #
     # ------------------------------------------------------------------ #
     "do_cao_man_may": {
-        "kind": "linear",
-        "unit": "mét",
-        "source_table": "hshs_special (qua solver)",
-        "needs_solver": True,         # chỉ nhánh quan trắc mới cần giải qua solver
         # 13 ngưỡng -> 14 bucket số (index 0..13); "không màn" = index 14 -> 15 lựa chọn.
         "bounds": [50, 100, 150, 200, 300, 400, 500, 600,
                    1000, 1500, 2000, 2500, 6000],
@@ -110,9 +99,7 @@ BUCKETS = {
     #    Chấm: MEGA khớp đúng VÀ buổi lệch <= 1 -> đúng.                  #
     # ------------------------------------------------------------------ #
     "hien_tuong": {
-        "kind": "phenomenon",           # 2 tầng: mega (exact) × sub (±1 vòng)
-        "unit": "mega (loại) × sub (buổi)",
-        "source_table": "ww + giờ",
+        # 2 tầng: mega (exact) × sub (±1 kẹp mép)
         # --- TẦNG MEGA: khớp chính xác ---
         "mega_buckets": [               # 5 mega theo THỨ TỰ
             "dong_mua_rao",
@@ -181,10 +168,6 @@ BUCKETS = {
         },
         # --- TẦNG SUB: buổi trong ngày, ±1 kẹp mép ---
         "sub_buckets": ["toi", "dem", "sang", "trua", "chieu"],
-        "sub_labels": {
-            "toi": "Tối", "dem": "Đêm", "sang": "Sáng",
-            "trua": "Trưa", "chieu": "Chiều",
-        },
         # Ánh xạ GIỜ quan trắc -> buổi: [giờ bắt đầu, giờ kết thúc). Nghiệp vụ
         # tách rõ tối (19->24) và đêm (0->5) nên không khoảng nào cuộn qua nửa đêm.
         "sub_hours": {
@@ -209,9 +192,6 @@ BUCKETS = {
     #    tốc độ (<=2 m/s thì bỏ hướng).                                   #
     # ------------------------------------------------------------------ #
     "huong_gio": {
-        "kind": "circular",
-        "unit": "hướng (16 hướng, 0=N, chiều kim đồng hồ)",
-        "source_table": "(dd -> 16 hướng)",
         "n": 16,
         "labels": ["N", "NNE", "NE", "ENE", "E", "ESE", "SE", "SSE",
                    "S", "SSW", "SW", "WSW", "W", "WNW", "NW", "NNW"],
@@ -228,17 +208,13 @@ BUCKETS = {
     #    Dự báo viên chọn 1 cửa.                                          #
     #                                                                    #
     #    Ghép cặp với hướng gió khi chấm: tốc độ >15 m/s thì bỏ chấm tốc  #
-    #    độ; khi được chấm thì dùng ±1 cửa như model chung.               #
+    #    độ; khi được chấm thì áp ±1 cửa (score_toc_do_gio).              #
     # ------------------------------------------------------------------ #
     "toc_do_gio": {
-        "kind": "forecast_window",
-        "unit": "m/s",
-        "source_table": "(ff trong mã)",
         # cửa rộng 3, bước 1 (lo=0..15) + cửa cuối 16 trở lên. Quan trắc tối
         # đa 16 nên mép trên vô hạn không ảnh hưởng điểm.
         "windows": [(i, i + 3) for i in range(16)] + [(16, float("inf"))],
-        "tolerance": 1,          # ±1 cửa (model chung; áp khi tốc độ được chấm)
-        "value_range": (0, 16),
+        "tolerance": 1,          # ±1 cửa (áp khi tốc độ được chấm, xem score_toc_do_gio)
         "na": [None],
     },
 
@@ -251,9 +227,6 @@ BUCKETS = {
     #    "0.5-1", không vào bucket dưới; 10.0 vào ">10").                #
     # ------------------------------------------------------------------ #
     "tam_nhin": {
-        "kind": "linear",
-        "unit": "km",
-        "source_table": "VV_special",
         # 7 ngưỡng -> 8 bucket: <0.5 | 0.5-1 | 1-1.5 | 1.5-2 | 2-4 | 4-6 | 6-10 | >10
         "bounds": [0.5, 1, 1.5, 2, 4, 6, 10],
         "side": "right",
