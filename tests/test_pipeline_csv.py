@@ -97,7 +97,7 @@ def test_flatten_record_yenbai(qt_00):
 def test_flatten_record_pads_missing_cloud_layers():
     """max_cloud_layers controls how many cloud_N_* column groups get created
     — layers beyond what the record reported come back as None, not missing."""
-    records = [{"cloud": [{"cloud_Ns": "8", "cloud_C": "Sc", "cloud_hshs": 1400}]}]
+    records = [{"cloud": [{"amount": 8, "type": "Sc", "height": 1400}]}]
     flat = flatten_record(records[0], max_cloud_layers=3)
     assert flat["cloud_2_Ns"] is None
     assert flat["cloud_3_hshs"] is None

@@ -137,7 +137,7 @@ def test_decode_weather():
 
 
 def test_decode_cloud():
-    assert decode_cloud("86647", TABLES) == {"cloud_Ns": "8", "cloud_C": "Sc", "cloud_hshs": 1400}
+    assert decode_cloud("86647", TABLES) == {"amount": 8, "type": "Sc", "height": 1400}
     assert decode_cloud("864", TABLES) is None
 
 

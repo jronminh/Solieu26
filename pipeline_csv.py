@@ -225,9 +225,9 @@ def flatten_record(record: dict, source_file: str = None,
     clouds = record.get("cloud") or []
     for i in range(max_cloud_layers):
         cloud = clouds[i] if i < len(clouds) else {}
-        flat[f"cloud_{i+1}_Ns"]   = cloud.get("cloud_Ns")
-        flat[f"cloud_{i+1}_C"]    = cloud.get("cloud_C")
-        flat[f"cloud_{i+1}_hshs"] = _num_or_none(cloud.get("cloud_hshs"))
+        flat[f"cloud_{i+1}_Ns"]   = cloud.get("amount")
+        flat[f"cloud_{i+1}_C"]    = cloud.get("type")
+        flat[f"cloud_{i+1}_hshs"] = _num_or_none(cloud.get("height"))
 
     # 'raw' goes last — for looking up the original bulletin only.
     flat["raw"] = record.get("raw")

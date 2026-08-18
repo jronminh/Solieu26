@@ -164,9 +164,9 @@ def decode_cloud(token: str, tables: dict):
         Ns = Ns if Ns in (None, "/") else int(Ns)
     except ValueError:
         Ns = None
-    return {"cloud_Ns": Ns,
-            "cloud_C":  tables["cloud_type"].get(token[2]),
-            "cloud_hshs": hshs_value(token[3:5], tables)}
+    return {"amount": Ns,
+            "type":   tables["cloud_type"].get(token[2]),
+            "height": hshs_value(token[3:5], tables)}
 
 
 def decode_storm(token: str, tables: dict):

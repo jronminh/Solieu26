@@ -108,7 +108,7 @@ def test_encode_state_orders_cloud_layers_by_slot():
     raw = _encode_state(state, "k31", 21.7, 104.85, "Yên Bái")
     decoded = decode_record(raw)
     assert len(decoded["cloud"]) == 4
-    got_Ns = [layer["cloud_Ns"] for layer in decoded["cloud"]]
+    got_Ns = [layer["amount"] for layer in decoded["cloud"]]
     expected_Ns = [TABLES["N_oktas"][codes[f"cloud{i}"]] for i in (1, 2, 3, 4)]
     assert got_Ns == expected_Ns
 
