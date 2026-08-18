@@ -1,12 +1,18 @@
 """
 test_pipeline_obs.py
 ====================
-Unit tests for pipeline_obs.py: wind_dd_to_huong_gio, ww_code_to_mega, and
-build_obs (the 6-key obs adapter scoring/scorer.py expects).
+Unit tests for pipeline_obs.py: wind_dd_to_huong_gio, ww_code_to_mega,
+build_obs (the 6-key obs adapter scoring/scorer.py expects), and
+build_scalar_history (24-file/day loop on top of build_obs).
 """
 
+import datetime
+import os
+import shutil
+
 from bulletin.decode import decode_qt_file
-from pipeline_obs import build_obs, ww_code_to_mega, wind_dd_to_huong_gio
+from bulletin.filename import quantrac_filename_at
+from pipeline_obs import build_obs, build_scalar_history, ww_code_to_mega, wind_dd_to_huong_gio
 from scoring.score_tables import BUCKETS
 
 LABELS = BUCKETS["huong_gio"]["labels"]
@@ -78,7 +84,10 @@ def test_ww_code_to_mega_distinguishes_identical_labels_by_raw_code():
 
 
 def test_ww_code_to_mega_none():
-    assert ww_code_to_mega(None) is None
+    """Không báo cáo ww -> "N_0" (không có gì đáng kể), không phải None -
+    thiếu dữ liệu thật chỉ xảy ra khi mã CÓ báo cáo nhưng không khớp nhóm
+    nào (xem test_ww_code_to_mega_unknown_code)."""
+    assert ww_code_to_mega(None) == "N_0"
 
 
 def test_ww_code_to_mega_unknown_code():
@@ -96,6 +105,7 @@ def test_build_obs_real_fixture_yenbai(qt_00):
     obs = build_obs(records[0], hour=0)
     assert obs == {
         "hour": 0,
+        "buoi": "dem",
         "tong_luong_may": 8,
         "do_cao_man_may": 1400,   # solve_ceiling: Sc layer, amount 8 >= threshold
         "hien_tuong": "mu_mu_kho",  # ww_code '10' -> Mù
@@ -105,16 +115,21 @@ def test_build_obs_real_fixture_yenbai(qt_00):
     }
 
 
-def test_build_obs_missing_groups_come_back_none():
+def test_build_obs_missing_groups_come_back_none_except_hien_tuong_and_buoi():
     """A record with none of the optional groups reported (only location) —
-    every derived field must come back None, not raise on a missing dict."""
+    5 field ra None (thiếu dữ liệu thật), không raise trên dict thiếu.
+    Riêng hien_tuong ra "N_0" (không báo cáo ww = không có gì đáng kể,
+    xem ww_code_to_mega()) và buoi luôn tính được từ hour truyền vào (giờ
+    5 -> "sang") - 2 trường này không phụ thuộc record có báo cáo gì hay
+    không."""
     record = {"location": {"station_code": "k31"}}
     obs = build_obs(record, hour=5)
     assert obs == {
         "hour": 5,
+        "buoi": "sang",
         "tong_luong_may": None,
         "do_cao_man_may": None,
-        "hien_tuong": None,
+        "hien_tuong": "N_0",
         "huong_gio": None,
         "toc_do_gio": None,
         "tam_nhin": None,
@@ -129,3 +144,46 @@ def test_build_obs_cloud_none_vs_no_layers():
 
     assert build_obs({}, hour=0)["do_cao_man_may"] is None
     assert build_obs({"cloud": []}, hour=0)["do_cao_man_may"] == NO_CEILING
+
+
+# =============================================================================
+# build_scalar_history
+# =============================================================================
+
+FIELD_KEYS = {"hour", "buoi", "tong_luong_may", "do_cao_man_may", "hien_tuong",
+              "huong_gio", "toc_do_gio", "tam_nhin"}
+
+
+def test_build_scalar_history_full_day_has_24_rows_in_order(full_day_dir):
+    rows = build_scalar_history(datetime.date(2026, 8, 10), full_day_dir)
+
+    assert [r["hour"] for r in rows] == list(range(24))
+    for r in rows:
+        assert set(r.keys()) == FIELD_KEYS
+
+
+def test_build_scalar_history_hour_0_matches_build_obs_on_first_station(full_day_dir, qt_00):
+    """Giờ 0 phải khớp build_obs() gọi tay trên bản ghi ĐẦU TIÊN có
+    location của Qt26081000.txt (Yên Bái) - cùng bản ghi
+    test_build_obs_real_fixture_yenbai đã hand-verify."""
+    rows = build_scalar_history(datetime.date(2026, 8, 10), full_day_dir)
+
+    first_record = next(r for r in decode_qt_file(qt_00) if r.get("location"))
+    assert rows[0] == build_obs(first_record, hour=0)
+
+
+def test_build_scalar_history_skips_missing_hour_files(tmp_path, full_day_dir):
+    """Chỉ copy 3/24 file vào thư mục tạm - 3 giờ đó có mặt, 21 giờ còn lại
+    vắng mặt trong list (không raise, không None)."""
+    kept_hours = [0, 5, 23]
+    for hour in kept_hours:
+        name = quantrac_filename_at(datetime.datetime(2026, 8, 10, hour))
+        shutil.copy(os.path.join(full_day_dir, name), tmp_path / name)
+
+    rows = build_scalar_history(datetime.date(2026, 8, 10), str(tmp_path))
+
+    assert [r["hour"] for r in rows] == kept_hours
+
+
+def test_build_scalar_history_empty_dir_returns_empty_list(tmp_path):
+    assert build_scalar_history(datetime.date(2026, 8, 10), str(tmp_path)) == []

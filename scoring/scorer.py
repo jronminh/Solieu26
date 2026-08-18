@@ -5,12 +5,14 @@ Bộ máy chấm điểm cho 6 trường dự báo: solve_ceiling (giải trần
 mây, dùng khi giải quan trắc trước khi chấm) và 6 hàm score_<field> — mỗi
 hàm ứng với đúng 1 trường, xem chi tiết ngay tại từng hàm.
 
-Mô hình chung: dự báo viên chọn thẳng 1 bucket (không nhập số); quan trắc
-truyền vào qua `obs` — 1 dict giá trị vô hướng đã giải, khóa theo tên 6
-trường (`tong_luong_may`, `do_cao_man_may`, `hien_tuong`, `huong_gio`,
-`toc_do_gio`, `tam_nhin`) cộng `"hour"` (giờ quan trắc, chỉ score_hien_tuong
-cần). Mỗi hàm score_<field> tự đọc đúng entry BUCKETS["<field>"] của mình
-và tự lấy trong `obs` những gì nó cần — kể cả từ trường khác, như
+Mô hình chung: mỗi hàm score_<field> nhận THẲNG 2 DÒNG đã ghép theo giờ —
+`forecast_row` (đầu ra pipeline_forecast.py::build_hourly_table()) và
+`obs` (đầu ra pipeline_obs.py::build_obs()/build_scalar_history()), đúng
+những gì pipeline_scoring.py::join_forecast_obs() đã ghép sẵn. Cả 2 dòng
+cùng khoá theo tên 6 trường (`tong_luong_may`, `do_cao_man_may`,
+`hien_tuong`, `huong_gio`, `toc_do_gio`, `tam_nhin`) cộng `"hour"`/`"buoi"`.
+Mỗi hàm score_<field> tự đọc đúng entry BUCKETS["<field>"] của mình và tự
+lấy trong MỖI BÊN những gì nó cần — kể cả từ trường khác của phía kia, như
 score_huong_gio cần obs["toc_do_gio"] để xét regime gió.
 
 Mọi hàm score_* trả về True/False, hoặc None nếu bỏ cặp (thiếu dữ liệu/na).
@@ -114,9 +116,11 @@ def _window_hit(windows, forecast_idx, obs_value, tolerance):
 # bucket hóa). ±1 áp cho CỬA SỔ dự báo, không phải cho giá trị.           #
 # ====================================================================== #
 
-def score_tong_luong_may(forecast_idx, obs):
-    """forecast_idx: cửa sổ dự báo viên chọn. obs["tong_luong_may"]: số quan trắc 0-10."""
+def score_tong_luong_may(forecast_row, obs):
+    """forecast_row["tong_luong_may"]: cửa sổ dự báo viên chọn.
+    obs["tong_luong_may"]: số quan trắc 0-10."""
     spec = BUCKETS["tong_luong_may"]
+    forecast_idx = forecast_row.get("tong_luong_may")
     obs_value = obs.get("tong_luong_may")
     if forecast_idx is None or obs_value is None or obs_value in spec["na"]:
         return None
@@ -130,9 +134,11 @@ def score_tong_luong_may(forecast_idx, obs):
 # giữa 2 trạng thái đó, không phải bỏ cặp.                                #
 # ====================================================================== #
 
-def score_do_cao_man_may(forecast_idx, obs):
-    """forecast_idx: bucket dự báo viên chọn. obs["do_cao_man_may"]: mét/NO_CEILING/None."""
+def score_do_cao_man_may(forecast_row, obs):
+    """forecast_row["do_cao_man_may"]: bucket dự báo viên chọn.
+    obs["do_cao_man_may"]: mét/NO_CEILING/None."""
     spec = BUCKETS["do_cao_man_may"]
+    forecast_idx = forecast_row.get("do_cao_man_may")
     obs_value = obs.get("do_cao_man_may")
     if forecast_idx is None or obs_value is None or obs_value in spec["na"]:
         return None
@@ -148,9 +154,11 @@ def score_do_cao_man_may(forecast_idx, obs):
 # bucket với bucket dự báo.                                               #
 # ====================================================================== #
 
-def score_tam_nhin(forecast_idx, obs):
-    """forecast_idx: bucket dự báo viên chọn. obs["tam_nhin"]: số km quan trắc."""
+def score_tam_nhin(forecast_row, obs):
+    """forecast_row["tam_nhin"]: bucket dự báo viên chọn.
+    obs["tam_nhin"]: số km quan trắc."""
     spec = BUCKETS["tam_nhin"]
+    forecast_idx = forecast_row.get("tam_nhin")
     obs_value = obs.get("tam_nhin")
     if forecast_idx is None or obs_value is None or obs_value in spec["na"]:
         return None
@@ -172,9 +180,11 @@ WIND_NO_DIR_MAX   = 2    # tốc độ <= 2 m/s -> không chấm HƯỚNG
 WIND_NO_SPEED_MIN = 15   # tốc độ > 15 m/s -> không chấm TỐC ĐỘ
 
 
-def score_toc_do_gio(forecast_idx, obs):
-    """forecast_idx: cửa sổ tốc độ dự báo viên chọn. obs["toc_do_gio"]: tốc độ quan trắc (m/s)."""
+def score_toc_do_gio(forecast_row, obs):
+    """forecast_row["toc_do_gio"]: cửa sổ tốc độ dự báo viên chọn.
+    obs["toc_do_gio"]: tốc độ quan trắc (m/s)."""
     spec = BUCKETS["toc_do_gio"]
+    forecast_idx = forecast_row.get("toc_do_gio")
     obs_speed = obs.get("toc_do_gio")
     if obs_speed is None or obs_speed in spec["na"]:
         return None
@@ -185,13 +195,14 @@ def score_toc_do_gio(forecast_idx, obs):
     return _window_hit(spec["windows"], forecast_idx, obs_speed, spec["tolerance"])
 
 
-def score_huong_gio(forecast_idx, obs):
+def score_huong_gio(forecast_row, obs):
     """
-    forecast_idx: hướng dự báo viên chọn (chỉ số 0..15 hoặc nhãn).
+    forecast_row["huong_gio"]: hướng dự báo viên chọn (chỉ số 0..15).
     obs["huong_gio"]: hướng quan trắc. obs["toc_do_gio"]: tốc độ quan trắc,
     dùng để xét regime — <= WIND_NO_DIR_MAX thì không chấm hướng.
     """
     spec = BUCKETS["huong_gio"]
+    forecast_idx = forecast_row.get("huong_gio")
     obs_speed = obs.get("toc_do_gio")
     if obs_speed is None or obs_speed <= WIND_NO_DIR_MAX:
         return None
@@ -211,14 +222,13 @@ def score_huong_gio(forecast_idx, obs):
 # Đúng khi MEGA khớp đúng VÀ buổi lệch <= 1.                              #
 # ====================================================================== #
 
-def _sub_index(x):
-    """Buổi: nhãn 'toi'/'dem'/... hoặc chỉ số 0..4 -> chỉ số (None nếu lạ/thiếu)."""
-    if x is None:
+def _sub_index(label):
+    """Nhãn buổi ('toi'/'dem'/'sang'/'trua'/'chieu') -> chỉ số trong
+    BUCKETS["hien_tuong"]["sub_buckets"] (None nếu nhãn lạ/thiếu)."""
+    if label is None:
         return None
     subs = BUCKETS["hien_tuong"]["sub_buckets"]
-    if isinstance(x, str):
-        return subs.index(x) if x in subs else None
-    return int(x)
+    return subs.index(label) if label in subs else None
 
 
 def sub_of_hour(hour):
@@ -236,27 +246,34 @@ def sub_of_hour(hour):
     return None
 
 
-def score_hien_tuong(forecast_mega, forecast_sub, obs):
+def score_hien_tuong(forecast_row, obs):
     """
-    forecast_mega : nhãn mega-bucket dự báo viên chọn.
-    forecast_sub  : buổi DỰ BÁO viên chọn ('toi'..'chieu' hoặc chỉ số 0..4).
+    forecast_row["hien_tuong"] : nhãn mega-bucket (loại hiện tượng) dự báo
+        viên chọn.
+    forecast_row["buoi"] : buổi dự báo ('toi'/'dem'/'sang'/'trua'/'chieu') -
+        pipeline_forecast.py::build_hourly_table() tự suy từ giờ của
+        chính dòng đó (sub_of_hour()) - dự báo viên chỉ chọn MEGA cho 1
+        khoảng giờ, KHÔNG tự chọn buổi.
     obs["hien_tuong"] : mega ĐÃ quy đổi sẵn từ mã ww gốc — adapter
         (pipeline_obs.py::ww_code_to_mega()) làm việc này trước khi gọi vào
-        đây, không phải mã ww thô.
-    obs["hour"]        : GIỜ quan trắc (0-23) — tự quy ra buổi bằng sub_of_hour().
+        đây, không phải mã ww thô. Không báo cáo ww cũng ra "N_0", không
+        phải None (xem ww_code_to_mega()).
+    obs["buoi"] : buổi quan trắc - pipeline_obs.py::build_obs() tự suy từ
+        giờ quan trắc, cùng cách tính sub_of_hour() như bên dự báo.
 
     Đúng khi: MEGA khớp CHÍNH XÁC (tolerance 0) VÀ buổi lệch <= sub_tolerance
     (kẹp mép, KHÔNG cuộn vòng).
     Trả True/False, hoặc None nếu thiếu dữ liệu.
     """
     spec = BUCKETS["hien_tuong"]
+    forecast_mega = forecast_row.get("hien_tuong")
     obs_mega = obs.get("hien_tuong")
     if forecast_mega is None or obs_mega is None:
         return None
     if forecast_mega != obs_mega:            # tầng mega: chính xác 100%
         return False
-    fi = _sub_index(forecast_sub)
-    oi = _sub_index(sub_of_hour(obs.get("hour")))   # nhúng ánh xạ giờ -> buổi
+    fi = _sub_index(forecast_row.get("buoi"))
+    oi = _sub_index(obs.get("buoi"))
     if fi is None or oi is None:
         return None
     n = len(spec["sub_buckets"])

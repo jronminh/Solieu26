@@ -45,6 +45,16 @@ def test_build_hourly_table_hour_range_spans_min_to_max_across_records():
     assert rows[-1]["tam_nhin"] is None
 
 
+def test_build_hourly_table_buoi_derived_from_each_row_own_hour():
+    """"buoi" không phải field dự báo viên chọn - mỗi dòng tự suy từ giờ
+    CỦA CHÍNH DÒNG ĐÓ (sub_of_hour()), kể cả khi 1 bản ghi trải dài qua
+    nhiều buổi (giờ 1 -> "dem", giờ 12 -> "trua", cùng 1 bản ghi)."""
+    rows = build_hourly_table([_rec(1, 12, "tam_nhin", 0)])
+    by_hour = {r["hour"]: r["buoi"] for r in rows}
+    assert by_hour[1] == "dem"
+    assert by_hour[12] == "trua"
+
+
 def test_build_hourly_table_later_starting_record_wins_on_overlap():
     rows = build_hourly_table([
         _rec(7, 12, "tong_luong_may", 2),

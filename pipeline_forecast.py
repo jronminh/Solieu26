@@ -5,9 +5,10 @@ Việc dựng lại pipeline dự báo (bản trước đã xoá - xem TODO.md m
 Input: nhiều bản ghi {start_hour, end_hour, field_name, bucket_selected} -
 dự báo viên chọn 1 BUCKET (không nhập giá trị vô hướng tự do), hợp lệ theo
 scoring/score_tables.py.BUCKETS[field_name]. build_hourly_table() gộp lại
-thành 1 dòng/giờ, đủ 6 khoá field - cùng hình dạng obs bên
-scoring/scorer.py, để gọi thẳng score_<field>(forecast_row[field], obs_row)
-không cần biến đổi thêm.
+thành 1 dòng/giờ, đủ 6 khoá field + "buoi" (tự suy từ giờ dòng đó, xem
+scoring/scorer.py::sub_of_hour()) - cùng hình dạng obs bên
+scoring/scorer.py, để gọi thẳng score_<field>(forecast_row, obs_row) không
+cần biến đổi thêm.
 
 Chạy trực tiếp (python pipeline_forecast.py) để xem demo trên
 tests/fixtures/forecast_sample.csv.
@@ -16,6 +17,7 @@ tests/fixtures/forecast_sample.csv.
 import csv
 
 from scoring.score_tables import BUCKETS
+from scoring.scorer import sub_of_hour
 
 FIELD_ORDER = list(BUCKETS.keys())
 
@@ -56,7 +58,8 @@ def build_hourly_table(records: list) -> list:
     raise ValueError ngay, không nhận 1 phần.
 
     Trả về: list các dict, MỖI PHẦN TỬ 1 GIỜ (trải từ giờ nhỏ nhất đến giờ
-    lớn nhất trong records), đủ khoá "hour" + 6 tên field trong BUCKETS -
+    lớn nhất trong records), đủ khoá "hour" + "buoi" (tự suy từ hour qua
+    sub_of_hour(), không phải dự báo viên chọn) + 6 tên field trong BUCKETS -
     field không có bản ghi nào phủ giờ đó -> None.
 
     2 bản ghi CÙNG field_name chồng giờ nhau: bản ghi start_hour muộn hơn
@@ -88,6 +91,7 @@ def build_hourly_table(records: list) -> list:
 
     return [
         {"hour": hour,
+         "buoi": sub_of_hour(hour),
          **{field: bucket_at.get((hour, field)) for field in FIELD_ORDER}}
         for hour in range(min_hour, max_hour + 1)
     ]

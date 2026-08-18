@@ -67,3 +67,8 @@ def full_day_qt_files():
     return sorted(
         os.path.join(FULL_DAY_DIR, name) for name in os.listdir(FULL_DAY_DIR)
     )
+
+
+@pytest.fixture
+def full_day_dir():
+    return FULL_DAY_DIR

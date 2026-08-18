@@ -4,17 +4,25 @@ pipeline_obs.py
 Adapter: 1 bản ghi quan trắc đã decode (bulletin/decode.py) + giờ quan trắc
 -> dict "obs" đúng 6 khoá field mà scoring/scorer.py cần
 (tong_luong_may/do_cao_man_may/hien_tuong/huong_gio/toc_do_gio/tam_nhin) +
-"hour". Chỉ biến đổi ĐÚNG 1 quan trắc (1 dòng, 1 trạm, 1 giờ) - không biết
-gì về phía dự báo, không ghép cặp trạm/giờ (việc của matcher, chưa xây).
+"hour" + "buoi" (buổi tự suy từ giờ, xem sub_of_hour() bên scoring/scorer.py).
+build_obs() chỉ biến đổi ĐÚNG 1 quan trắc (1 dòng, 1 trạm, 1 giờ) - không
+biết gì về phía dự báo. build_scalar_history() lặp thêm 1 tầng: đọc 24
+file/ngày, MỖI GIỜ lấy 1 trạm đại diện (chưa phân biệt nhiều trạm - việc
+ghép trạm để sau, xem pipeline_scoring.py) - trả về 1 list cùng hình dạng
+build_hourly_table() bên pipeline_forecast.py.
 
 Chạy trực tiếp (python pipeline_obs.py) để xem demo trên
-tests/fixtures/qt_files/Qt26081000.txt.
+tests/fixtures/qt_files/Qt26081000.txt và
+tests/fixtures/qt_files/full_day_20260810/.
 """
 
+import datetime
+import os
+
 from bulletin.decode import decode_qt_file
-from bulletin.filename import parse_obs_dt
+from bulletin.filename import parse_obs_dt, quantrac_filename_at
 from scoring.score_tables import BUCKETS
-from scoring.scorer import solve_ceiling
+from scoring.scorer import solve_ceiling, sub_of_hour
 
 # Mỗi hướng ứng với các mốc CHỤC ĐỘ nó bao, theo
 # reference/Bang_cham_huong_gio_16_huong.md (4 hướng chính N/E/S/W ôm 3 mốc
@@ -114,10 +122,20 @@ _WW_TO_MEGA = {
 
 def ww_code_to_mega(ww_code):
     """Mã ww GỐC (decode_weather()'s "ww_code") -> nhãn mega-bucket
-    (BUCKETS["hien_tuong"]["mega_buckets"]). None -> None (chưa gán / không
-    thuộc nhóm nào -> bỏ cặp, xem score_hien_tuong())."""
+    (BUCKETS["hien_tuong"]["mega_buckets"]). KHÔNG báo cáo mã (ww_code is
+    None - bản ghi thiếu hẳn group thời tiết) nghĩa là "không có hiện
+    tượng gì đáng kể" -> "N_0", không phải thiếu dữ liệu (không có hiện
+    tượng cũng là 1 trạng thái có ý nghĩa). Mã CÓ báo cáo nhưng không khớp
+    nhóm nào (lỗi giải mã/mã lạ ngoài 00-99) mới -> None (bỏ cặp thật sự,
+    xem score_hien_tuong()) - _WW_TO_MEGA đã phủ đủ 00-99 nên ca này gần
+    như không xảy ra với dữ liệu hợp lệ.
+
+    CẦN THEO DÕI: giả định "không báo cáo = không có gì đáng kể" chưa
+    kiểm chứng chắc chắn - có thể 1 số ca "không báo cáo" thực ra là lỗi
+    truyền/mất dữ liệu, không phải quan trắc viên xác nhận trời quang
+    (xem TODO.md)."""
     if ww_code is None:
-        return None
+        return "N_0"
     return _WW_TO_MEGA.get(ww_code)
 
 
@@ -128,7 +146,9 @@ def build_obs(record: dict, hour: int) -> dict:
 
     tốc độ gió (wind_ff) không quy đổi - bulletin đã cho sẵn đơn vị m/s.
     hien_tuong quy ra MEGA ngay tại đây (ww_code_to_mega()) - scoring/scorer.py
-    (score_hien_tuong()) nhận thẳng mega, không tự quy đổi nữa."""
+    (score_hien_tuong()) nhận thẳng mega, không tự quy đổi nữa. "buoi" quy
+    thẳng từ hour qua sub_of_hour() - scorer.py so buổi 2 phía trực tiếp,
+    không tự suy từ hour nữa."""
     head        = record.get("head") or {}
     wind        = record.get("wind") or {}
     weather     = record.get("weather") or {}
@@ -136,6 +156,7 @@ def build_obs(record: dict, hour: int) -> dict:
 
     return {
         "hour": hour,
+        "buoi": sub_of_hour(hour),
         "tong_luong_may": total_cloud.get("total_cloud_N"),
         "do_cao_man_may": solve_ceiling(record.get("cloud")),
         "hien_tuong":     ww_code_to_mega(weather.get("ww_code")),
@@ -145,9 +166,49 @@ def build_obs(record: dict, hour: int) -> dict:
     }
 
 
+def build_scalar_history(date: datetime.date, local_dir: str) -> list:
+    """
+    date: ngày quan trắc. local_dir: thư mục chứa file QtYYMMDDHH.txt
+    (cùng quy ước tham số với pipeline_csv.py::download_files()).
+
+    Với mỗi giờ 0-23: dựng tên file qua quantrac_filename_at(), lấy bản ghi
+    ĐẦU TIÊN có "location" trong file đó (1 trạm đại diện/giờ - matcher
+    hiện chưa cần phân biệt trạm, xem pipeline_scoring.py) rồi build_obs().
+    File giờ nào không tồn tại trên đĩa (chưa tải/đã mất) -> bỏ qua giờ đó,
+    không raise (cùng chính sách "thiếu file -> giảm số dòng, không lỗi"
+    như bulletin/decode.py::decode_history()); file tồn tại nhưng không
+    bản ghi nào có "location" thì cũng bỏ qua giờ đó.
+
+    Trả về: list dict, CÙNG HÌNH DẠNG build_hourly_table()
+    (pipeline_forecast.py) - mỗi phần tử 1 giờ, đủ khoá "hour" + "buoi" +
+    6 field, sắp theo giờ tăng dần. Giờ thiếu dữ liệu thì vắng mặt trong
+    list (không
+    phải None) - khác build_hourly_table() ở chỗ đó (bên forecast pivot đủ
+    24 dòng, bên obs chỉ có dòng cho giờ THẬT SỰ đọc được).
+    """
+    rows = []
+    for hour in range(24):
+        dt = datetime.datetime(date.year, date.month, date.day, hour)
+        path = os.path.join(local_dir, quantrac_filename_at(dt))
+        if not os.path.exists(path):
+            continue
+        record = next((r for r in decode_qt_file(path) if r.get("location")), None)
+        if record is None:
+            continue
+        rows.append(build_obs(record, hour=hour))
+    return rows
+
+
 if __name__ == "__main__":
     path = "tests/fixtures/qt_files/Qt26081000.txt"
     hour = parse_obs_dt(path).hour
     for record in decode_qt_file(path):
         if record.get("location"):
             print(record["station"], build_obs(record, hour))
+
+    print()
+    history = build_scalar_history(
+        datetime.date(2026, 8, 10), "tests/fixtures/qt_files/full_day_20260810")
+    print(f"{len(history)} dòng")
+    for row in history[:3]:
+        print(row)
