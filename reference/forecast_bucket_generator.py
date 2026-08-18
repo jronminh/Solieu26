@@ -1,6 +1,13 @@
 """
-forecast_bucket_generator.py
+forecast_bucket_generator.py — FILE THAM KHẢO, KHÔNG CHẠY ĐƯỢC
 ====================
+Archived 2026-08-18: its logic module `pipeline_forecast.py` (the imports
+below) was deleted after `scoring/score_tables.py` dropped the "kind" field
+its dispatch depended on and the tool was judged not worth fixing — it had
+never been integrated into gui.py/dialogs.py anyway (see TODO.md). Kept here
+only as a design reference for the widget layout / CRUD shape when stage 2
+("Dự báo") of the scoring pipeline gets a real UI.
+
 Standalone Tkinter tool that lets a dự báo viên (forecaster) pick a bucket
 for each of the 6 scored fields over a time range, and exports the result
 to CSV - a hand-built stand-in for the "Dự báo" stage of the scoring
