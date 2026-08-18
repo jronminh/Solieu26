@@ -27,6 +27,7 @@ from ftplib import FTP, error_perm, error_temp
 
 from config import DEFAULT_OUTPUT_DIR, FTP_TIMEOUT
 from bulletin.decode import decode_history
+from bulletin.filename import parse_obs_dt, quantrac_filename_at
 from utils.csv_utils import write_csv
 from utils.ftp_utils import fetch_and_bucket
 
@@ -34,26 +35,6 @@ from utils.ftp_utils import fetch_and_bucket
 # =============================================================================
 # FTP LAYER — FILE DOWNLOAD  (log/progress via callback)
 # =============================================================================
-
-def quantrac_filename_at(dt: datetime.datetime) -> str:
-    """Qt<YY><MM><DD><HH>.txt — e.g. datetime(2026,4,1,13) → 'Qt26040113.txt'."""
-    return f"Qt{dt.strftime('%y%m%d')}{dt.hour:02}.txt"
-
-
-def parse_obs_dt(filename: str):
-    """
-    Extract the observation datetime from a 'QtYYMMDDHH.txt' filename.
-    Returns a datetime, or None if the name doesn't match the pattern.
-    Used to generate a real time column for the CSV (instead of burying it in source_file).
-    """
-    if not filename:
-        return None
-    base = os.path.basename(filename)
-    try:
-        return datetime.datetime.strptime(base[2:10], "%y%m%d%H")
-    except (ValueError, IndexError):
-        return None
-
 
 def download_files(ftp: FTP, cfg: dict, log, progress=None) -> dict:
     """

@@ -2,9 +2,11 @@
 test_pipeline_csv.py
 ====================
 Unit tests for the CSV-export half of pipeline_csv.py (flatten_record,
-cloud_layers_needed, write_csv, export_history_by_date) plus the small
-filename<->datetime helpers. The FTP download layer (download_files,
-run_pipeline) needs a live/mocked server and isn't covered here.
+cloud_layers_needed, write_csv, export_history_by_date). The filename<->
+datetime helpers (quantrac_filename_at/parse_obs_dt) live in
+bulletin/filename.py now — see test_filename.py. The FTP download layer
+(download_files, run_pipeline) needs a live/mocked server and isn't covered
+here.
 """
 
 import csv
@@ -15,36 +17,8 @@ from pipeline_csv import (
     cloud_layers_needed,
     export_history_by_date,
     flatten_record,
-    parse_obs_dt,
-    quantrac_filename_at,
     write_csv,
 )
-import datetime
-
-
-# =============================================================================
-# Filename <-> datetime helpers
-# =============================================================================
-
-def test_quantrac_filename_at():
-    dt = datetime.datetime(2026, 4, 1, 13)
-    assert quantrac_filename_at(dt) == "Qt26040113.txt"
-
-
-def test_quantrac_filename_at_midnight():
-    dt = datetime.datetime(2026, 8, 10, 0)
-    assert quantrac_filename_at(dt) == "Qt26081000.txt"
-
-
-def test_parse_obs_dt_valid():
-    assert parse_obs_dt("Qt26081000.txt") == datetime.datetime(2026, 8, 10, 0)
-    assert parse_obs_dt(r"C:\some\dir\Qt26081412.txt") == datetime.datetime(2026, 8, 14, 12)
-
-
-def test_parse_obs_dt_invalid():
-    assert parse_obs_dt("not_a_bulletin.txt") is None
-    assert parse_obs_dt(None) is None
-    assert parse_obs_dt("") is None
 
 
 # =============================================================================

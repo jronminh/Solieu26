@@ -12,7 +12,7 @@ tests/fixtures/qt_files/Qt26081000.txt.
 """
 
 from bulletin.decode import decode_qt_file
-from pipeline_csv import parse_obs_dt
+from bulletin.filename import parse_obs_dt
 from scoring.score_tables import BUCKETS
 from scoring.scorer import solve_ceiling
 
@@ -124,7 +124,7 @@ def ww_code_to_mega(ww_code):
 def build_obs(record: dict, hour: int) -> dict:
     """record: 1 phần tử decode_qt_file()/decode_record() (1 trạm, 1 giờ).
     hour: giờ quan trắc (0-23) - decode_record() không tự mang giờ (giờ nằm
-    ở TÊN FILE, xem pipeline_csv.parse_obs_dt()), nên truyền riêng.
+    ở TÊN FILE, xem bulletin/filename.py::parse_obs_dt()), nên truyền riêng.
 
     tốc độ gió (wind_ff) không quy đổi - bulletin đã cho sẵn đơn vị m/s.
     hien_tuong quy ra MEGA ngay tại đây (ww_code_to_mega()) - scoring/scorer.py
