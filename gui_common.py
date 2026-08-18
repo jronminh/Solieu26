@@ -9,6 +9,7 @@ this module only reports their result (report_open).
 """
 
 import re
+import tkinter as tk
 from tkinter import messagebox
 
 
@@ -87,6 +88,30 @@ def _is_numeric_viewer_column(col: str) -> bool:
     (cloud_1_hshs, cloud_2_hshs...), so they're matched by suffix instead of
     being listed in NUMERIC_VIEWER_COLUMNS."""
     return col in NUMERIC_VIEWER_COLUMNS or col.endswith("_hshs")
+
+
+def make_dialog(root, dialogs: dict, key: str, title: str):
+    """Create a singleton Toplevel keyed by `key` in `dialogs`: if already open, bring
+    it to front and return None. Callers own everything else about the window."""
+    existing = dialogs.get(key)
+    if existing is not None and existing.winfo_exists():
+        existing.deiconify(); existing.lift(); existing.focus_set()
+        return None
+    win = tk.Toplevel(root)
+    win.title(title)
+    win.transient(root)
+    win.resizable(False, False)
+    dialogs[key] = win
+    return win
+
+
+def center_over_root(root, win):
+    """Position `win` roughly centered over `root` for visibility."""
+    win.update_idletasks()
+    rx, ry = root.winfo_rootx(), root.winfo_rooty()
+    rw, rh = root.winfo_width(), root.winfo_height()
+    ww, wh = win.winfo_width(), win.winfo_height()
+    win.geometry(f"+{max(rx + (rw - ww)//2, 0)}+{max(ry + (rh - wh)//3, 0)}")
 
 
 def report_open(log, ok: bool, info: str, what: str = None, warn: bool = False):

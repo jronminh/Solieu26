@@ -1,48 +1,36 @@
 """
 gui.py
 ===================
-Tkinter GUI entry point + the App class (the spine): main window, worker
-thread, run-pipeline glue, logging, auto-query timer, info panel.
+Tkinter GUI entry point + the App class (the spine): main window, logging,
+info panel, and wiring for the other pieces.
 
-The three heavier UI pieces live in their own modules as standalone classes —
-history_viewer.HistoryViewer ("Xem số liệu"), dialogs.SettingsDialog
-("Thiết lập") and dialogs.AdvancedDialog ("Tải số liệu") — each constructed
-once in App.__init__ and holding the `app` instance so it can reach back into
-shared state (self.app.v, self.app._log, self.app._dialogs, ...).
+Heavier pieces live in their own modules as standalone classes — runner.Runner
+(pipeline run + worker thread + queue poll), auto_query.AutoQuery (the
+"Tự động truy vấn" timer), history_viewer.HistoryViewer ("Xem số liệu"),
+dialogs.SettingsDialog ("Thiết lập") and dialogs.AdvancedDialog ("Tải số
+liệu") — each constructed once in App.__init__ and holding the `app` instance
+so it can reach back into shared state (self.app.v, self.app._log,
+self.app._dialogs, ...).
 
 Run:  python gui.py [config.ini path]
-Requires utils/config_utils.py/pipeline_fetch.py/pipeline_csv.py/gui_common.py/
+Requires utils/config_utils.py/gui_common.py/runner.py/auto_query.py/
 history_viewer.py/dialogs.py, plus the bulletin/ and utils/ packages, in the
 same folder.
-
-Anti-freeze architecture: heavy work runs on a worker thread that never
-touches widgets — it only pushes events onto a queue.Queue(); the main thread
-polls the queue every 100ms via root.after() and applies the UI updates
-itself. The worker (_work()) is the ONLY place that ties the 2 independent
-pipeline modules together — pipeline_fetch.py (FTP download) and
-pipeline_csv.py (decode + CSV export) don't import each other and neither
-knows about the other; a decode failure can't take down a download already in
-progress or gui.py's own startup. It runs them as 2 stages and reports them
-as 2 separate outcomes: 'fetch_done' (always, once download finishes) then
-either 'export_done' or 'export_error' (only if there were files to process) —
-on top of the always-available 'log' / 'progress' / 'error' (connect/login
-failure) events.
 
 Tác giả: congminh9981 (congminh9981@gmail.com); Claude (Anthropic) — đồng tác giả.
 """
 
 import datetime
 import os
-import queue
 import sys
-import threading
 
 import tkinter as tk
-from tkinter import ttk, messagebox, scrolledtext
+from tkinter import ttk, scrolledtext
 
 from utils import config_utils as config
-import pipeline_fetch
 from gui_common import LOG_COLORS
+from runner import Runner
+from auto_query import AutoQuery
 from history_viewer import HistoryViewer
 from dialogs import SettingsDialog, AdvancedDialog
 
@@ -50,16 +38,9 @@ from dialogs import SettingsDialog, AdvancedDialog
 class App:
     def __init__(self, root: tk.Tk, config_path: str = None):
         self.root = root
-        self.q = queue.Queue()
-        self.worker = None
-        self._run_in_progress = False  # mirrors _set_actions_enabled — feeds advanced_dialog.refresh_controls_state
-        self.last_output_dir = None
-        self.auto_job = None        # root.after() id for the pending auto-query tick
-        self.auto_next_run = None   # datetime of the next scheduled auto-query tick (None = off)
-        self.last_result = None     # result dict from the last completed run (for the info panel)
-        self.last_cfg = None        # cfg dict from the last _on_run (carries the queried date)
-        self.last_updated_at = None # datetime the last run finished (success or not)
         self._dialogs = {}          # keeps references to open dialogs (avoids reopening duplicates)
+        self.runner = Runner(self)
+        self.auto_query = AutoQuery(self)
 
         # Load the external config (if any) BEFORE prefilling the form. The log
         # widget doesn't exist yet at this point, so buffer any per-key WARNs
@@ -124,7 +105,7 @@ class App:
         self._fit_window_to_content()
         # Floor = the natural size with every field + the log shown.
         self.root.minsize(self.root.winfo_width(), self.root.winfo_height())
-        self.root.after(100, self._poll)
+        self.root.after(100, self.runner._poll)
         for level, msg in config_log_buffer:
             self._log(level, msg)
         self._log("INFO", "Khởi động xong — sẵn sàng. Điền thông tin rồi bấm 'Làm mới'.")
@@ -132,11 +113,11 @@ class App:
             self._log("OK", f"Đã nạp {len(self.cfg_overrides)} thiết lập từ config: {self.cfg_path}")
         else:
             self._log("INFO", f"Không thấy config ({self.cfg_path}) — dùng mặc định trong mã.")
-        self._schedule_auto_tick()   # also refreshes the info panel's auto-query status
+        self.auto_query._schedule_auto_tick()   # also refreshes the info panel's auto-query status
 
         if self.v["auto_on_startup"].get():
             self._log("ACT", "Tự động truy vấn khi khởi động")
-            self.root.after(300, self._on_run)   # small delay so the window renders first
+            self.root.after(300, self.runner._on_run)   # small delay so the window renders first
 
     # ----- UI construction ---------------------------------------------
     def _build_ui(self):
@@ -171,7 +152,7 @@ class App:
         # Làm mới, Tải số liệu, Xem số liệu, Thiết lập.
         btn_col = ttk.Frame(content_row)
         btn_col.pack(side="left", padx=(12, 0))
-        self.refresh_btn = ttk.Button(btn_col, text="Làm mới", command=self._on_run)
+        self.refresh_btn = ttk.Button(btn_col, text="Làm mới", command=self.runner._on_run)
         self.refresh_btn.pack(fill="x")
         ttk.Button(btn_col, text="Tải số liệu",
                   command=self.advanced_dialog.open).pack(fill="x", pady=(4, 0))
@@ -231,37 +212,13 @@ class App:
         self.log.see("end")
         self.log.config(state="disabled")
 
-    # ----- Dialog helpers (generic) ---------------------------------------
-    # Shared singleton-dialog helpers used by every popup window in the app.
-    # App owns self._dialogs (the singleton registry), so it owns these too.
-    def _make_dialog(self, key: str, title: str):
-        """Create a singleton Toplevel: if already open, bring it to front and return None."""
-        existing = self._dialogs.get(key)
-        if existing is not None and existing.winfo_exists():
-            existing.deiconify(); existing.lift(); existing.focus_set()
-            return None
-        win = tk.Toplevel(self.root)
-        win.title(title)
-        win.transient(self.root)
-        win.resizable(False, False)
-        self._dialogs[key] = win
-        return win
-
-    def _center_over_root(self, win):
-        """Position the dialog roughly centered over the main window for visibility."""
-        win.update_idletasks()
-        rx, ry = self.root.winfo_rootx(), self.root.winfo_rooty()
-        rw, rh = self.root.winfo_width(), self.root.winfo_height()
-        ww, wh = win.winfo_width(), win.winfo_height()
-        win.geometry(f"+{max(rx + (rw - ww)//2, 0)}+{max(ry + (rh - wh)//3, 0)}")
-
     # ----- Info panel ("Thông tin truy vấn") --------------------------
     def _refresh_info_panel(self):
         """Recompute every label in the info panel from current state (last run result,
         auto-query schedule). Cheap — just StringVar.set() calls — safe to call often."""
-        result = self.last_result or {}
+        result = self.runner.last_result or {}
 
-        if self.last_result is not None:
+        if self.runner.last_result is not None:
             hr = result.get("history_records", 0)
             history_files = result.get("history_files") or {}
             self.info["csv_result"].set(f"{hr} record · {len(history_files)} ngày (history_*.csv)")
@@ -271,13 +228,13 @@ class App:
             self.info["csv_result"].set("—")
             self.info["missing"].set("—")
 
-        if self.last_cfg and self.last_updated_at:
-            start, end = self.last_cfg["start_date"], self.last_cfg["end_date"]
+        if self.runner.last_cfg and self.runner.last_updated_at:
+            start, end = self.runner.last_cfg["start_date"], self.runner.last_cfg["end_date"]
             if start.date() == end.date():
                 rng = f"Ngày {start:%Y-%m-%d}"
             else:
                 rng = f"{start:%Y-%m-%d} → {end:%Y-%m-%d}"
-            self.info["data_status"].set(f"{rng} — cập nhật lúc {self.last_updated_at:%H:%M:%S}")
+            self.info["data_status"].set(f"{rng} — cập nhật lúc {self.runner.last_updated_at:%H:%M:%S}")
         else:
             self.info["data_status"].set("Chưa có dữ liệu")
 
@@ -285,241 +242,13 @@ class App:
             self.info["auto_status"].set("Tạm dừng — đang tải số liệu")
             return
 
-        if self._auto_effective_minutes() <= 0:
+        if self.auto_query._auto_effective_minutes() <= 0:
             self.info["auto_status"].set("Tắt")
         else:
             v, unit = self.v["auto_value"].get(), self.v["auto_unit"].get().lower()
-            next_run = f" (tiếp theo: {self.auto_next_run:%H:%M:%S})" if self.auto_next_run else ""
-            self.info["auto_status"].set(f"Bật — mỗi {v} {unit}{next_run}")
-
-    # ----- Auto-query (timer) ----------------------------------------
-    def _auto_effective_minutes(self) -> int:
-        """Current interval in minutes; 0 means auto-query is off."""
-        try:
-            v = int(self.v["auto_value"].get().strip())
-        except ValueError:
-            v = 0
-        v = max(v, 0)
-        return v * 60 if self.v["auto_unit"].get() == "Giờ" else v
-
-    def _schedule_auto_tick(self):
-        """(Re)schedule the next auto-query tick from the current value/unit; cancels any pending
-        one first. Also tracks auto_next_run and refreshes the info panel's auto-query status."""
-        if self.auto_job is not None:
-            self.root.after_cancel(self.auto_job)
-            self.auto_job = None
-        minutes = self._auto_effective_minutes()
-        if minutes <= 0:
-            self.auto_next_run = None
-        else:
-            self.auto_next_run = datetime.datetime.now() + datetime.timedelta(minutes=minutes)
-            self.auto_job = self.root.after(minutes * 60 * 1000, self._on_auto_tick)
-        self._refresh_info_panel()
-
-    def _on_auto_tick(self):
-        self.auto_job = None
-        if self.worker and self.worker.is_alive():
-            self._log("SKIP", "Tự động truy vấn: bỏ qua vì đang có tác vụ chạy")
-        else:
-            self._log("ACT", "Tự động truy vấn: chạy truy vấn")
-            self._on_run()
-        self._schedule_auto_tick()
-
-    def _on_auto_change(self, event=None):
-        """Entry/dropdown changed: normalize the value and reschedule the timer right away
-        (takes effect immediately); persisting to config.ini happens via 'Lưu thiết lập'."""
-        v = self._auto_effective_value()
-        self.v["auto_value"].set(str(v))
-        unit = self.v["auto_unit"].get()
-        state = "tắt" if v == 0 else f"mỗi {v} {unit.lower()}"
-        self._log("ACT", f"Tùy chọn 'Tự động truy vấn': {state}")
-        self._schedule_auto_tick()
-
-    def _auto_effective_value(self) -> int:
-        try:
-            return max(int(self.v["auto_value"].get().strip()), 0)
-        except ValueError:
-            return 0
-
-    # ----- Run pipeline ("Làm mới" / "Bắt đầu") ----------------------------
-    def _build_cfg(self) -> dict:
-        """Read the form → cfg dict; local_dir/timeout/retry come from config's fixed constants.
-
-        Always sets start_date/end_date — pipeline_fetch.download_files() takes the fast
-        single-day path when they're equal. Normal mode: always "today", no date
-        field to read. Advanced mode (self.v["advanced_mode"], on while the "Tải
-        số liệu" dialog is open): reads them from that dialog's fields instead.
-        """
-        cfg = {
-            "ftp_host": self.v["ftp_host"].get().strip(),
-            "ftp_user": self.v["ftp_user"].get().strip(),
-            "ftp_pass": self.v["ftp_pass"].get(),
-            "ftp_timeout": config.CONFIG.get("ftp_timeout", config.FTP_TIMEOUT),
-            "retry_temp": config.CONFIG.get("retry_temp", config.RETRY_TEMP),
-            "retry_wait": config.CONFIG.get("retry_wait", config.RETRY_WAIT),
-            "remote_dir": self.v["remote_dir"].get().strip() or "/Quantrac",
-            "local_dir":  config.TEMP_DL_DIR,
-            "output_dir": self.v["output_dir"].get().strip() or config.DEFAULT_OUTPUT_DIR,
-        }
-
-        if self.v["advanced_mode"].get():
-            try:
-                start = datetime.datetime.strptime(self.v["start_date"].get().strip(), "%Y-%m-%d")
-                end = datetime.datetime.strptime(self.v["end_date"].get().strip(), "%Y-%m-%d")
-            except ValueError:
-                raise ValueError("Ngày bắt đầu/kết thúc phải theo định dạng YYYY-MM-DD, vd 2026-08-10")
-            if end < start:
-                raise ValueError("Ngày kết thúc phải sau hoặc bằng ngày bắt đầu")
-            cfg["start_date"] = start
-            cfg["end_date"] = end
-        else:
-            today = datetime.datetime.combine(datetime.date.today(), datetime.time())
-            cfg["start_date"] = cfg["end_date"] = today
-
-        return cfg
-
-    def _set_actions_enabled(self, enabled: bool):
-        """Toggle 'Làm mới' — locked while a run is in progress. 'Bắt đầu' (trong
-        dialog 'Tải số liệu', nếu đang mở) khóa/mở theo cùng trạng thái qua
-        advanced_dialog.refresh_controls_state()."""
-        self._run_in_progress = not enabled
-        self.refresh_btn.config(state="normal" if enabled else "disabled")
-        self.advanced_dialog.refresh_controls_state()
-
-    def _on_run(self) -> bool:
-        """Returns True iff a worker thread was actually started — False if
-        skipped (a run is already in progress) or rejected (bad input). Callers
-        that need to know whether the query truly started (e.g.
-        AdvancedDialog._on_advanced_start, to decide whether to close the 'Tải
-        số liệu' dialog) check this."""
-        if self.worker and self.worker.is_alive():
-            self._log("WARN", "Bỏ qua: một tác vụ đang chạy")
-            return False
-        try:
-            cfg = self._build_cfg()
-            if not cfg["ftp_host"]:
-                raise ValueError("Chưa nhập FTP host")
-        except ValueError as e:
-            self._log("ERR", f"Nhập sai: {e}")
-            messagebox.showerror("Nhập sai", str(e))
-            return False
-
-        self._divider()
-        if cfg["start_date"].date() == cfg["end_date"].date():
-            self._log("ACT", f"Bắt đầu: ngày {cfg['start_date']:%Y-%m-%d} (00h–23h)")
-        else:
-            days = (cfg["end_date"].date() - cfg["start_date"].date()).days + 1
-            self._log("ACT", f"Bắt đầu: {cfg['start_date']:%Y-%m-%d} → "
-                             f"{cfg['end_date']:%Y-%m-%d} ({days} ngày)")
-        self.last_cfg = cfg
-        self._set_actions_enabled(False)
-        self.status.config(text="Đang chạy...")
-
-        self.worker = threading.Thread(target=self._work, args=(cfg,), daemon=True)
-        self.worker.start()
-        return True
-
-    def _work(self, cfg):
-        """
-        Worker thread — only pushes events onto the queue, never touches widgets.
-
-        2 giai đoạn ĐỘC LẬP, khớp với việc pipeline_fetch.py và pipeline_csv.py
-        không import lẫn nhau: fetch (luôn chạy, không phụ thuộc gì ở khối 2)
-        rồi export (chỉ cần biết khối 1 có để lại file hay không, không quan
-        tâm khối 1 "thành công" theo nghĩa nào khác). pipeline_csv được import
-        TRỄ, ngay ở đây — một lỗi decode (import lỗi hay exception lúc chạy)
-        chỉ làm hỏng giai đoạn export, không đụng tới giai đoạn fetch đã báo
-        xong lẫn việc gui.py tự khởi động.
-        """
-        q = self.q
-        def log(level, msg): q.put(("log", level, msg))
-        def progress(done, total, status): q.put(("progress", done, total))
-
-        try:
-            dl = pipeline_fetch.fetch_files(cfg, log=log, progress=progress)
-        except Exception as e:
-            q.put(("error", f"{type(e).__name__}: {e}"))
-            return
-
-        q.put(("fetch_done", dl))
-        if not dl["files"]:
-            return
-
-        try:
-            import pipeline_csv
-            output_dir = os.path.abspath(cfg.get("output_dir") or config.DEFAULT_OUTPUT_DIR)
-            os.makedirs(output_dir, exist_ok=True)
-            history_files = pipeline_csv.export_history_by_date(sorted(dl["files"]), output_dir)
-            q.put(("export_done", {"output_dir": output_dir, "history_files": history_files}))
-        except Exception as e:
-            q.put(("export_error", f"{type(e).__name__}: {e}"))
-
-    def _poll(self):
-        try:
-            while True:
-                item = self.q.get_nowait()
-                kind = item[0]
-                if kind == "log":
-                    self._log(item[1], item[2])
-                elif kind == "progress":
-                    _, done, total = item
-                    self.status.config(text=f"Tải {done}/{total}")
-                elif kind == "fetch_done":
-                    self._on_fetch_done(item[1])
-                elif kind == "export_done":
-                    self._on_export_done(item[1])
-                elif kind == "export_error":
-                    self._on_export_error(item[1])
-                elif kind == "error":
-                    self._log("ERR", item[1])
-                    self.status.config(text="Lỗi")
-                    self._set_actions_enabled(True)
-                    messagebox.showerror("Lỗi", item[1])
-        except queue.Empty:
-            pass
-        self.root.after(100, self._poll)
-
-    def _on_fetch_done(self, dl: dict):
-        """Giai đoạn 1 (fetch) xong — LUÔN cập nhật files/missing bất kể giai
-        đoạn 2 sau đó thế nào. Giữ đúng hình dạng dict cũ (ok/history_files/
-        history_records) để _refresh_info_panel() không phải sửa; _on_export_done()/
-        _on_export_error() sẽ cập nhật tiếp lên self.last_result này."""
-        self.last_result = {"ok": False, "files": dl["files"], "missing": dl["missing"],
-                             "history_files": {}, "history_records": 0}
-        self.last_updated_at = datetime.datetime.now()
-        self._refresh_info_panel()
-
-        miss = dl.get("missing") or []
-        if miss:
-            self._log("WARN", f"Thiếu {len(miss)} file trên server")
-
-        if not dl["files"]:
-            self._set_actions_enabled(True)
-            self.status.config(text="Không có dữ liệu")
-
-    def _on_export_done(self, info: dict):
-        self._set_actions_enabled(True)
-        self.last_output_dir = info["output_dir"]
-
-        history_files = info["history_files"]
-        self.last_result.update(
-            ok=True, output_dir=info["output_dir"], history_files=history_files,
-            history_records=sum(v["records"] for v in history_files.values()))
-        self.last_updated_at = datetime.datetime.now()
-        self._refresh_info_panel()
-
-        self.status.config(text="Hoàn tất")
-        parts = [f"{os.path.basename(hinfo['csv'])} ({hinfo['records']} record)"
-                 for _, hinfo in sorted(history_files.items())]
-        self._log("OK", "Hoàn tất — đã xuất: " + (", ".join(parts) if parts else "(không có)"))
-
-    def _on_export_error(self, msg: str):
-        """Khối 1 đã xong (self.last_result đã có files/missing từ _on_fetch_done)
-        — lỗi ở đây chỉ là khối 2 (xử lý readable), không xoá kết quả tải đã có."""
-        self._set_actions_enabled(True)
-        self._log("ERR", f"Xử lý số liệu thất bại (đã tải xong file, chỉ bước xử lý lỗi): {msg}")
-        self.status.config(text="Tải xong, xử lý lỗi")
-        messagebox.showerror("Lỗi xử lý", msg)
+            next_run = self.auto_query.auto_next_run
+            next_run_txt = f" (tiếp theo: {next_run:%H:%M:%S})" if next_run else ""
+            self.info["auto_status"].set(f"Bật — mỗi {v} {unit}{next_run_txt}")
 
 
 def main():

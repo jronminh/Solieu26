@@ -22,7 +22,7 @@ from utils import config_utils as config
 from gui_common import (
     STATIONS, STATION_NAMES, NAME_TO_CODE, ALL_STATIONS,
     HOURS, ALL_HOURS, HISTORY_CSV_RE, ALWAYS_HIDDEN_VIEWER_COLUMNS,
-    _is_numeric_viewer_column, report_open,
+    _is_numeric_viewer_column, report_open, make_dialog, center_over_root,
 )
 from utils.file_utils import open_in_editor
 from utils.ini_utils import update_ini_key
@@ -154,14 +154,14 @@ class HistoryViewer:
         tree.tag_configure("odd", background="#f3f4f6")
         tree.tag_configure("even", background="#ffffff")
 
-        self.app._center_over_root(win)
+        center_over_root(self.app.root, win)
         self._load_csv_into_viewer(win, path)
 
     # ----- File discovery ---------------------------------------------------
     def _current_output_dir(self) -> str:
         """Directory holding the CSVs: prefers where the last run wrote to, else the form."""
-        if self.app.last_output_dir:
-            return self.app.last_output_dir
+        if self.app.runner.last_output_dir:
+            return self.app.runner.last_output_dir
         return os.path.abspath(self.app.v["output_dir"].get().strip() or config.DEFAULT_OUTPUT_DIR)
 
     def _available_history_files(self) -> dict:
@@ -308,7 +308,7 @@ class HistoryViewer:
     def _open_column_picker(self, win):
         """Open a checkbox dialog to pick visible columns (shared across all viewer windows)."""
         self.app._log("ACT", "Mở hộp thoại Chọn cột hiển thị")
-        dlg = self.app._make_dialog("columns", "Chọn cột hiển thị")
+        dlg = make_dialog(self.app.root, self.app._dialogs, "columns", "Chọn cột hiển thị")
         if dlg is None:
             return
         frm = ttk.Frame(dlg, padding=12)
@@ -333,7 +333,7 @@ class HistoryViewer:
                    side="right", padx=6)
 
         dlg.minsize(360, 0)
-        self.app._center_over_root(dlg)
+        center_over_root(self.app.root, dlg)
 
     def _apply_column_selection(self, col_vars: dict):
         """Read checkbox states → update self.hidden_cols, redraw every open viewer, save to config."""

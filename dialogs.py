@@ -18,7 +18,7 @@ import tkinter as tk
 from tkinter import ttk, filedialog, messagebox
 
 from utils import config_utils as config
-from gui_common import report_open
+from gui_common import report_open, make_dialog, center_over_root
 from utils.file_utils import open_folder
 from utils.ini_utils import update_ini_key
 
@@ -42,7 +42,7 @@ class SettingsDialog:
         config.ini actions (restore-defaults at bottom-left, explicit save at bottom-right)."""
         app = self.app
         app._log("ACT", "Mở hộp thoại Thiết lập")
-        win = app._make_dialog("settings", "Thiết lập")
+        win = make_dialog(app.root, app._dialogs, "settings", "Thiết lập")
         if win is None:
             return
         frm = ttk.Frame(win, padding=12)
@@ -73,12 +73,12 @@ class SettingsDialog:
         auto_box.pack(fill="x", pady=(8, 0))
         auto_entry = ttk.Entry(auto_box, textvariable=app.v["auto_value"], width=6)
         auto_entry.grid(row=0, column=0, padx=(0, 4))
-        auto_entry.bind("<FocusOut>", app._on_auto_change)
-        auto_entry.bind("<Return>", app._on_auto_change)
+        auto_entry.bind("<FocusOut>", app.auto_query._on_auto_change)
+        auto_entry.bind("<Return>", app.auto_query._on_auto_change)
         auto_unit = ttk.Combobox(auto_box, textvariable=app.v["auto_unit"],
                                  values=["Phút", "Giờ"], state="readonly", width=8)
         auto_unit.grid(row=0, column=1)
-        auto_unit.bind("<<ComboboxSelected>>", app._on_auto_change)
+        auto_unit.bind("<<ComboboxSelected>>", app.auto_query._on_auto_change)
         ttk.Label(auto_box, text="(0 = tắt)").grid(row=0, column=2, padx=(8, 0))
         ttk.Checkbutton(auto_box, text="Tự động truy vấn khi khởi động",
                         variable=app.v["auto_on_startup"]).grid(
@@ -92,7 +92,7 @@ class SettingsDialog:
                    command=self._on_save_settings).pack(side="right")
 
         win.minsize(420, 0)
-        app._center_over_root(win)
+        center_over_root(app.root, win)
 
     def _on_save_settings(self):
         """Persist every field in the Thiết lập dialog to config.ini in one shot."""
@@ -125,7 +125,7 @@ class SettingsDialog:
         except OSError as e:
             app._log("ERR", f"Không lưu được thiết lập: {e}")
             messagebox.showerror("Lỗi", f"Không lưu được thiết lập:\n{e}")
-        app._schedule_auto_tick()
+        app.auto_query._schedule_auto_tick()
 
     def _on_restore_defaults(self):
         """Overwrite config.ini with the hardcoded defaults (config.DEFAULT_CONFIG)
@@ -155,7 +155,7 @@ class SettingsDialog:
         app.v["auto_value"].set(str(d["auto_query_value"]))
         app.v["auto_unit"].set("Giờ" if d["auto_query_unit"] == "hours" else "Phút")
         app.v["auto_on_startup"].set(bool(d["auto_query_on_startup"]))
-        app._schedule_auto_tick()
+        app.auto_query._schedule_auto_tick()
         app._log("OK", f"Đã khôi phục thiết lập mặc định vào config: {path}")
 
     def _browse_output(self, parent=None):
@@ -193,7 +193,7 @@ class AdvancedDialog:
 
     def open(self):
         app = self.app
-        win = app._make_dialog("advanced", "Tải số liệu")
+        win = make_dialog(app.root, app._dialogs, "advanced", "Tải số liệu")
         if win is None:
             return
         app._log("ACT", "Mở hộp thoại Tải số liệu — tạm dừng tự động truy vấn")
@@ -226,7 +226,7 @@ class AdvancedDialog:
         app.v["advanced_mode"].set(True)
         self._on_mode_changed()
         win.minsize(260, 0)
-        app._center_over_root(win)
+        center_over_root(app.root, win)
 
     def _on_now(self):
         """'Về hiện tại': force start_date/end_date to today."""
@@ -243,12 +243,9 @@ class AdvancedDialog:
         and info panel. advanced_mode simply tracks whether this dialog is open."""
         app = self.app
         if app.v["advanced_mode"].get():
-            if app.auto_job is not None:
-                app.root.after_cancel(app.auto_job)
-                app.auto_job = None
-            app.auto_next_run = None
+            app.auto_query.pause()
         else:
-            app._schedule_auto_tick()   # resume using the already-configured interval
+            app.auto_query.resume()
         self.refresh_controls_state()
         app._refresh_info_panel()
 
@@ -262,7 +259,7 @@ class AdvancedDialog:
         self.start_date_entry.config(state="normal")
         self.end_date_entry.config(state="normal")
         self.now_btn.config(state="normal")
-        self.start_btn.config(state="disabled" if self.app._run_in_progress else "normal")
+        self.start_btn.config(state="disabled" if self.app.runner._run_in_progress else "normal")
 
     def _on_close(self):
         """WM_DELETE_WINDOW cho dialog 'Tải số liệu': đóng cửa sổ rồi tắt chế độ
@@ -275,10 +272,10 @@ class AdvancedDialog:
 
     def _on_advanced_start(self):
         """'Bắt đầu': chạy truy vấn theo khoảng ngày đã nhập, rồi đóng dialog —
-        NHƯNG chỉ khi truy vấn thực sự bắt đầu được. app._on_run() build cfg từ
-        start_date/end_date trước khi dialog đóng, nên khoảng ngày vẫn đúng
+        NHƯNG chỉ khi truy vấn thực sự bắt đầu được. app.runner._on_run() build cfg
+        từ start_date/end_date trước khi dialog đóng, nên khoảng ngày vẫn đúng
         (đóng trước sẽ tắt advanced_mode → cfg rơi về "hôm nay"). Nếu ngày nhập
-        sai hoặc đang có tác vụ chạy, app._on_run() trả về False và dialog vẫn
-        mở để người dùng sửa."""
-        if self.app._on_run():
+        sai hoặc đang có tác vụ chạy, app.runner._on_run() trả về False và dialog
+        vẫn mở để người dùng sửa."""
+        if self.app.runner._on_run():
             self._on_close()
