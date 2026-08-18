@@ -66,7 +66,7 @@ def test_flatten_record_yenbai(qt_00):
     assert flat["lon"] == 104.8833
 
     assert flat["visibility_km"] == 8.0
-    assert flat["total_cloud_N"] == "8"
+    assert flat["total_cloud_N"] == 8
     assert flat["wind_dd_deg"] == 0
     assert flat["wind_ff"] == 0
 
@@ -85,7 +85,7 @@ def test_flatten_record_yenbai(qt_00):
     assert flat["pressure_hpa"] == 993.7
 
     assert flat["cloud_layers"] == 1
-    assert flat["cloud_1_Ns"] == "8"
+    assert flat["cloud_1_Ns"] == 8
     assert flat["cloud_1_C"] == "Sc"
     assert flat["cloud_1_hshs"] == 1400
 

@@ -15,6 +15,7 @@ from bulletin.decode import (
     decode_record,
     decode_storm,
     decode_tail,
+    decode_total_cloud,
     decode_wind,
     decode_weather,
     get_qt_data,
@@ -73,11 +74,11 @@ def test_split_record_no_head_no_wind():
 # =============================================================================
 
 def test_vv_value_ranges():
-    assert vv_value("30", TABLES) == "3.0"       # < 51 -> "d.d" km
+    assert vv_value("30", TABLES) == 3.0          # < 51 -> "d.d" km
     assert vv_value("53", TABLES) is None         # 51-55 undefined
-    assert vv_value("58", TABLES) == "8"          # 56-80 -> vv - 50
-    assert vv_value("85", TABLES) == "45"         # 81-89 -> vv - 40
-    assert vv_value("94", TABLES) == "1"          # special table
+    assert vv_value("58", TABLES) == 8.0          # 56-80 -> vv - 50
+    assert vv_value("85", TABLES) == 45.0         # 81-89 -> vv - 40
+    assert vv_value("94", TABLES) == 1.0          # special table
     assert vv_value("x", TABLES) is None          # non-numeric
     assert vv_value("5", TABLES) is None          # too short
 
@@ -95,40 +96,38 @@ def test_hshs_value_ranges():
 # =============================================================================
 
 def test_decode_head():
-    """'VV_km' is VV coerced to a float km — added for score_tables.py's tam_nhin
-    field, alongside (not replacing) the existing display string 'VV'."""
-    assert decode_head("k3158", TABLES) == {"iii": "k31", "VV": "8", "VV_km": 8.0}
+    """VV is already the resolved km float (vv_value) — no separate raw code
+    kept alongside it."""
+    assert decode_head("k3158", TABLES) == {"iii": "k31", "VV": 8.0}
     assert decode_head(None, TABLES) is None
     assert decode_head("60000", TABLES) is None  # doesn't start with 'k'
 
 
+def test_decode_total_cloud():
+    """total_cloud_N is the N_oktas value coerced to an int — the first char
+    of the combined total-cloud+wind token, split out from decode_wind()."""
+    assert decode_total_cloud("60000", TABLES) == {"total_cloud_N": 8}
+    assert decode_total_cloud("21211", TABLES) == {"total_cloud_N": 3}
+    assert decode_total_cloud(None, TABLES) is None
+    assert decode_total_cloud("abc", TABLES) is None  # too short
+
+
+def test_decode_total_cloud_obscured_sky_keeps_slash_sentinel():
+    """N_oktas code '9' maps to '/' (obscured sky) — total_cloud_N must pass
+    it through unchanged (not None), since score_tables.py's tong_luong_may
+    treats '/' as its own distinct na-sentinel, not "missing data"."""
+    assert decode_total_cloud("90000", TABLES) == {"total_cloud_N": "/"}
+
+
 def test_decode_wind():
-    """'wind_N_num' is the N_oktas value coerced to an int — added for
-    score_tables.py's tong_luong_may field, alongside the existing display string
-    'wind_N'."""
-    assert decode_wind("60000", TABLES) == {
-        "wind_N": "8", "wind_N_num": 8, "wind_dd": 0, "wind_ff": 0,
-    }
-    assert decode_wind("21211", TABLES) == {
-        "wind_N": "3", "wind_N_num": 3, "wind_dd": 120, "wind_ff": 11,
-    }
-    assert decode_wind(None, TABLES) is None
-    assert decode_wind("abc", TABLES) is None  # too short
+    assert decode_wind("60000") == {"wind_dd": 0, "wind_ff": 0}
+    assert decode_wind("21211") == {"wind_dd": 120, "wind_ff": 11}
+    assert decode_wind(None) is None
+    assert decode_wind("abc") is None  # too short
 
 
-def test_decode_wind_bad_digits_keeps_N():
-    assert decode_wind("6abcd", TABLES) == {
-        "wind_N": "8", "wind_N_num": 8, "wind_dd": None, "wind_ff": None,
-    }
-
-
-def test_decode_wind_obscured_sky_keeps_slash_sentinel():
-    """N_oktas code '9' maps to '/' (obscured sky) — wind_N_num must pass it
-    through unchanged (not None), since score_tables.py's tong_luong_may treats
-    '/' as its own distinct na-sentinel, not "missing data"."""
-    decoded = decode_wind("90000", TABLES)
-    assert decoded["wind_N"] == "/"
-    assert decoded["wind_N_num"] == "/"
+def test_decode_wind_bad_digits():
+    assert decode_wind("6abcd") == {"wind_dd": None, "wind_ff": None}
 
 
 def test_decode_weather():
@@ -185,8 +184,9 @@ def test_decode_record_yenbai():
               "tYên Bái  k31214410453")
     decoded = decode_record(record)
 
-    assert decoded["head"] == {"iii": "k31", "VV": "8", "VV_km": 8.0}
-    assert decoded["wind"] == {"wind_N": "8", "wind_N_num": 8, "wind_dd": 0, "wind_ff": 0}
+    assert decoded["head"] == {"iii": "k31", "VV": 8.0}
+    assert decoded["total_cloud"] == {"total_cloud_N": 8}
+    assert decoded["wind"] == {"wind_dd": 0, "wind_ff": 0}
     assert decoded["temperature"] == 29.6
     assert decoded["dewpoint"] == 27.0
     assert decoded["weather"] == {"ww": "Mù", "ww_code": "10", "W1": "Nhiều mây", "W2": "Nhiều mây"}

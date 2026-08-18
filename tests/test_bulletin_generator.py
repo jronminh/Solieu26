@@ -16,7 +16,7 @@ covered at all.
 
 import pytest
 
-from bulletin_generator import (
+from bulletin.bulletin_generator import (
     CLOUD_FIELD_KEYS,
     FIELD_DEFS,
     _covered_hours,
@@ -71,8 +71,9 @@ def test_encode_state_defaults_mandatory_fields_when_uncovered():
     not raise."""
     raw = _encode_state({}, "k31", 21.7, 104.85, "Yên Bái")
     decoded = decode_record(raw)
-    assert decoded["wind"] == {"wind_N": "0", "wind_N_num": 0, "wind_dd": 0, "wind_ff": 0}
-    assert decoded["head"]["VV"] == "0.0"
+    assert decoded["wind"] == {"wind_dd": 0, "wind_ff": 0}
+    assert decoded["total_cloud"] == {"total_cloud_N": 0}
+    assert decoded["head"]["VV"] == 0.0
 
 
 def test_encode_state_omits_uncovered_optional_fields():
@@ -109,7 +110,7 @@ def test_encode_state_orders_cloud_layers_by_slot():
     decoded = decode_record(raw)
     assert len(decoded["cloud"]) == 4
     got_Ns = [layer["amount"] for layer in decoded["cloud"]]
-    expected_Ns = [TABLES["N_oktas"][codes[f"cloud{i}"]] for i in (1, 2, 3, 4)]
+    expected_Ns = [int(TABLES["N_oktas"][codes[f"cloud{i}"]]) for i in (1, 2, 3, 4)]
     assert got_Ns == expected_Ns
 
 
