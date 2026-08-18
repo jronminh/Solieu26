@@ -8,7 +8,7 @@ Adapter: 1 bản ghi quan trắc đã decode (bulletin/decode.py) + giờ quan t
 build_obs() chỉ biến đổi ĐÚNG 1 quan trắc (1 dòng, 1 trạm, 1 giờ) - không
 biết gì về phía dự báo. build_scalar_history() lặp thêm 1 tầng: đọc 24
 file/ngày, MỖI GIỜ lấy 1 trạm đại diện (chưa phân biệt nhiều trạm - việc
-ghép trạm để sau, xem pipeline/scoring.py) - trả về 1 list cùng hình dạng
+ghép trạm để sau, xem pipeline/match_score.py) - trả về 1 list cùng hình dạng
 build_hourly_table() bên pipeline/forecast.py.
 
 Chạy trực tiếp (python -m pipeline.obs) để xem demo trên
@@ -167,7 +167,7 @@ def build_scalar_history(date: datetime.date, local_dir: str) -> list:
 
     Với mỗi giờ 0-23: dựng tên file qua quantrac_filename_at(), lấy bản ghi
     ĐẦU TIÊN có "location" trong file đó (1 trạm đại diện/giờ - matcher
-    hiện chưa cần phân biệt trạm, xem pipeline/scoring.py) rồi build_obs().
+    hiện chưa cần phân biệt trạm, xem pipeline/match_score.py) rồi build_obs().
     File giờ nào không tồn tại trên đĩa (chưa tải/đã mất) -> bỏ qua giờ đó,
     không raise (cùng chính sách "thiếu file -> giảm số dòng, không lỗi"
     như bulletin/decode.py::decode_history()); file tồn tại nhưng không

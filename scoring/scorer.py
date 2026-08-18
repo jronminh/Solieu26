@@ -8,7 +8,7 @@ hàm ứng với đúng 1 trường, xem chi tiết ngay tại từng hàm.
 Mô hình chung: mỗi hàm score_<field> nhận THẲNG 2 DÒNG đã ghép theo giờ —
 `forecast_row` (đầu ra pipeline/forecast.py::build_hourly_table()) và
 `obs` (đầu ra pipeline/obs.py::build_obs()/build_scalar_history()), đúng
-những gì pipeline/scoring.py::join_forecast_obs() đã ghép sẵn. Cả 2 dòng
+những gì pipeline/match_score.py::join_forecast_obs() đã ghép sẵn. Cả 2 dòng
 cùng khoá theo tên 6 trường (`tong_luong_may`, `do_cao_man_may`,
 `hien_tuong`, `huong_gio`, `toc_do_gio`, `tam_nhin`) cộng `"hour"`/`"buoi"`.
 Mỗi hàm score_<field> tự đọc đúng entry BUCKETS["<field>"] của mình và tự

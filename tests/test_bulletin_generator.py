@@ -16,7 +16,7 @@ covered at all.
 
 import pytest
 
-from bulletin.bulletin_generator import (
+from tools.bulletin_generator import (
     CLOUD_FIELD_KEYS,
     FIELD_DEFS,
     _covered_hours,

@@ -2,7 +2,7 @@
 runner.py
 ====================
 Drives one pipeline run: builds cfg from the form, starts the worker thread
-(pipeline.fetch -> pipeline.decode), and polls its queue.Queue() back into the UI.
+(pipeline.fetch -> pipeline.decode_files), and polls its queue.Queue() back into the UI.
 
 Reaches into the App instance (see main.py) for the form variables in app.v,
 the log helper, and the "Làm mới" button; main.py starts its poll loop from
@@ -12,7 +12,7 @@ Anti-freeze contract: _work() runs on a worker thread and never touches
 widgets — it only pushes events onto self.q; the main thread's _poll() reads
 them back via root.after() and applies UI updates itself. It is the ONLY
 place that ties the 2 independent pipeline modules together —
-pipeline/fetch.py (FTP download) and pipeline/decode.py (decode + CSV export)
+pipeline/fetch.py (FTP download) and pipeline/decode_files.py (decode + CSV export)
 don't import each other and neither knows about the other; a decode failure
 can't take down a download already in progress. It runs them as 2 stages and
 reports them as 2 separate outcomes: 'fetch_done' (always, once download
@@ -128,7 +128,7 @@ class Runner:
         """
         Worker thread — only pushes events onto the queue, never touches widgets.
 
-        pipeline.decode được import TRỄ, ngay ở đây (không phải ở đầu file) —
+        pipeline.decode_files được import TRỄ, ngay ở đây (không phải ở đầu file) —
         một lỗi decode (import lỗi hay exception lúc chạy) chỉ làm hỏng giai
         đoạn export, không đụng tới giai đoạn fetch đã báo xong lẫn việc
         main.py tự khởi động (xem module docstring: fetch/decode không import
@@ -149,7 +149,7 @@ class Runner:
             return
 
         try:
-            from pipeline import decode as pipeline_decode
+            from pipeline import decode_files as pipeline_decode
             output_dir = os.path.abspath(cfg.get("output_dir") or config.DEFAULT_OUTPUT_DIR)
             os.makedirs(output_dir, exist_ok=True)
             history_files = pipeline_decode.export_history_by_date(sorted(dl["files"]), output_dir)

@@ -1,5 +1,5 @@
 """
-pipeline/scoring.py
+pipeline/match_score.py
 ====================
 Matcher (join_forecast_obs) + chấm điểm (score_history) - xem TODO.md mục
 "Matcher ghép cặp dự báo ↔ quan trắc". pipeline/forecast.py::build_hourly_table()
@@ -15,7 +15,7 @@ dạng (1 dict/giờ, đủ "hour"+"buoi"+6 field):
                         scoring/scorer.py's score_<field>(), pivot ngược
                         lại thành 1 dòng/(giờ, field).
 
-Chạy trực tiếp (python -m pipeline.scoring) để xem demo trên
+Chạy trực tiếp (python -m pipeline.match_score) để xem demo trên
 tests/fixtures/forecast_sample.csv ghép với
 tests/fixtures/qt_files/full_day_20260810/.
 """

@@ -2,8 +2,8 @@
 pipeline/fetch.py
 ====================
 Khối 1 (lấy file số liệu) — toàn bộ tầng FTP, đứng độc lập hoàn toàn: không
-import pipeline/decode.py, bulletin/decode.py hay bất cứ gì thuộc khối "xử lý
-readable" (pipeline/decode.py) hay khối chấm điểm (pipeline/scoring.py/
+import pipeline/decode_files.py, bulletin/decode.py hay bất cứ gì thuộc khối "xử lý
+readable" (pipeline/decode_files.py) hay khối chấm điểm (pipeline/match_score.py/
 scoring/). Module này vỡ hay lành không phụ thuộc 2 khối kia, và ngược lại.
 
 fetch_files() là điểm vào duy nhất caller (runner.py) cần: connect FTP → login

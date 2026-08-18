@@ -1,7 +1,7 @@
 """
-test_pipeline_scoring.py
+test_pipeline_match_score.py
 ====================
-Unit tests for pipeline/scoring.py's score_history: correct dispatch of
+Unit tests for pipeline/match_score.py's score_history: correct dispatch of
 each field to scoring/scorer.py's score_<field>() (values reused from
 tests/test_scorer.py's hand-verified cases - each score_<field>() now
 takes the WHOLE forecast_row/obs dict, not a scalar), and output row
@@ -16,7 +16,7 @@ import datetime
 
 from pipeline.forecast import build_hourly_table, load_records_csv
 from pipeline.obs import build_scalar_history
-from pipeline.scoring import FIELD_ORDER, join_forecast_obs, score_history
+from pipeline.match_score import FIELD_ORDER, join_forecast_obs, score_history
 
 # hour 1 -> sub_of_hour() == "dem" (see test_sub_of_hour_covers_every_buổi).
 # Values below are the exact True-case pairs hand-verified in

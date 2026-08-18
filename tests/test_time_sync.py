@@ -2,7 +2,7 @@
 test_time_sync.py
 ====================
 Ghép build_hourly_table() (pipeline/forecast.py) với build_scalar_history()
-(pipeline/obs.py) qua join_forecast_obs() (pipeline/scoring.py) - cả 3 hàm
+(pipeline/obs.py) qua join_forecast_obs() (pipeline/match_score.py) - cả 3 hàm
 đều thao tác trên list "1 dict/giờ, đủ hour+6 field", ghép nhau thuần theo
 khoá "hour" (chưa phân biệt trạm).
 
@@ -16,7 +16,7 @@ import pytest
 
 from pipeline.forecast import build_hourly_table, load_records_csv
 from pipeline.obs import build_scalar_history
-from pipeline.scoring import join_forecast_obs
+from pipeline.match_score import join_forecast_obs
 
 
 def _forecast_rows():

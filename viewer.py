@@ -36,7 +36,7 @@ class HistoryViewer:
     # ----- Entry points ---------------------------------------------------
     def open_latest(self):
         """'Xem số liệu' — opens the history viewer showing the MOST RECENT day
-        available on disk. pipeline.decode.export_history_by_date() writes one
+        available on disk. pipeline.decode_files.export_history_by_date() writes one
         history_YYYYMMDD.csv per day, so a multi-day advanced query leaves several
         files behind — the 'Ngày' dropdown inside the viewer switches between them."""
         history_files = self._available_history_files()
@@ -164,7 +164,7 @@ class HistoryViewer:
 
     def _available_history_files(self) -> dict:
         """Scan the current output dir for history_YYYYMMDD.csv files (one per
-        day, written by pipeline.decode.export_history_by_date). Returns {"YYYY-MM-DD": path},
+        day, written by pipeline.decode_files.export_history_by_date). Returns {"YYYY-MM-DD": path},
         sorted by nothing in particular — callers sort the keys as needed."""
         out_dir = self._current_output_dir()
         found = {}

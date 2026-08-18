@@ -5,7 +5,7 @@ Unit tests for scoring/scorer.py: solve_ceiling and the 6 score_<field>
 functions, plus sub_of_hour (the giờ -> buổi mapping score_hien_tuong uses).
 
 Every score_<field>() takes (forecast_row, obs) - 2 whole rows already
-synced by hour (pipeline/scoring.py::join_forecast_obs()'s output shape) -
+synced by hour (pipeline/match_score.py::join_forecast_obs()'s output shape) -
 so tests build a 1-key forecast_row dict per case instead of passing a
 scalar directly.
 """

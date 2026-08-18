@@ -1,7 +1,7 @@
 """
-test_pipeline_decode.py
+test_pipeline_decode_files.py
 ====================
-Unit tests for pipeline/decode.py (flatten_record, cloud_layers_needed,
+Unit tests for pipeline/decode_files.py (flatten_record, cloud_layers_needed,
 write_csv, export_history_by_date) — the "xử lý số liệu thành readable"
 block, independent from FTP. The filename<->datetime helpers
 (quantrac_filename_at/parse_obs_dt) live in bulletin/filename.py now — see
@@ -14,7 +14,7 @@ import csv
 import os
 
 from bulletin.decode import decode_qt_file
-from pipeline.decode import (
+from pipeline.decode_files import (
     cloud_layers_needed,
     export_history_by_date,
     flatten_record,

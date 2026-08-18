@@ -1,5 +1,5 @@
 """
-pipeline/decode.py
+pipeline/decode_files.py
 ====================
 Khối 2 (xử lý số liệu thành readable) — decode file bulletin đã có sẵn trên
 đĩa (`bulletin/decode.py`, KHÔNG PHẢI module này dù trùng tên "decode") rồi
