@@ -1,5 +1,5 @@
 """
-pipeline_obs.py
+pipeline/obs.py
 ====================
 Adapter: 1 bản ghi quan trắc đã decode (bulletin/decode.py) + giờ quan trắc
 -> dict "obs" đúng 6 khoá field mà scoring/scorer.py cần
@@ -8,10 +8,10 @@ Adapter: 1 bản ghi quan trắc đã decode (bulletin/decode.py) + giờ quan t
 build_obs() chỉ biến đổi ĐÚNG 1 quan trắc (1 dòng, 1 trạm, 1 giờ) - không
 biết gì về phía dự báo. build_scalar_history() lặp thêm 1 tầng: đọc 24
 file/ngày, MỖI GIỜ lấy 1 trạm đại diện (chưa phân biệt nhiều trạm - việc
-ghép trạm để sau, xem pipeline_scoring.py) - trả về 1 list cùng hình dạng
-build_hourly_table() bên pipeline_forecast.py.
+ghép trạm để sau, xem pipeline/scoring.py) - trả về 1 list cùng hình dạng
+build_hourly_table() bên pipeline/forecast.py.
 
-Chạy trực tiếp (python pipeline_obs.py) để xem demo trên
+Chạy trực tiếp (python -m pipeline.obs) để xem demo trên
 tests/fixtures/qt_files/Qt26081000.txt và
 tests/fixtures/qt_files/full_day_20260810/.
 """
@@ -123,17 +123,11 @@ _WW_TO_MEGA = {
 def ww_code_to_mega(ww_code):
     """Mã ww GỐC (decode_weather()'s "ww_code") -> nhãn mega-bucket
     (BUCKETS["hien_tuong"]["mega_buckets"]). KHÔNG báo cáo mã (ww_code is
-    None - bản ghi thiếu hẳn group thời tiết) nghĩa là "không có hiện
-    tượng gì đáng kể" -> "N_0", không phải thiếu dữ liệu (không có hiện
-    tượng cũng là 1 trạng thái có ý nghĩa). Mã CÓ báo cáo nhưng không khớp
-    nhóm nào (lỗi giải mã/mã lạ ngoài 00-99) mới -> None (bỏ cặp thật sự,
-    xem score_hien_tuong()) - _WW_TO_MEGA đã phủ đủ 00-99 nên ca này gần
-    như không xảy ra với dữ liệu hợp lệ.
-
-    CẦN THEO DÕI: giả định "không báo cáo = không có gì đáng kể" chưa
-    kiểm chứng chắc chắn - có thể 1 số ca "không báo cáo" thực ra là lỗi
-    truyền/mất dữ liệu, không phải quan trắc viên xác nhận trời quang
-    (xem TODO.md)."""
+    None) -> "N_0", không phải thiếu dữ liệu (giả định này chưa kiểm chứng
+    chắc chắn, xem TODO.md). Mã CÓ báo cáo nhưng không khớp nhóm nào (lỗi
+    giải mã/mã lạ ngoài 00-99) mới -> None (bỏ cặp thật sự, xem
+    score_hien_tuong()) - _WW_TO_MEGA đã phủ đủ 00-99 nên ca này gần như
+    không xảy ra với dữ liệu hợp lệ."""
     if ww_code is None:
         return "N_0"
     return _WW_TO_MEGA.get(ww_code)
@@ -169,18 +163,18 @@ def build_obs(record: dict, hour: int) -> dict:
 def build_scalar_history(date: datetime.date, local_dir: str) -> list:
     """
     date: ngày quan trắc. local_dir: thư mục chứa file QtYYMMDDHH.txt
-    (cùng quy ước tham số với pipeline_csv.py::download_files()).
+    (cùng quy ước tham số với pipeline/fetch.py::download_files()).
 
     Với mỗi giờ 0-23: dựng tên file qua quantrac_filename_at(), lấy bản ghi
     ĐẦU TIÊN có "location" trong file đó (1 trạm đại diện/giờ - matcher
-    hiện chưa cần phân biệt trạm, xem pipeline_scoring.py) rồi build_obs().
+    hiện chưa cần phân biệt trạm, xem pipeline/scoring.py) rồi build_obs().
     File giờ nào không tồn tại trên đĩa (chưa tải/đã mất) -> bỏ qua giờ đó,
     không raise (cùng chính sách "thiếu file -> giảm số dòng, không lỗi"
     như bulletin/decode.py::decode_history()); file tồn tại nhưng không
     bản ghi nào có "location" thì cũng bỏ qua giờ đó.
 
     Trả về: list dict, CÙNG HÌNH DẠNG build_hourly_table()
-    (pipeline_forecast.py) - mỗi phần tử 1 giờ, đủ khoá "hour" + "buoi" +
+    (pipeline/forecast.py) - mỗi phần tử 1 giờ, đủ khoá "hour" + "buoi" +
     6 field, sắp theo giờ tăng dần. Giờ thiếu dữ liệu thì vắng mặt trong
     list (không
     phải None) - khác build_hourly_table() ở chỗ đó (bên forecast pivot đủ

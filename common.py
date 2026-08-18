@@ -1,5 +1,5 @@
 """
-gui_common.py
+common.py
 ====================
 Constants + small helpers shared across the GUI modules. No Tkinter App state
 lives here (only the stdlib `tkinter` messagebox, used by report_open) — keeps

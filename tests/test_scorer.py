@@ -5,7 +5,7 @@ Unit tests for scoring/scorer.py: solve_ceiling and the 6 score_<field>
 functions, plus sub_of_hour (the giờ -> buổi mapping score_hien_tuong uses).
 
 Every score_<field>() takes (forecast_row, obs) - 2 whole rows already
-synced by hour (pipeline_scoring.py::join_forecast_obs()'s output shape) -
+synced by hour (pipeline/scoring.py::join_forecast_obs()'s output shape) -
 so tests build a 1-key forecast_row dict per case instead of passing a
 scalar directly.
 """
@@ -227,10 +227,10 @@ def test_score_hien_tuong_missing_buoi_is_none():
 
 
 def test_score_hien_tuong_no_ww_reported_scores_false_not_none():
-    """Trạm không báo cáo ww (pipeline_obs.py::ww_code_to_mega(None) ==
+    """Trạm không báo cáo ww (pipeline/obs.py::ww_code_to_mega(None) ==
     "N_0") mà dự báo lại chọn 1 mega khác "N_0" -> phải chấm SAI (False),
     không bị bỏ cặp."""
-    from pipeline_obs import ww_code_to_mega
+    from pipeline.obs import ww_code_to_mega
 
     obs = {"hien_tuong": ww_code_to_mega(None), "buoi": "dem"}
     forecast_row = {"hien_tuong": "dong_mua_rao", "buoi": "dem"}

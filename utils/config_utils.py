@@ -4,7 +4,7 @@ config_utils.py
 Path/FTP constants + the CONFIG dict + config.ini load/save.
 
 No FTP calls, no decoding — this is the settings layer everything else
-(decode.py, pipeline_csv.py, gui.py) reads from. gui.py is the only writer: it calls
+(decode.py, pipeline/decode.py, main.py) reads from. main.py is the only writer: it calls
 apply_config_file() once at startup and write_default_config() whenever the
 user restores default settings from the "Thiết lập" dialog (saving individual
 keys goes through utils.ini_utils.update_ini_key() instead).
@@ -192,7 +192,7 @@ def apply_config_file(path: str, log):
     might sit under Program Files.
 
     `log` is forwarded to load_config_file() for its per-key WARNs — pass the
-    GUI's own log sink (gui.py buffers calls made before its log widget exists yet).
+    GUI's own log sink (main.py buffers calls made before its log widget exists yet).
     """
     path = path or os.path.join(TEMP_DL_DIR, CONFIG_FILENAME)
     os.makedirs(os.path.dirname(path) or ".", exist_ok=True)

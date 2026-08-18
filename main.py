@@ -1,20 +1,20 @@
 """
-gui.py
+main.py
 ===================
 Tkinter GUI entry point + the App class (the spine): main window, logging,
 info panel, and wiring for the other pieces.
 
 Heavier pieces live in their own modules as standalone classes — runner.Runner
 (pipeline run + worker thread + queue poll), auto_query.AutoQuery (the
-"Tự động truy vấn" timer), history_viewer.HistoryViewer ("Xem số liệu"),
+"Tự động truy vấn" timer), viewer.HistoryViewer ("Xem số liệu"),
 dialogs.SettingsDialog ("Thiết lập") and dialogs.AdvancedDialog ("Tải số
 liệu") — each constructed once in App.__init__ and holding the `app` instance
 so it can reach back into shared state (self.app.v, self.app._log,
 self.app._dialogs, ...).
 
-Run:  python gui.py [config.ini path]
-Requires utils/config_utils.py/gui_common.py/runner.py/auto_query.py/
-history_viewer.py/dialogs.py, plus the bulletin/ and utils/ packages, in the
+Run:  python main.py [config.ini path]
+Requires utils/config_utils.py/common.py/runner.py/auto_query.py/
+viewer.py/dialogs.py, plus the bulletin/ and utils/ packages, in the
 same folder.
 
 Tác giả: congminh9981 (congminh9981@gmail.com); Claude (Anthropic) — đồng tác giả.
@@ -28,10 +28,10 @@ import tkinter as tk
 from tkinter import ttk, scrolledtext
 
 from utils import config_utils as config
-from gui_common import LOG_COLORS
+from common import LOG_COLORS
 from runner import Runner
 from auto_query import AutoQuery
-from history_viewer import HistoryViewer
+from viewer import HistoryViewer
 from dialogs import SettingsDialog, AdvancedDialog
 
 
@@ -252,7 +252,7 @@ class App:
 
 
 def main():
-    # Allows: python gui.py [config_ini_path]
+    # Allows: python main.py [config_ini_path]
     config_path = sys.argv[1] if len(sys.argv) > 1 else None
     root = tk.Tk()
     App(root, config_path=config_path)

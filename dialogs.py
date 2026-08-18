@@ -4,11 +4,10 @@ dialogs.py
 The two small Toplevel dialogs hung off the main window: "Thiết lập" (settings)
 and "Tải số liệu" (advanced date-range query).
 
-Both are standalone classes (not mixins) — each takes the App instance in its
-constructor and reaches back into it (`self.app....`) for shared state (the
-form variables in app.v, the log/dialog-registry helpers, the auto-query
-timer). gui.py creates ONE instance of each per App and keeps it around, so
-e.g. AdvancedDialog's own widget refs survive across "Tải số liệu" opens/closes.
+Each reaches into the App instance (see main.py) for app.v, the
+log/dialog-registry helpers, and the auto-query timer; AdvancedDialog's
+widget refs survive across "Tải số liệu" opens/closes since main.py keeps
+one instance for the app's lifetime.
 """
 
 import datetime
@@ -18,7 +17,7 @@ import tkinter as tk
 from tkinter import ttk, filedialog, messagebox
 
 from utils import config_utils as config
-from gui_common import report_open, make_dialog, center_over_root
+from common import report_open, make_dialog, center_over_root
 from utils.file_utils import open_folder
 from utils.ini_utils import update_ini_key
 
@@ -67,8 +66,8 @@ class SettingsDialog:
 
         path_box.columnconfigure(1, weight=1)
 
-        # Auto-query: re-runs the pipeline on a timer (system time → "Về hiện tại" →
-        # "Làm mới"). 0 = tắt tự động truy vấn.
+        # Edits AutoQuery's interval/unit directly (auto_query.py owns the
+        # scheduling logic and the "0 = off" convention).
         auto_box = ttk.LabelFrame(frm, text="Tự động truy vấn", padding=8)
         auto_box.pack(fill="x", pady=(8, 0))
         auto_entry = ttk.Entry(auto_box, textvariable=app.v["auto_value"], width=6)

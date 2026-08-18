@@ -40,7 +40,7 @@ REV_W1W2       = _reverse_table(TABLES["W1W2"])
 # =============================================================================
 
 def encode_head(station_code: str, vv_code: str) -> str:
-    """station_code: 'kXX' (3 chars — matches gui_common.STATIONS keys and
+    """station_code: 'kXX' (3 chars — matches common.STATIONS keys and
     decode_tail's station_code). vv_code: raw 2-digit VV code (00-99), NOT
     a km value — decode.vv_value is piecewise/lossy, so there's no single
     correct code for a given distance."""

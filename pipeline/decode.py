@@ -1,21 +1,21 @@
 """
-pipeline_csv.py
+pipeline/decode.py
 ====================
 Khối 2 (xử lý số liệu thành readable) — decode file bulletin đã có sẵn trên
-đĩa (`bulletin/decode.py`) rồi làm phẳng thành CSV. Nhận thẳng 1 list đường
-dẫn file cục bộ; không biết gì về FTP (khối 1, xem `pipeline_fetch.py`) và
-không import module đó — độc lập hoàn toàn, module này vỡ không ảnh hưởng
-khối lấy file, và ngược lại. Named "pipeline_csv" (not just "pipeline") to
-stay distinct from the forecast-scoring pipeline in score_tables.py/scorer.py
-— this module produces the display-oriented CSV export only, unaffected by
-the type coercion decode.py does for score_tables.py's benefit.
+đĩa (`bulletin/decode.py`, KHÔNG PHẢI module này dù trùng tên "decode") rồi
+làm phẳng thành CSV. Nhận thẳng 1 list đường dẫn file cục bộ; không biết gì
+về FTP (khối 1, xem `pipeline/fetch.py`) và không import module đó — độc
+lập hoàn toàn, module này vỡ không ảnh hưởng khối lấy file, và ngược lại.
+This module produces the display-oriented CSV export only, unaffected by
+the type coercion bulletin/decode.py does for score_tables.py's benefit.
 
-Built on decode.py (bulletin → dict decoding) only — no config_utils.py dependency,
-no log(level, msg) callback (unlike pipeline_fetch.py, nothing here reports
-progress; a caller that wants per-step logging does it around these calls).
-GUI-only — not runnable standalone. gui.py imports this module lazily (right
+Built on bulletin/decode.py (bulletin → dict decoding) only — no
+config_utils.py dependency, no log(level, msg) callback (unlike
+pipeline/fetch.py, nothing here reports progress; a caller that wants
+per-step logging does it around these calls).
+GUI-only — not runnable standalone. runner.py imports this module lazily (right
 where export_history_by_date() is called) so a decode-layer failure here
-can't take down the fetch step or gui.py's own startup — see gui.py::_work().
+can't take down the fetch step or main.py's own startup — see runner.py::_work().
 """
 
 import os

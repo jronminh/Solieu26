@@ -6,9 +6,9 @@ mây, dùng khi giải quan trắc trước khi chấm) và 6 hàm score_<field>
 hàm ứng với đúng 1 trường, xem chi tiết ngay tại từng hàm.
 
 Mô hình chung: mỗi hàm score_<field> nhận THẲNG 2 DÒNG đã ghép theo giờ —
-`forecast_row` (đầu ra pipeline_forecast.py::build_hourly_table()) và
-`obs` (đầu ra pipeline_obs.py::build_obs()/build_scalar_history()), đúng
-những gì pipeline_scoring.py::join_forecast_obs() đã ghép sẵn. Cả 2 dòng
+`forecast_row` (đầu ra pipeline/forecast.py::build_hourly_table()) và
+`obs` (đầu ra pipeline/obs.py::build_obs()/build_scalar_history()), đúng
+những gì pipeline/scoring.py::join_forecast_obs() đã ghép sẵn. Cả 2 dòng
 cùng khoá theo tên 6 trường (`tong_luong_may`, `do_cao_man_may`,
 `hien_tuong`, `huong_gio`, `toc_do_gio`, `tam_nhin`) cộng `"hour"`/`"buoi"`.
 Mỗi hàm score_<field> tự đọc đúng entry BUCKETS["<field>"] của mình và tự
@@ -251,14 +251,14 @@ def score_hien_tuong(forecast_row, obs):
     forecast_row["hien_tuong"] : nhãn mega-bucket (loại hiện tượng) dự báo
         viên chọn.
     forecast_row["buoi"] : buổi dự báo ('toi'/'dem'/'sang'/'trua'/'chieu') -
-        pipeline_forecast.py::build_hourly_table() tự suy từ giờ của
+        pipeline/forecast.py::build_hourly_table() tự suy từ giờ của
         chính dòng đó (sub_of_hour()) - dự báo viên chỉ chọn MEGA cho 1
         khoảng giờ, KHÔNG tự chọn buổi.
     obs["hien_tuong"] : mega ĐÃ quy đổi sẵn từ mã ww gốc — adapter
-        (pipeline_obs.py::ww_code_to_mega()) làm việc này trước khi gọi vào
+        (pipeline/obs.py::ww_code_to_mega()) làm việc này trước khi gọi vào
         đây, không phải mã ww thô. Không báo cáo ww cũng ra "N_0", không
         phải None (xem ww_code_to_mega()).
-    obs["buoi"] : buổi quan trắc - pipeline_obs.py::build_obs() tự suy từ
+    obs["buoi"] : buổi quan trắc - pipeline/obs.py::build_obs() tự suy từ
         giờ quan trắc, cùng cách tính sub_of_hour() như bên dự báo.
 
     Đúng khi: MEGA khớp CHÍNH XÁC (tolerance 0) VÀ buổi lệch <= sub_tolerance

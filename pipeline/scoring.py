@@ -1,9 +1,9 @@
 """
-pipeline_scoring.py
+pipeline/scoring.py
 ====================
 Matcher (join_forecast_obs) + chấm điểm (score_history) - xem TODO.md mục
-"Matcher ghép cặp dự báo ↔ quan trắc". pipeline_forecast.py::build_hourly_table()
-và pipeline_obs.py::build_scalar_history() đều trả về 1 list cùng hình
+"Matcher ghép cặp dự báo ↔ quan trắc". pipeline/forecast.py::build_hourly_table()
+và pipeline/obs.py::build_scalar_history() đều trả về 1 list cùng hình
 dạng (1 dict/giờ, đủ "hour"+"buoi"+6 field):
 
   join_forecast_obs()  ghép 2 list đó theo khoá "hour", không tự
@@ -15,7 +15,7 @@ dạng (1 dict/giờ, đủ "hour"+"buoi"+6 field):
                         scoring/scorer.py's score_<field>(), pivot ngược
                         lại thành 1 dòng/(giờ, field).
 
-Chạy trực tiếp (python pipeline_scoring.py) để xem demo trên
+Chạy trực tiếp (python -m pipeline.scoring) để xem demo trên
 tests/fixtures/forecast_sample.csv ghép với
 tests/fixtures/qt_files/full_day_20260810/.
 """
@@ -48,9 +48,9 @@ _SCORERS = {
 
 def join_forecast_obs(forecast_rows: list, scalar_history: list) -> list:
     """
-    forecast_rows: đầu ra pipeline_forecast.py::build_hourly_table() (1
+    forecast_rows: đầu ra pipeline/forecast.py::build_hourly_table() (1
     dict/giờ, đủ "hour"+"buoi"+6 field).
-    scalar_history: đầu ra pipeline_obs.py::build_scalar_history() - cùng
+    scalar_history: đầu ra pipeline/obs.py::build_scalar_history() - cùng
     hình dạng, không mang định danh trạm.
 
     Ghép theo "hour": mỗi phần tử scalar_history tra thẳng vào
@@ -106,8 +106,8 @@ def score_history(joined_rows: list) -> list:
 if __name__ == "__main__":
     import datetime
 
-    from pipeline_forecast import build_hourly_table, load_records_csv
-    from pipeline_obs import build_scalar_history
+    from pipeline.forecast import build_hourly_table, load_records_csv
+    from pipeline.obs import build_scalar_history
 
     forecast_rows = build_hourly_table(load_records_csv("tests/fixtures/forecast_sample.csv"))
     scalar_history = build_scalar_history(

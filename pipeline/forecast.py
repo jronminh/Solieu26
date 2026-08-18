@@ -1,5 +1,5 @@
 """
-pipeline_forecast.py
+pipeline/forecast.py
 ====================
 Việc dựng lại pipeline dự báo (bản trước đã xoá - xem TODO.md mục VỠ).
 Input: nhiều bản ghi {start_hour, end_hour, field_name, bucket_selected} -
@@ -10,7 +10,7 @@ scoring/scorer.py::sub_of_hour()) - cùng hình dạng obs bên
 scoring/scorer.py, để gọi thẳng score_<field>(forecast_row, obs_row) không
 cần biến đổi thêm.
 
-Chạy trực tiếp (python pipeline_forecast.py) để xem demo trên
+Chạy trực tiếp (python -m pipeline.forecast) để xem demo trên
 tests/fixtures/forecast_sample.csv.
 """
 

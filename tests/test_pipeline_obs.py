@@ -1,7 +1,7 @@
 """
 test_pipeline_obs.py
 ====================
-Unit tests for pipeline_obs.py: wind_dd_to_huong_gio, ww_code_to_mega,
+Unit tests for pipeline/obs.py: wind_dd_to_huong_gio, ww_code_to_mega,
 build_obs (the 6-key obs adapter scoring/scorer.py expects), and
 build_scalar_history (24-file/day loop on top of build_obs).
 """
@@ -12,7 +12,7 @@ import shutil
 
 from bulletin.decode import decode_qt_file
 from bulletin.filename import quantrac_filename_at
-from pipeline_obs import build_obs, build_scalar_history, ww_code_to_mega, wind_dd_to_huong_gio
+from pipeline.obs import build_obs, build_scalar_history, ww_code_to_mega, wind_dd_to_huong_gio
 from scoring.score_tables import BUCKETS
 
 LABELS = BUCKETS["huong_gio"]["labels"]
@@ -100,7 +100,7 @@ def test_ww_code_to_mega_unknown_code():
 
 def test_build_obs_real_fixture_yenbai(qt_00):
     """Hand-verified against Qt26081000.txt's first (Yên Bái) record — same
-    record test_pipeline_csv.py's flatten_record test is anchored to."""
+    record test_pipeline_decode.py's flatten_record test is anchored to."""
     records = decode_qt_file(qt_00)
     obs = build_obs(records[0], hour=0)
     assert obs == {

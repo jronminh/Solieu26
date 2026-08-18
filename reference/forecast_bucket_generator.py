@@ -4,7 +4,7 @@ forecast_bucket_generator.py — FILE THAM KHẢO, KHÔNG CHẠY ĐƯỢC
 Archived 2026-08-18: its logic module `pipeline_forecast.py` (the imports
 below) was deleted after `scoring/score_tables.py` dropped the "kind" field
 its dispatch depended on and the tool was judged not worth fixing — it had
-never been integrated into gui.py/dialogs.py anyway (see TODO.md). Kept here
+never been integrated into main.py/dialogs.py anyway (see TODO.md). Kept here
 only as a design reference for the widget layout / CRUD shape when stage 2
 ("Dự báo") of the scoring pipeline gets a real UI.
 
@@ -31,8 +31,9 @@ No station/trạm or ngày dự báo anywhere - the micro-database is scoped to
 1 station/1 day implicitly (by whoever is running the tool); the schema
 intentionally carries only start_hour/end_hour/data_name/bucket_selected.
 
-Imports only the logic module above and nothing else project-local. Run:
-    python forecast_bucket_generator.py
+Imports only the logic module above and nothing else project-local — that
+module no longer exists, so this file cannot run (see the archive note
+above).
 """
 
 import os

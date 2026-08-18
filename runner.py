@@ -2,19 +2,17 @@
 runner.py
 ====================
 Drives one pipeline run: builds cfg from the form, starts the worker thread
-(pipeline_fetch -> pipeline_csv), and polls its queue.Queue() back into the UI.
+(pipeline.fetch -> pipeline.decode), and polls its queue.Queue() back into the UI.
 
-Runner is a standalone class (not a mixin) — like SettingsDialog/AdvancedDialog
-in dialogs.py, it takes the App instance in its constructor and reaches back
-into it (self.app...) for shared state (the form variables in app.v, the log
-helper, the "Làm mới" button). gui.py creates ONE instance per App, kept for
-the app's lifetime, and starts its poll loop from App.__init__.
+Reaches into the App instance (see main.py) for the form variables in app.v,
+the log helper, and the "Làm mới" button; main.py starts its poll loop from
+App.__init__.
 
 Anti-freeze contract: _work() runs on a worker thread and never touches
 widgets — it only pushes events onto self.q; the main thread's _poll() reads
 them back via root.after() and applies UI updates itself. It is the ONLY
 place that ties the 2 independent pipeline modules together —
-pipeline_fetch.py (FTP download) and pipeline_csv.py (decode + CSV export)
+pipeline/fetch.py (FTP download) and pipeline/decode.py (decode + CSV export)
 don't import each other and neither knows about the other; a decode failure
 can't take down a download already in progress. It runs them as 2 stages and
 reports them as 2 separate outcomes: 'fetch_done' (always, once download
@@ -31,7 +29,7 @@ import threading
 from tkinter import messagebox
 
 from utils import config_utils as config
-import pipeline_fetch
+from pipeline import fetch as pipeline_fetch
 
 
 class Runner:
@@ -130,13 +128,11 @@ class Runner:
         """
         Worker thread — only pushes events onto the queue, never touches widgets.
 
-        2 giai đoạn ĐỘC LẬP, khớp với việc pipeline_fetch.py và pipeline_csv.py
-        không import lẫn nhau: fetch (luôn chạy, không phụ thuộc gì ở khối 2)
-        rồi export (chỉ cần biết khối 1 có để lại file hay không, không quan
-        tâm khối 1 "thành công" theo nghĩa nào khác). pipeline_csv được import
-        TRỄ, ngay ở đây — một lỗi decode (import lỗi hay exception lúc chạy)
-        chỉ làm hỏng giai đoạn export, không đụng tới giai đoạn fetch đã báo
-        xong lẫn việc gui.py tự khởi động.
+        pipeline.decode được import TRỄ, ngay ở đây (không phải ở đầu file) —
+        một lỗi decode (import lỗi hay exception lúc chạy) chỉ làm hỏng giai
+        đoạn export, không đụng tới giai đoạn fetch đã báo xong lẫn việc
+        main.py tự khởi động (xem module docstring: fetch/decode không import
+        lẫn nhau).
         """
         q = self.q
         def log(level, msg): q.put(("log", level, msg))
@@ -153,10 +149,10 @@ class Runner:
             return
 
         try:
-            import pipeline_csv
+            from pipeline import decode as pipeline_decode
             output_dir = os.path.abspath(cfg.get("output_dir") or config.DEFAULT_OUTPUT_DIR)
             os.makedirs(output_dir, exist_ok=True)
-            history_files = pipeline_csv.export_history_by_date(sorted(dl["files"]), output_dir)
+            history_files = pipeline_decode.export_history_by_date(sorted(dl["files"]), output_dir)
             q.put(("export_done", {"output_dir": output_dir, "history_files": history_files}))
         except Exception as e:
             q.put(("export_error", f"{type(e).__name__}: {e}"))

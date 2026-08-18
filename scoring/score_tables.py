@@ -26,7 +26,7 @@ nào cũng có đủ):
   windows   : [(lo,hi),...] cửa sổ chồng nhau (quan trắc so trực tiếp, không bucket hóa)
 
 Quy đổi từ MÃ QUAN TRẮC THÔ (độ gió, mã ww...) sang từ vựng bucket ở đây
-KHÔNG nằm trong module này - đó là việc của adapter (pipeline_obs.py), xem
+KHÔNG nằm trong module này - đó là việc của adapter (pipeline/obs.py), xem
 vd wind_dd_to_huong_gio()/ww_code_to_mega() ở đó. Module này chỉ mô tả HÌNH
 DẠNG bucket (dự báo viên chọn gì), không biết quan trắc thô ánh xạ vào đó
 thế nào.
@@ -122,7 +122,7 @@ BUCKETS = {
         },
         "mega_tolerance": 0,            # khớp chính xác 100%
         # Quy đổi MÃ ww GỐC -> mega không còn ở đây - xem
-        # pipeline_obs.py::ww_code_to_mega() (chuyển 2026-08-18, cùng lý do
+        # pipeline/obs.py::ww_code_to_mega() (chuyển 2026-08-18, cùng lý do
         # wind_dd_to_huong_gio() không nằm ở BUCKETS["huong_gio"]).
         # --- TẦNG SUB: buổi trong ngày, ±1 kẹp mép ---
         "sub_buckets": ["toi", "dem", "sang", "trua", "chieu"],

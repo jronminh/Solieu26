@@ -1,13 +1,13 @@
 """
 test_pipeline_forecast.py
 ====================
-Unit tests for pipeline_forecast.py: build_hourly_table's merge/validation
+Unit tests for pipeline/forecast.py: build_hourly_table's merge/validation
 rules and load_records_csv's CSV -> records coercion.
 """
 
 import pytest
 
-from pipeline_forecast import build_hourly_table, load_records_csv
+from pipeline.forecast import build_hourly_table, load_records_csv
 
 
 def _rec(start, end, field, bucket):

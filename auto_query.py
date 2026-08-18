@@ -2,13 +2,10 @@
 auto_query.py
 ====================
 The "Tự động truy vấn" timer: re-runs the pipeline on a schedule via
-root.after(), independent of the log/info-panel widgets that live in gui.py.
+root.after(), independent of the log/info-panel widgets that live in main.py.
 
-AutoQuery is a standalone class (not a mixin) — like SettingsDialog/
-AdvancedDialog in dialogs.py, it takes the App instance in its constructor
-and reaches back into it (self.app...) for shared state (app.v["auto_value"]/
-["auto_unit"], the log helper, app.runner to check/start a run). gui.py
-creates ONE instance per App and starts its first tick from App.__init__.
+Reaches into the App instance (see main.py) for app.v["auto_value"]/
+["auto_unit"], the log helper, and app.runner to check/start a run.
 
 pause()/resume() are the only entry points other modules should use to stop
 and restart the timer (e.g. while the "Tải số liệu" advanced-mode dialog is

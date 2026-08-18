@@ -1,12 +1,12 @@
 """
-pipeline_fetch.py
+pipeline/fetch.py
 ====================
 Khối 1 (lấy file số liệu) — toàn bộ tầng FTP, đứng độc lập hoàn toàn: không
-import pipeline_csv.py, bulletin/decode.py hay bất cứ gì thuộc khối "xử lý
-readable" (pipeline_csv.py) hay khối chấm điểm (pipeline_scoring.py/
+import pipeline/decode.py, bulletin/decode.py hay bất cứ gì thuộc khối "xử lý
+readable" (pipeline/decode.py) hay khối chấm điểm (pipeline/scoring.py/
 scoring/). Module này vỡ hay lành không phụ thuộc 2 khối kia, và ngược lại.
 
-fetch_files() là điểm vào duy nhất caller (gui.py) cần: connect FTP → login
+fetch_files() là điểm vào duy nhất caller (runner.py) cần: connect FTP → login
 → download_files() → quit, trả về danh sách file cục bộ đã có sẵn (tải mới
 hoặc đã tồn tại từ trước). Không biết gì về decode/CSV — "tải xong" ở đây
 chỉ có nghĩa là "có file trên đĩa hay không", ai dùng file đó làm gì là việc
@@ -17,8 +17,8 @@ Mỗi lời gọi log(level, msg) dùng LEVEL 4 ký tự cố định:
     SKIP  skipped (already there) MISS  file missing on server
     WARN  warning                 ERR   error
 
-Chạy trực tiếp (python pipeline_fetch.py) không có demo CLI — cần config FTP
-thật, dùng qua gui.py.
+Chạy trực tiếp (python -m pipeline.fetch) không có demo CLI — cần config FTP
+thật, dùng qua main.py.
 """
 
 import datetime
@@ -125,7 +125,7 @@ def download_files(ftp: FTP, cfg: dict, log, progress=None) -> dict:
 def fetch_files(cfg: dict, log, progress=None) -> dict:
     """
     Connect FTP (cfg['ftp_host']/ftp_user/ftp_pass/ftp_timeout) → login →
-    download_files() → quit. Raises on connect/login failure — caller (gui.py)
+    download_files() → quit. Raises on connect/login failure — caller (runner.py)
     tự bắt và báo lỗi riêng, KHÔNG ảnh hưởng gì tới việc khối này đã tự chứa
     trọn vẹn tầng FTP.
 

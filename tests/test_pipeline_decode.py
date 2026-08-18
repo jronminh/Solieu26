@@ -1,12 +1,12 @@
 """
-test_pipeline_csv.py
+test_pipeline_decode.py
 ====================
-Unit tests for pipeline_csv.py (flatten_record, cloud_layers_needed,
+Unit tests for pipeline/decode.py (flatten_record, cloud_layers_needed,
 write_csv, export_history_by_date) — the "xử lý số liệu thành readable"
 block, independent from FTP. The filename<->datetime helpers
 (quantrac_filename_at/parse_obs_dt) live in bulletin/filename.py now — see
-test_filename.py. The FTP layer (pipeline_fetch.py's download_files/
-fetch_files) and gui.py's _work() orchestration need a live/mocked server
+test_filename.py. The FTP layer (pipeline/fetch.py's download_files/
+fetch_files) and runner.py's _work() orchestration need a live/mocked server
 (and a mocked worker-thread/queue) and aren't covered here.
 """
 
@@ -14,7 +14,7 @@ import csv
 import os
 
 from bulletin.decode import decode_qt_file
-from pipeline_csv import (
+from pipeline.decode import (
     cloud_layers_needed,
     export_history_by_date,
     flatten_record,

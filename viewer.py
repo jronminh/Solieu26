@@ -1,15 +1,13 @@
 """
-history_viewer.py
+viewer.py
 ====================
 The "Xem số liệu" window: load a history_YYYYMMDD.csv into a Treeview, filter
 by trạm/giờ/ngày, sort by column, toggle raw/data mode, and pick visible columns.
 
-HistoryViewer is a standalone class (not a mixin) — it takes the App instance
-in its constructor and reaches back into it (`self.app....`) for the handful
-of things it needs: the root window, the shared log/dialog-registry helpers,
-and the output-dir/config state. gui.py creates ONE HistoryViewer per App and
-keeps it around, so its own state (hidden_cols, the open viewer Toplevel...)
-persists across "Xem số liệu" clicks.
+Reaches into the App instance (see main.py) for the root window, the shared
+log/dialog-registry helpers, and the output-dir/config state; main.py keeps
+one HistoryViewer per App, so hidden_cols and the open viewer Toplevel
+persist across "Xem số liệu" clicks.
 """
 
 import csv
@@ -19,7 +17,7 @@ import tkinter as tk
 from tkinter import ttk, messagebox
 
 from utils import config_utils as config
-from gui_common import (
+from common import (
     STATIONS, STATION_NAMES, NAME_TO_CODE, ALL_STATIONS,
     HOURS, ALL_HOURS, HISTORY_CSV_RE, ALWAYS_HIDDEN_VIEWER_COLUMNS,
     _is_numeric_viewer_column, report_open, make_dialog, center_over_root,
@@ -38,7 +36,7 @@ class HistoryViewer:
     # ----- Entry points ---------------------------------------------------
     def open_latest(self):
         """'Xem số liệu' — opens the history viewer showing the MOST RECENT day
-        available on disk. pipeline_csv.export_history_by_date() writes one
+        available on disk. pipeline.decode.export_history_by_date() writes one
         history_YYYYMMDD.csv per day, so a multi-day advanced query leaves several
         files behind — the 'Ngày' dropdown inside the viewer switches between them."""
         history_files = self._available_history_files()
@@ -166,7 +164,7 @@ class HistoryViewer:
 
     def _available_history_files(self) -> dict:
         """Scan the current output dir for history_YYYYMMDD.csv files (one per
-        day, written by pipeline_csv.export_history_by_date). Returns {"YYYY-MM-DD": path},
+        day, written by pipeline.decode.export_history_by_date). Returns {"YYYY-MM-DD": path},
         sorted by nothing in particular — callers sort the keys as needed."""
         out_dir = self._current_output_dir()
         found = {}
