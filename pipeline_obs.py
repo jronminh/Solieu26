@@ -58,14 +58,77 @@ def wind_dd_to_huong_gio(wind_dd):
     return BUCKETS["huong_gio"]["labels"].index(direction)
 
 
+# Mã ww (2 ký tự) -> mega (BUCKETS["hien_tuong"]["mega_buckets"]). Chuyển
+# nguyên từ scoring/score_tables.py (2026-08-18) - score_tables.py chỉ còn
+# mô tả HÌNH DẠNG bucket, không biết quan trắc thô ánh xạ vào đó thế nào,
+# cùng lý do bảng hướng gió ở trên không nằm ở đó.
+#   - 13 (chớp không sấm), 18 (tố), 19 (vòi rồng): báo hiệu/đi kèm dông ->
+#     gộp dong_mua_rao.
+#   - 04 (khói), 06 (bụi lơ lửng): giảm tầm nhìn như mù khô -> gộp mu_mu_kho.
+#   - 66,67 (mưa đông kết), 68,69 (mưa+tuyết), 83-86 (rào lẫn tuyết/tuyết
+#     rào): hiếm gặp VN -> N_0 hết, không tách riêng.
+#   - 20-29 (hiện tượng "giờ trước"): tính như hiện tượng hiện tại, xếp
+#     theo loại, không gộp hết vào N_0.
+#
+# Lưu ý: mã 64/65 và 82 cùng nhãn tiếng Việt "Mưa to" nhưng khác mega-bucket
+# (mưa thường to -> mua_mua_phun; mưa rào dữ dội -> dong_mua_rao). Tra bảng
+# này dùng MÃ GỐC làm khóa nên đầu vào phải giữ mã ww (decode_weather()'s
+# "ww_code"), không chỉ nhãn đã dịch, nếu không 2 trường hợp này sẽ không
+# phân biệt được.
+_WW_TO_MEGA = {
+    # --- dong_mua_rao: dông, mưa rào, mưa đá rào, sau dông; chớp/tố/vòi
+    #     rồng gộp vào (báo hiệu/đi kèm dông) ---
+    **{c: "dong_mua_rao" for c in [
+        "13", "17", "18", "19", "25", "27", "29",
+        "80", "81", "82", "87", "88", "89", "90",
+        "91", "92", "93", "94", "95", "96", "97", "98", "99",
+    ]},
+    # --- mua_mua_phun: mưa phùn, mưa THƯỜNG (không phải mưa rào) ---
+    **{c: "mua_mua_phun" for c in [
+        "20", "21",
+        "50", "51", "52", "53", "54", "55", "56", "57", "58", "59",
+        "60", "61", "62", "63", "64", "65",
+    ]},
+    # --- suong_mu: sương mù (kể cả mỏng, giờ trước) ---
+    **{c: "suong_mu" for c in [
+        "11", "12", "28",
+        "40", "41", "42", "43", "44", "45", "46", "47", "48", "49",
+    ]},
+    # --- mu_mu_kho: mù, mù khô, khói, bụi lơ lửng ---
+    **{c: "mu_mu_kho" for c in ["04", "05", "06", "10"]},
+    # --- N_0: phần còn lại (mây tan/hình thành/không đổi, mưa xa chưa tới
+    #     trạm, tuyết/băng/mưa đông kết/hỗn hợp mưa-tuyết hiếm gặp VN,
+    #     bụi/lốc bụi/bão bụi-cát/tuyết cuốn) ---
+    **{c: "N_0" for c in [
+        "00", "01", "02", "03",
+        "07", "08", "09",
+        "14", "15", "16",
+        "22", "23", "24", "26",
+        "30", "31", "32", "33", "34", "35", "36", "37", "38", "39",
+        "66", "67", "68", "69",
+        "70", "71", "72", "73", "74", "75", "76", "77", "78", "79",
+        "83", "84", "85", "86",
+    ]},
+}
+
+
+def ww_code_to_mega(ww_code):
+    """Mã ww GỐC (decode_weather()'s "ww_code") -> nhãn mega-bucket
+    (BUCKETS["hien_tuong"]["mega_buckets"]). None -> None (chưa gán / không
+    thuộc nhóm nào -> bỏ cặp, xem score_hien_tuong())."""
+    if ww_code is None:
+        return None
+    return _WW_TO_MEGA.get(ww_code)
+
+
 def build_obs(record: dict, hour: int) -> dict:
     """record: 1 phần tử decode_qt_file()/decode_record() (1 trạm, 1 giờ).
     hour: giờ quan trắc (0-23) - decode_record() không tự mang giờ (giờ nằm
     ở TÊN FILE, xem pipeline_csv.parse_obs_dt()), nên truyền riêng.
 
     tốc độ gió (wind_ff) không quy đổi - bulletin đã cho sẵn đơn vị m/s.
-    hien_tuong giữ MÃ ww GỐC (không quy ra mega ở đây) - scoring/scorer.py
-    tự quy qua mega_of() ngay bên trong score_hien_tuong()."""
+    hien_tuong quy ra MEGA ngay tại đây (ww_code_to_mega()) - scoring/scorer.py
+    (score_hien_tuong()) nhận thẳng mega, không tự quy đổi nữa."""
     head        = record.get("head") or {}
     wind        = record.get("wind") or {}
     weather     = record.get("weather") or {}
@@ -75,7 +138,7 @@ def build_obs(record: dict, hour: int) -> dict:
         "hour": hour,
         "tong_luong_may": total_cloud.get("total_cloud_N"),
         "do_cao_man_may": solve_ceiling(record.get("cloud")),
-        "hien_tuong":     weather.get("ww_code"),
+        "hien_tuong":     ww_code_to_mega(weather.get("ww_code")),
         "huong_gio":      wind_dd_to_huong_gio(wind.get("wind_dd")),
         "toc_do_gio":     wind.get("wind_ff"),
         "tam_nhin":       head.get("VV"),

@@ -211,11 +211,6 @@ def score_huong_gio(forecast_idx, obs):
 # Đúng khi MEGA khớp đúng VÀ buổi lệch <= 1.                              #
 # ====================================================================== #
 
-def mega_of(ww_code):
-    """Mã ww -> nhãn mega-bucket (None nếu chưa gán / không thuộc nhóm nào)."""
-    return BUCKETS["hien_tuong"]["groups"].get(ww_code)
-
-
 def _sub_index(x):
     """Buổi: nhãn 'toi'/'dem'/... hoặc chỉ số 0..4 -> chỉ số (None nếu lạ/thiếu)."""
     if x is None:
@@ -245,7 +240,9 @@ def score_hien_tuong(forecast_mega, forecast_sub, obs):
     """
     forecast_mega : nhãn mega-bucket dự báo viên chọn.
     forecast_sub  : buổi DỰ BÁO viên chọn ('toi'..'chieu' hoặc chỉ số 0..4).
-    obs["hien_tuong"] : MÃ ww gốc quan trắc — tự quy ra mega bằng mega_of().
+    obs["hien_tuong"] : mega ĐÃ quy đổi sẵn từ mã ww gốc — adapter
+        (pipeline_obs.py::ww_code_to_mega()) làm việc này trước khi gọi vào
+        đây, không phải mã ww thô.
     obs["hour"]        : GIỜ quan trắc (0-23) — tự quy ra buổi bằng sub_of_hour().
 
     Đúng khi: MEGA khớp CHÍNH XÁC (tolerance 0) VÀ buổi lệch <= sub_tolerance
@@ -253,7 +250,7 @@ def score_hien_tuong(forecast_mega, forecast_sub, obs):
     Trả True/False, hoặc None nếu thiếu dữ liệu.
     """
     spec = BUCKETS["hien_tuong"]
-    obs_mega = mega_of(obs.get("hien_tuong"))
+    obs_mega = obs.get("hien_tuong")
     if forecast_mega is None or obs_mega is None:
         return None
     if forecast_mega != obs_mega:            # tầng mega: chính xác 100%
