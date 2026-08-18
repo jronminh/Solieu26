@@ -149,9 +149,14 @@ def decode_wind(token: str):
 
 
 def decode_weather(token: str, tables: dict):
+    """ww_code kept alongside the decoded ww label: codes 64/65 and 82 both
+    decode to the Vietnamese label "Mưa to" but score into different
+    mega-buckets in scoring/score_tables.py, which keys its groups table by
+    code, not label."""
     if len(token) < 5:
         return None
     return {"ww": tables["ww"].get(token[1:3]),
+            "ww_code": token[1:3],
             "W1": tables["W1W2"].get(token[3]),
             "W2": tables["W1W2"].get(token[4])}
 

@@ -132,7 +132,8 @@ def test_decode_wind_obscured_sky_keeps_slash_sentinel():
 
 
 def test_decode_weather():
-    assert decode_weather("71022", TABLES) == {"ww": "Mù", "W1": "Nhiều mây", "W2": "Nhiều mây"}
+    assert decode_weather("71022", TABLES) == {
+        "ww": "Mù", "ww_code": "10", "W1": "Nhiều mây", "W2": "Nhiều mây"}
     assert decode_weather("710", TABLES) is None  # too short
 
 
@@ -188,7 +189,7 @@ def test_decode_record_yenbai():
     assert decoded["wind"] == {"wind_N": "8", "wind_N_num": 8, "wind_dd": 0, "wind_ff": 0}
     assert decoded["temperature"] == 29.6
     assert decoded["dewpoint"] == 27.0
-    assert decoded["weather"] == {"ww": "Mù", "W1": "Nhiều mây", "W2": "Nhiều mây"}
+    assert decoded["weather"] == {"ww": "Mù", "ww_code": "10", "W1": "Nhiều mây", "W2": "Nhiều mây"}
     assert decoded["pressure"] == {"pressure_raw": 745.3, "pressure_hpa": 993.7}
     assert decoded["station"] == "Yên Bái"
     assert decoded["location"] == {"station_code": "k31", "lat": 21.7333, "lon": 104.8833}
