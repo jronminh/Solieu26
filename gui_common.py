@@ -1,16 +1,14 @@
 """
 gui_common.py
 ====================
-Constants + small OS-integration helpers shared across the GUI modules. No
-Tkinter App state lives here (only the stdlib `tkinter` messagebox, used by
-report_open) — keeps this module import-safe from all of them without any
-risk of a circular import.
+Constants + small helpers shared across the GUI modules. No Tkinter App state
+lives here (only the stdlib `tkinter` messagebox, used by report_open) — keeps
+this module import-safe from all of them without any risk of a circular
+import. OS-level file/folder operations live in utils/file_utils.py instead —
+this module only reports their result (report_open).
 """
 
-import os
 import re
-import subprocess
-import sys
 from tkinter import messagebox
 
 
@@ -89,41 +87,6 @@ def _is_numeric_viewer_column(col: str) -> bool:
     (cloud_1_hshs, cloud_2_hshs...), so they're matched by suffix instead of
     being listed in NUMERIC_VIEWER_COLUMNS."""
     return col in NUMERIC_VIEWER_COLUMNS or col.endswith("_hshs")
-
-
-def _os_open(path: str):
-    """Hand `path` to the OS's default handler — file manager for a folder, the
-    associated app for a file. Returns (ok: bool, reason/path)."""
-    try:
-        if os.name == "nt":
-            os.startfile(path)                       # Windows
-        elif sys.platform == "darwin":
-            subprocess.Popen(["open", path])         # macOS
-        else:
-            subprocess.Popen(["xdg-open", path])     # Linux
-        return True, path
-    except Exception as e:
-        return False, str(e)
-
-
-def open_folder(path: str):
-    """Open a folder with the OS's file manager. Returns (ok: bool, reason/path)."""
-    if not path:
-        return False, "chưa có thư mục xuất (cần chạy thành công ít nhất một lần)"
-    path = os.path.abspath(path)                      # './x' → absolute (Windows dislikes relative paths)
-    if not os.path.isdir(path):
-        return False, f"thư mục không tồn tại: {path}"
-    return _os_open(path)
-
-
-def open_in_editor(path: str):
-    """Open a FILE with its default application (for editing). Returns (ok, reason/path)."""
-    if not path:
-        return False, "chưa có đường dẫn file"
-    path = os.path.abspath(path)
-    if not os.path.isfile(path):
-        return False, f"file không tồn tại: {path}"
-    return _os_open(path)
 
 
 def report_open(log, ok: bool, info: str, what: str = None, warn: bool = False):

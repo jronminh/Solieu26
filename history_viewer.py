@@ -22,8 +22,9 @@ import config
 from gui_common import (
     STATIONS, STATION_NAMES, NAME_TO_CODE, ALL_STATIONS,
     HOURS, ALL_HOURS, HISTORY_CSV_RE, ALWAYS_HIDDEN_VIEWER_COLUMNS,
-    _is_numeric_viewer_column, open_in_editor, report_open,
+    _is_numeric_viewer_column, report_open,
 )
+from utils.file_utils import open_in_editor
 from utils.ini_utils import update_ini_key
 
 
