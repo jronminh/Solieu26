@@ -9,6 +9,7 @@ dist/
 # Generated output (re-created by running the app)
 data/
 *.csv
+!tests/fixtures/**/*.csv
 config.ini
 
 # Local-only planning notes

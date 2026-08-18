@@ -1,0 +1,12 @@
+start_hour,end_hour,field_name,bucket_selected
+0,6,tong_luong_may,3
+7,12,tong_luong_may,4
+10,15,tong_luong_may,6
+0,11,hien_tuong,N_0
+12,18,hien_tuong,dong_mua_rao
+19,23,hien_tuong,suong_mu
+0,23,huong_gio,4
+6,14,toc_do_gio,2
+0,9,do_cao_man_may,14
+10,19,do_cao_man_may,8
+0,23,tam_nhin,7
