@@ -57,18 +57,18 @@ def build_hourly_table(records: list) -> list:
     ghi nào (field_name lạ hoặc bucket_selected ngoài phạm vi BUCKETS) thì
     raise ValueError ngay, không nhận 1 phần.
 
-    Trả về: list các dict, MỖI PHẦN TỬ 1 GIỜ (trải từ giờ nhỏ nhất đến giờ
-    lớn nhất trong records), đủ khoá "hour" + "buoi" (tự suy từ hour qua
-    sub_of_hour(), không phải dự báo viên chọn) + 6 tên field trong BUCKETS -
-    field không có bản ghi nào phủ giờ đó -> None.
+    Trả về: LUÔN 24 dòng (giờ 0-23) - kể cả khi records rỗng hoàn toàn - đủ
+    khoá "hour" + "buoi" (tự suy từ hour qua sub_of_hour(), không phải dự
+    báo viên chọn) + "station" (luôn None - 1 bảng dự báo không gắn với 1
+    trạm cụ thể; khoá này chỉ tồn tại để đối xứng với
+    pipeline/obs.py::build_scalar_history() - 2 bên phải cùng bộ khóa để
+    pipeline/match_score.py::join_forecast_obs() ghép thẳng không cần xử lý
+    giờ lệch/khóa lệch) + 6 tên field trong BUCKETS - giờ không có bản ghi
+    nào phủ (kể cả TOÀN BỘ giờ khi records rỗng) -> None.
 
     2 bản ghi CÙNG field_name chồng giờ nhau: bản ghi start_hour muộn hơn
     thắng (duyệt theo thứ tự start_hour tăng dần, ghi đè bản ghi cũ).
-    records rỗng -> trả về [].
     """
-    if not records:
-        return []
-
     for r in records:
         if r["field_name"] not in BUCKETS:
             raise ValueError(
@@ -86,14 +86,12 @@ def build_hourly_table(records: list) -> list:
         for hour in range(r["start_hour"], r["end_hour"] + 1):
             bucket_at[(hour, r["field_name"])] = r["bucket_selected"]
 
-    min_hour = min(r["start_hour"] for r in records)
-    max_hour = max(r["end_hour"] for r in records)
-
     return [
         {"hour": hour,
          "buoi": sub_of_hour(hour),
+         "station": None,
          **{field: bucket_at.get((hour, field)) for field in FIELD_ORDER}}
-        for hour in range(min_hour, max_hour + 1)
+        for hour in range(24)
     ]
 
 

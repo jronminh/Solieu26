@@ -3,14 +3,12 @@ test_time_sync.py
 ====================
 Ghép build_hourly_table() (pipeline/forecast.py) với build_scalar_history()
 (pipeline/obs.py) qua join_forecast_obs() (pipeline/match_score.py) - cả 3 hàm
-đều thao tác trên list "1 dict/giờ, đủ hour+6 field", ghép nhau thuần theo
-khoá "hour" (chưa phân biệt trạm).
+đều thao tác trên list "LUÔN 24 dòng/ngày, đủ hour+buoi+station+6 field",
+ghép nhau thuần theo khoá "hour" (chưa phân biệt nhiều trạm/giờ).
 
 Dữ liệu: forecast_sample.csv (giả lập, phủ giờ 0-23) ghép với
 tests/fixtures/qt_files/full_day_20260810/ (24 file thật, ngày 2026-08-10).
 """
-
-import datetime
 
 import pytest
 
@@ -26,14 +24,14 @@ def _forecast_rows():
 def test_forecast_and_obs_hour_axes_match_for_full_day(full_day_dir):
     forecast_hours = {r["hour"] for r in _forecast_rows()}
 
-    scalar_history = build_scalar_history(datetime.date(2026, 8, 10), full_day_dir)
+    scalar_history = build_scalar_history(full_day_dir)["2026-08-10"]
     obs_hours = {r["hour"] for r in scalar_history}
 
     assert forecast_hours == obs_hours == set(range(24))
 
 
 def test_join_forecast_obs_hour_always_agrees(full_day_dir):
-    scalar_history = build_scalar_history(datetime.date(2026, 8, 10), full_day_dir)
+    scalar_history = build_scalar_history(full_day_dir)["2026-08-10"]
     rows = join_forecast_obs(_forecast_rows(), scalar_history)
 
     assert len(rows) == 24
@@ -42,16 +40,16 @@ def test_join_forecast_obs_hour_always_agrees(full_day_dir):
 
 
 def test_join_forecast_obs_row_shape(full_day_dir):
-    """Mỗi dòng ghép chỉ có 3 khoá - KHÔNG mang định danh trạm; "forecast"
-    và "obs" đều đủ 7 khoá (hour + 6 field) - hai bên CÙNG khoá field nhưng
-    khác không gian giá trị (forecast là bucket đã chọn, obs phần lớn là
-    số đo thô)."""
-    scalar_history = build_scalar_history(datetime.date(2026, 8, 10), full_day_dir)
+    """Mỗi dòng ghép chỉ có 3 khoá - "forecast" và "obs" đều đủ 9 khoá
+    (hour + buoi + station + 6 field) - hai bên CÙNG bộ khoá nhưng khác
+    không gian giá trị (forecast là bucket đã chọn + station luôn None,
+    obs phần lớn là số đo thô + station thật của trạm đại diện giờ đó)."""
+    scalar_history = build_scalar_history(full_day_dir)["2026-08-10"]
     row = join_forecast_obs(_forecast_rows(), scalar_history)[0]
 
     assert set(row.keys()) == {"hour", "forecast", "obs"}
-    field_keys = {"hour", "buoi", "tong_luong_may", "do_cao_man_may", "hien_tuong",
-                  "huong_gio", "toc_do_gio", "tam_nhin"}
+    field_keys = {"hour", "buoi", "station", "tong_luong_may", "do_cao_man_may",
+                  "hien_tuong", "huong_gio", "toc_do_gio", "tam_nhin"}
     assert set(row["forecast"].keys()) == field_keys
     assert set(row["obs"].keys()) == field_keys
 

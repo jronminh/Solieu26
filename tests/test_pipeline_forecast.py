@@ -19,14 +19,29 @@ def _rec(start, end, field, bucket):
 # =============================================================================
 
 def test_build_hourly_table_empty_records():
-    assert build_hourly_table([]) == []
+    """records rỗng -> vẫn đủ 24 dòng (0-23), tất cả field + station None -
+    đối xứng với build_scalar_history() rỗng dữ liệu bên pipeline/obs.py."""
+    rows = build_hourly_table([])
+    assert [r["hour"] for r in rows] == list(range(24))
+    for r in rows:
+        assert r["station"] is None
+        assert r["tong_luong_may"] is None
+        assert r["do_cao_man_may"] is None
+        assert r["hien_tuong"] is None
+        assert r["huong_gio"] is None
+        assert r["toc_do_gio"] is None
+        assert r["tam_nhin"] is None
 
 
 def test_build_hourly_table_single_record_spans_inclusive_range():
     rows = build_hourly_table([_rec(7, 9, "tong_luong_may", 2)])
-    assert [r["hour"] for r in rows] == [7, 8, 9]
+    assert [r["hour"] for r in rows] == list(range(24))
     for r in rows:
-        assert r["tong_luong_may"] == 2
+        assert r["station"] is None
+        if 7 <= r["hour"] <= 9:
+            assert r["tong_luong_may"] == 2
+        else:
+            assert r["tong_luong_may"] is None
         assert r["do_cao_man_may"] is None
         assert r["hien_tuong"] is None
         assert r["huong_gio"] is None
@@ -35,14 +50,18 @@ def test_build_hourly_table_single_record_spans_inclusive_range():
 
 
 def test_build_hourly_table_hour_range_spans_min_to_max_across_records():
-    """The hourly table always covers [min start_hour, max end_hour] across
-    ALL records, even fields whose own coverage is narrower."""
+    """The hourly table always covers the full 0-23 day, regardless of how
+    narrow any single field's own record coverage is - hours outside a
+    field's covered range are None for that field, not absent."""
     rows = build_hourly_table([_rec(5, 5, "tam_nhin", 0), _rec(20, 20, "huong_gio", 3)])
-    assert [r["hour"] for r in rows] == list(range(5, 21))
-    assert rows[0]["tam_nhin"] == 0
-    assert rows[0]["huong_gio"] is None
-    assert rows[-1]["huong_gio"] == 3
-    assert rows[-1]["tam_nhin"] is None
+    assert [r["hour"] for r in rows] == list(range(24))
+    by_hour = {r["hour"]: r for r in rows}
+    assert by_hour[5]["tam_nhin"] == 0
+    assert by_hour[5]["huong_gio"] is None
+    assert by_hour[20]["huong_gio"] == 3
+    assert by_hour[20]["tam_nhin"] is None
+    assert by_hour[0]["tam_nhin"] is None
+    assert by_hour[0]["huong_gio"] is None
 
 
 def test_build_hourly_table_buoi_derived_from_each_row_own_hour():

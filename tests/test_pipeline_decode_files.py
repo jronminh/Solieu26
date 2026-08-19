@@ -4,8 +4,8 @@ test_pipeline_decode_files.py
 Unit tests for pipeline/decode_files.py (flatten_record, cloud_layers_needed,
 write_csv, export_history_by_date) — the "xử lý số liệu thành readable"
 block, independent from FTP. The filename<->datetime helpers
-(quantrac_filename_at/parse_obs_dt) live in bulletin/filename.py now — see
-test_filename.py. The FTP layer (pipeline/fetch.py's download_files/
+(quantrac_filename_at/parse_obs_dt) live in utils/filename_utils.py now —
+see test_filename_utils.py. The FTP layer (pipeline/fetch.py's download_files/
 fetch_files) and runner.py's _work() orchestration need a live/mocked server
 (and a mocked worker-thread/queue) and aren't covered here.
 """

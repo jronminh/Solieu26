@@ -21,8 +21,8 @@ can't take down the fetch step or main.py's own startup — see runner.py::_work
 import os
 
 from bulletin.decode import decode_history
-from bulletin.filename import parse_obs_dt
 from utils.csv_utils import write_csv
+from utils.filename_utils import parse_obs_dt
 
 
 # =============================================================================

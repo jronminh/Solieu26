@@ -1,13 +1,13 @@
 """
-test_filename.py
+test_filename_utils.py
 ====================
-Unit tests for bulletin/filename.py: the QtYYMMDDHH.txt filename<->datetime
+Unit tests for utils/filename_utils.py: the QtYYMMDDHH.txt filename<->datetime
 helpers, both directions.
 """
 
 import datetime
 
-from bulletin.filename import parse_obs_dt, quantrac_filename_at
+from utils.filename_utils import parse_obs_dt, quantrac_filename_at
 
 
 def test_quantrac_filename_at():

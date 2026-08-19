@@ -1,5 +1,5 @@
 """
-filename.py
+filename_utils.py
 ====================
 Bulletin filename <-> datetime, both directions: 'QtYYMMDDHH.txt' names an
 hourly bulletin file, no century, hour zero-padded.

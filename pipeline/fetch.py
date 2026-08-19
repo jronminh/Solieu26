@@ -26,7 +26,7 @@ import os
 from ftplib import FTP, error_perm, error_temp
 
 from utils.config_utils import FTP_TIMEOUT
-from bulletin.filename import quantrac_filename_at
+from utils.filename_utils import quantrac_filename_at
 from utils.ftp_utils import fetch_and_bucket
 
 
