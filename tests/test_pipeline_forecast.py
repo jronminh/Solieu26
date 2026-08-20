@@ -13,8 +13,9 @@ import pytest
 from pipeline.forecast import build_hourly_table, export_forecast_table, load_records_csv
 
 
-def _rec(start, end, field, bucket):
-    return {"start_hour": start, "end_hour": end, "field_name": field, "bucket_selected": bucket}
+def _rec(start, end, field, bucket, station_code="k31"):
+    return {"station_code": station_code, "start_hour": start, "end_hour": end,
+            "field_name": field, "bucket_selected": bucket}
 
 
 # =============================================================================
@@ -22,25 +23,17 @@ def _rec(start, end, field, bucket):
 # =============================================================================
 
 def test_build_hourly_table_empty_records():
-    """records rỗng -> vẫn đủ 24 dòng (0-23), tất cả field + station None -
-    đối xứng với build_scalar_history() rỗng dữ liệu bên pipeline/obs.py."""
-    rows = build_hourly_table([])
-    assert [r["hour"] for r in rows] == list(range(24))
-    for r in rows:
-        assert r["station"] is None
-        assert r["tong_luong_may"] is None
-        assert r["do_cao_man_may"] is None
-        assert r["hien_tuong"] is None
-        assert r["huong_gio"] is None
-        assert r["toc_do_gio"] is None
-        assert r["tam_nhin"] is None
+    """records rỗng -> [] (không trạm nào để dựng bảng - dữ liệu do TRẠM dẫn
+    dắt, khác trước đây khi hàm còn ngầm định "1 trạm ẩn danh" luôn trả 24
+    dòng rỗng)."""
+    assert build_hourly_table([]) == []
 
 
 def test_build_hourly_table_single_record_spans_inclusive_range():
     rows = build_hourly_table([_rec(7, 9, "tong_luong_may", 2)])
     assert [r["hour"] for r in rows] == list(range(24))
     for r in rows:
-        assert r["station"] is None
+        assert r["station_code"] == "k31"
         if 7 <= r["hour"] <= 9:
             assert r["tong_luong_may"] == 2
         else:
@@ -87,6 +80,25 @@ def test_build_hourly_table_later_starting_record_wins_on_overlap():
     assert by_hour[10] == 5   # both cover hour 10; later-starting record wins
     assert by_hour[12] == 5
     assert by_hour[15] == 5
+
+
+def test_build_hourly_table_groups_rows_per_station_sorted():
+    """2 trạm khác nhau -> 2 khối 24 dòng riêng biệt (2 x 24 = 48 dòng),
+    sort theo (station_code, hour); dữ liệu của trạm này không lẫn sang trạm
+    kia dù cùng field_name."""
+    rows = build_hourly_table([
+        _rec(0, 23, "tam_nhin", 1, station_code="k31"),
+        _rec(0, 23, "tam_nhin", 5, station_code="k15"),
+    ])
+    assert len(rows) == 48
+    assert [r["station_code"] for r in rows] == ["k15"] * 24 + ["k31"] * 24   # sorted alphabetically
+    by_station = {}
+    for r in rows:
+        by_station.setdefault(r["station_code"], []).append(r)
+    assert [r["hour"] for r in by_station["k15"]] == list(range(24))
+    assert [r["hour"] for r in by_station["k31"]] == list(range(24))
+    assert all(r["tam_nhin"] == 5 for r in by_station["k15"])
+    assert all(r["tam_nhin"] == 1 for r in by_station["k31"])
 
 
 # =============================================================================
@@ -159,7 +171,8 @@ def test_build_hourly_table_hien_tuong_rejects_int_bucket():
 def test_load_records_csv_coerces_hours_and_bucket_to_int():
     records = load_records_csv("tests/fixtures/forecast_sample.csv")
     first = records[0]
-    assert first == {"start_hour": 0, "end_hour": 6, "field_name": "tong_luong_may", "bucket_selected": 3}
+    assert first == {"station_code": "k31", "start_hour": 0, "end_hour": 6,
+                      "field_name": "tong_luong_may", "bucket_selected": 3}
     assert isinstance(first["start_hour"], int)
     assert isinstance(first["bucket_selected"], int)
 

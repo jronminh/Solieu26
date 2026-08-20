@@ -2,13 +2,13 @@
 pipeline/forecast.py
 ====================
 Việc dựng lại pipeline dự báo (bản trước đã xoá - xem TODO.md mục VỠ).
-Input: nhiều bản ghi {start_hour, end_hour, field_name, bucket_selected} -
-dự báo viên chọn 1 BUCKET (không nhập giá trị vô hướng tự do), hợp lệ theo
-scoring/score_tables.py.BUCKETS[field_name]. build_hourly_table() gộp lại
-thành 1 dòng/giờ, đủ 6 khoá field + "buoi" (tự suy từ giờ dòng đó, xem
-scoring/scorer.py::sub_of_hour()) - cùng hình dạng obs bên
-scoring/scorer.py, để gọi thẳng score_<field>(forecast_row, obs_row) không
-cần biến đổi thêm.
+Input: nhiều bản ghi {station_code, start_hour, end_hour, field_name,
+bucket_selected} - dự báo viên chọn 1 BUCKET (không nhập giá trị vô hướng
+tự do) cho 1 trạm cụ thể, hợp lệ theo scoring/score_tables.py.BUCKETS[field_name].
+build_hourly_table() gộp lại thành 1 dòng/(trạm, giờ), đủ 6 khoá field +
+"buoi" (tự suy từ giờ dòng đó, xem scoring/scorer.py::sub_of_hour()) - cùng
+hình dạng obs bên pipeline/obs.py, để gọi thẳng score_<field>(forecast_row,
+obs_row) không cần biến đổi thêm.
 
 Chạy trực tiếp (python -m pipeline.forecast) để xem demo trên
 tests/fixtures/forecast_sample.csv.
@@ -51,25 +51,49 @@ def _valid_bucket(field_name: str, bucket_selected) -> bool:
     return 0 <= bucket_selected < n
 
 
+def _build_station_block(station_code, station_records: list) -> list:
+    """1 trạm: gộp station_records (đã lọc đúng station_code này) thành 24
+    dòng/giờ, cùng luật merge/overlap như trước (start_hour muộn hơn thắng)."""
+    by_start_hour = sorted(station_records, key=lambda r: r["start_hour"])
+
+    bucket_at = {}   # (hour, field_name) -> bucket_selected
+    for r in by_start_hour:
+        for hour in range(r["start_hour"], r["end_hour"] + 1):
+            bucket_at[(hour, r["field_name"])] = r["bucket_selected"]
+
+    return [
+        {"station_code": station_code,
+         "hour": hour,
+         "buoi": sub_of_hour(hour),
+         **{field: bucket_at.get((hour, field)) for field in FIELD_ORDER}}
+        for hour in range(24)
+    ]
+
+
 def build_hourly_table(records: list) -> list:
     """
-    records: list các dict {start_hour, end_hour, field_name, bucket_selected}
-    - bucket_selected áp dụng cho MỌI giờ trong đoạn [start_hour, end_hour]
-    (bao gồm 2 đầu). Validate từng bản ghi TRƯỚC khi gộp - sai bất kỳ bản
-    ghi nào (field_name lạ hoặc bucket_selected ngoài phạm vi BUCKETS) thì
-    raise ValueError ngay, không nhận 1 phần.
+    records: list các dict {station_code, start_hour, end_hour, field_name,
+    bucket_selected} - bucket_selected áp dụng cho MỌI giờ trong đoạn
+    [start_hour, end_hour] (bao gồm 2 đầu), CỦA ĐÚNG station_code đó.
+    Validate từng bản ghi TRƯỚC khi gộp - sai bất kỳ bản ghi nào (field_name
+    lạ hoặc bucket_selected ngoài phạm vi BUCKETS) thì raise ValueError
+    ngay, không nhận 1 phần.
 
-    Trả về: LUÔN 24 dòng (giờ 0-23) - kể cả khi records rỗng hoàn toàn - đủ
-    khoá "hour" + "buoi" (tự suy từ hour qua sub_of_hour(), không phải dự
-    báo viên chọn) + "station" (luôn None - 1 bảng dự báo không gắn với 1
-    trạm cụ thể; khoá này chỉ tồn tại để đối xứng với
-    pipeline/obs.py::build_scalar_history() - 2 bên phải cùng bộ khóa để
-    pipeline/match_score.py::join_forecast_obs() ghép thẳng không cần xử lý
-    giờ lệch/khóa lệch) + 6 tên field trong BUCKETS - giờ không có bản ghi
-    nào phủ (kể cả TOÀN BỘ giờ khi records rỗng) -> None.
+    Trả về: 24 dòng (giờ 0-23) CHO MỖI station_code tìm thấy trong records -
+    sort theo (station_code, hour). records rỗng -> [] (không trạm nào để
+    dựng bảng - khác trước đây khi hàm còn ngầm định "1 trạm ẩn danh", nay
+    dữ liệu do TRẠM dẫn dắt nên không trạm thì không có dòng nào). Mỗi dòng
+    đủ khoá "station_code" + "hour" + "buoi" (tự suy từ hour qua
+    sub_of_hour(), không phải dự báo viên chọn) + 6 tên field trong BUCKETS
+    - giờ không có bản ghi nào phủ (kể cả TOÀN BỘ giờ của 1 trạm không có
+    bản ghi field đó) -> None. Bộ khoá "station_code"/"hour" đối xứng với
+    pipeline/obs.py::build_scalar_history() để
+    pipeline/match_score.py::join_forecast_obs() ghép thẳng theo
+    (station_code, hour) không cần xử lý lệch khóa.
 
-    2 bản ghi CÙNG field_name chồng giờ nhau: bản ghi start_hour muộn hơn
-    thắng (duyệt theo thứ tự start_hour tăng dần, ghi đè bản ghi cũ).
+    2 bản ghi CÙNG (station_code, field_name) chồng giờ nhau: bản ghi
+    start_hour muộn hơn thắng (duyệt theo thứ tự start_hour tăng dần, ghi
+    đè bản ghi cũ) - luật này áp riêng trong phạm vi từng trạm.
     """
     for r in records:
         if r["field_name"] not in BUCKETS:
@@ -81,28 +105,23 @@ def build_hourly_table(records: list) -> list:
                 f"bucket_selected {r['bucket_selected']!r} không hợp lệ "
                 f"cho field_name {r['field_name']!r}")
 
-    by_start_hour = sorted(records, key=lambda r: r["start_hour"])
+    by_station = {}
+    for r in records:
+        by_station.setdefault(r["station_code"], []).append(r)
 
-    bucket_at = {}   # (hour, field_name) -> bucket_selected
-    for r in by_start_hour:
-        for hour in range(r["start_hour"], r["end_hour"] + 1):
-            bucket_at[(hour, r["field_name"])] = r["bucket_selected"]
-
-    return [
-        {"hour": hour,
-         "buoi": sub_of_hour(hour),
-         "station": None,
-         **{field: bucket_at.get((hour, field)) for field in FIELD_ORDER}}
-        for hour in range(24)
-    ]
+    rows = []
+    for station_code in sorted(by_station):
+        rows.extend(_build_station_block(station_code, by_station[station_code]))
+    return rows
 
 
 def load_records_csv(path: str) -> list:
-    """Đọc CSV 4 cột (start_hour,end_hour,field_name,bucket_selected) ->
-    list bản ghi cho build_hourly_table(). Ép start_hour/end_hour/
-    bucket_selected sang int, TRỪ bucket_selected của hien_tuong giữ nguyên
-    string (mega). Không validate ở đây - build_hourly_table() làm hết, để
-    1 chỗ duy nhất chịu trách nhiệm đúng/sai dữ liệu."""
+    """Đọc CSV 5 cột (station_code,start_hour,end_hour,field_name,
+    bucket_selected) -> list bản ghi cho build_hourly_table(). station_code
+    giữ nguyên string; ép start_hour/end_hour/bucket_selected sang int, TRỪ
+    bucket_selected của hien_tuong giữ nguyên string (mega). Không validate
+    ở đây - build_hourly_table() làm hết, để 1 chỗ duy nhất chịu trách
+    nhiệm đúng/sai dữ liệu."""
     with open(path, encoding="utf-8-sig", newline="") as f:
         rows = list(csv.DictReader(f))
 
@@ -112,6 +131,7 @@ def load_records_csv(path: str) -> list:
         if r["field_name"] != "hien_tuong":
             bucket_selected = int(bucket_selected)
         records.append({
+            "station_code": r["station_code"],
             "start_hour": int(r["start_hour"]),
             "end_hour": int(r["end_hour"]),
             "field_name": r["field_name"],

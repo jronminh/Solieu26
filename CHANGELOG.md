@@ -4,7 +4,7 @@ Các thay đổi đáng chú ý của Solieu26, mới nhất lên đầu. Chi ti
 xem `git log`; việc đang mở/chưa quyết xem `TODO.md` (file local, không nằm
 trong repo).
 
-## [Chưa gắn tag] — 2026-08-16 → 2026-08-18 (sau v4.0)
+## [Chưa gắn tag] — 2026-08-16 → 2026-08-20 (sau v4.0)
 
 ### Chương trình chấm điểm dự báo (mới)
 - Thêm chương trình con chấm điểm dự báo cho 6 trường (tổng lượng mây, độ
@@ -25,6 +25,18 @@ trong repo).
   (`pipeline_forecast.py`) xoá hẳn, UI (`forecast_bucket_generator.py`)
   chuyển sang `reference/` làm tham khảo thiết kế, không còn chạy được —
   giai đoạn "Dự báo" của pipeline chấm điểm quay lại vạch xuất phát.
+- Thêm `pipeline/forecast.py::export_forecast_table()` — ghi archive dự báo
+  viên nhập (`forecast_YYYYMMDD.csv`) độc lập với quan trắc; đổi
+  `export_forecast_score()` nhận đường dẫn file thay vì list, output đổi tên
+  `score_YYYYMMDD.csv` để không đụng file archive.
+- Ghép đúng theo TRẠM xuyên suốt pipeline dự báo/chấm điểm (trước đó mỗi giờ
+  chỉ lấy 1 bản ghi đại diện, bỏ qua các trạm còn lại): `build_hourly_table()`
+  (`pipeline/forecast.py`) và `build_scalar_history()` (`pipeline/obs.py`)
+  giờ trả về theo từng `station_code` (mã trạm thật, từ
+  `location.station_code`, không phải tên đã giải mã); `join_forecast_obs()`
+  ghép theo `(station_code, hour)`, do quan trắc dẫn dắt (mọi trạm báo cáo
+  đều ra 1 dòng, kể cả trạm chưa ai dự báo). `score_YYYYMMDD.csv` giờ nhiều
+  trạm/file (cột `station_code`), giống quy ước `history_YYYYMMDD.csv`.
 
 ### Tái cấu trúc module
 - Tách `pipeline.py`/`core.py` cũ thành các khối độc lập không import lẫn

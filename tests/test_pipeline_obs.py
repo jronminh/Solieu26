@@ -106,7 +106,7 @@ def test_build_obs_real_fixture_yenbai(qt_00):
     assert obs == {
         "hour": 0,
         "buoi": "dem",
-        "station": "Yên Bái",
+        "station_code": "k31",
         "tong_luong_may": 8,
         "do_cao_man_may": 1400,   # solve_ceiling: Sc layer, amount 8 >= threshold
         "hien_tuong": "mu_mu_kho",  # ww_code '10' -> Mù
@@ -118,17 +118,17 @@ def test_build_obs_real_fixture_yenbai(qt_00):
 
 def test_build_obs_missing_groups_come_back_none_except_hien_tuong_and_buoi():
     """A record with none of the optional groups reported (only location) —
-    5 field + station ra None (thiếu dữ liệu thật), không raise trên dict
-    thiếu. Riêng hien_tuong ra "N_0" (không báo cáo ww = không có gì đáng
-    kể, xem ww_code_to_mega()) và buoi luôn tính được từ hour truyền vào
-    (giờ 5 -> "sang") - 2 trường này không phụ thuộc record có báo cáo gì
-    hay không."""
+    5 field ra None (thiếu dữ liệu thật), không raise trên dict thiếu.
+    Riêng hien_tuong ra "N_0" (không báo cáo ww = không có gì đáng kể, xem
+    ww_code_to_mega()) và buoi luôn tính được từ hour truyền vào (giờ 5 ->
+    "sang") - 2 trường này không phụ thuộc record có báo cáo gì hay không.
+    station_code vẫn lấy được từ location dù các nhóm khác đều thiếu."""
     record = {"location": {"station_code": "k31"}}
     obs = build_obs(record, hour=5)
     assert obs == {
         "hour": 5,
         "buoi": "sang",
-        "station": None,
+        "station_code": "k31",
         "tong_luong_may": None,
         "do_cao_man_may": None,
         "hien_tuong": "N_0",
@@ -152,53 +152,71 @@ def test_build_obs_cloud_none_vs_no_layers():
 # build_scalar_history
 # =============================================================================
 
-FIELD_KEYS = {"hour", "buoi", "station", "tong_luong_may", "do_cao_man_may", "hien_tuong",
+FIELD_KEYS = {"hour", "buoi", "station_code", "tong_luong_may", "do_cao_man_may", "hien_tuong",
               "huong_gio", "toc_do_gio", "tam_nhin"}
 
 
-def test_build_scalar_history_full_day_has_24_rows_in_order(full_day_dir):
+def _group_by_station(rows):
+    by_station = {}
+    for r in rows:
+        by_station.setdefault(r["station_code"], []).append(r)
+    return by_station
+
+
+def test_build_scalar_history_full_day_has_24_rows_per_station_in_order(full_day_dir):
+    """Không còn cố định 24 dòng/ngày (1 trạm đại diện) - giờ là (số trạm
+    thực sự báo cáo × 24), mỗi khối 24 dòng/trạm sort theo giờ tăng dần."""
     history = build_scalar_history(full_day_dir)
 
     assert list(history.keys()) == ["2026-08-10"]
     rows = history["2026-08-10"]
-    assert [r["hour"] for r in rows] == list(range(24))
+    by_station = _group_by_station(rows)
+    assert len(by_station) > 1   # fixture này có nhiều trạm cùng báo cáo mỗi giờ
+    assert len(rows) == len(by_station) * 24
+    for station_code, srows in by_station.items():
+        assert [r["hour"] for r in srows] == list(range(24))
     for r in rows:
         assert set(r.keys()) == FIELD_KEYS
 
 
-def test_build_scalar_history_hour_0_matches_build_obs_on_first_station(full_day_dir, qt_00):
-    """Giờ 0 phải khớp build_obs() gọi tay trên bản ghi ĐẦU TIÊN có
-    location của Qt26081000.txt (Yên Bái) - cùng bản ghi
-    test_build_obs_real_fixture_yenbai đã hand-verify."""
+def test_build_scalar_history_station_row_matches_build_obs(full_day_dir, qt_00):
+    """Giờ 0, trạm Yên Bái (k31) phải khớp build_obs() gọi tay trên bản ghi
+    Yên Bái của Qt26081000.txt - cùng bản ghi test_build_obs_real_fixture_yenbai
+    đã hand-verify."""
     rows = build_scalar_history(full_day_dir)["2026-08-10"]
+    row = next(r for r in rows if r["station_code"] == "k31" and r["hour"] == 0)
 
-    first_record = next(r for r in decode_qt_file(qt_00) if r.get("location"))
-    assert rows[0] == build_obs(first_record, hour=0)
+    yenbai_record = next(
+        r for r in decode_qt_file(qt_00)
+        if (r.get("location") or {}).get("station_code") == "k31")
+    assert row == build_obs(yenbai_record, hour=0)
 
 
 def test_build_scalar_history_missing_hour_files_get_empty_rows_not_skipped(tmp_path, full_day_dir):
-    """Chỉ copy 3/24 file vào thư mục tạm - vẫn đủ 24 dòng (không raise,
-    không bỏ giờ), 3 giờ có file thì có station/dữ liệu thật, 21 giờ còn
-    lại là dòng rỗng (station + 6 field None, hour/buoi vẫn suy được)."""
+    """Chỉ copy 3/24 file vào thư mục tạm - vẫn đủ 24 dòng/trạm (không
+    raise, không bỏ giờ) cho MỌI trạm xuất hiện trong 3 file đó: 3 giờ có
+    file thì trạm đó có dữ liệu thật, 21 giờ còn lại là dòng rỗng (6 field
+    None, station_code/hour/buoi vẫn suy được - trạm đã biết, chỉ thiếu dữ
+    liệu giờ đó)."""
     kept_hours = [0, 5, 23]
     for hour in kept_hours:
         name = quantrac_filename_at(datetime.datetime(2026, 8, 10, hour))
         shutil.copy(os.path.join(full_day_dir, name), tmp_path / name)
 
     rows = build_scalar_history(str(tmp_path))["2026-08-10"]
+    by_station = _group_by_station(rows)
+    assert by_station   # 3 file này có ít nhất 1 trạm báo cáo
 
-    assert [r["hour"] for r in rows] == list(range(24))
-    for r in rows:
-        if r["hour"] in kept_hours:
-            assert r["station"] is not None
-        else:
-            assert r["station"] is None
-            assert r["tong_luong_may"] is None
-            assert r["do_cao_man_may"] is None
-            assert r["hien_tuong"] is None
-            assert r["huong_gio"] is None
-            assert r["toc_do_gio"] is None
-            assert r["tam_nhin"] is None
+    for station_code, srows in by_station.items():
+        assert [r["hour"] for r in srows] == list(range(24))
+        for r in srows:
+            if r["hour"] not in kept_hours:
+                assert r["tong_luong_may"] is None
+                assert r["do_cao_man_may"] is None
+                assert r["hien_tuong"] is None
+                assert r["huong_gio"] is None
+                assert r["toc_do_gio"] is None
+                assert r["tam_nhin"] is None
 
 
 def test_build_scalar_history_empty_dir_returns_empty_dict(tmp_path):
@@ -209,7 +227,7 @@ def test_build_scalar_history_empty_dir_returns_empty_dict(tmp_path):
 
 def test_build_scalar_history_multi_date_dir_splits_per_date(tmp_path, full_day_dir, qt_other_day):
     """1 thư mục có file của 2 ngày khác nhau -> 2 entry riêng, mỗi entry
-    đủ 24 dòng, không lẫn giờ giữa 2 ngày."""
+    đủ 24 dòng/trạm, không lẫn giờ giữa 2 ngày."""
     name_10 = quantrac_filename_at(datetime.datetime(2026, 8, 10, 0))
     shutil.copy(os.path.join(full_day_dir, name_10), tmp_path / name_10)
     shutil.copy(qt_other_day, tmp_path / os.path.basename(qt_other_day))
@@ -218,4 +236,7 @@ def test_build_scalar_history_multi_date_dir_splits_per_date(tmp_path, full_day_
 
     assert set(history.keys()) == {"2026-08-10", "2026-08-11"}
     for rows in history.values():
-        assert [r["hour"] for r in rows] == list(range(24))
+        by_station = _group_by_station(rows)
+        assert by_station
+        for station_code, srows in by_station.items():
+            assert [r["hour"] for r in srows] == list(range(24))

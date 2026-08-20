@@ -5,11 +5,11 @@ Adapter: 1 bản ghi quan trắc đã decode (bulletin/decode.py) + giờ quan t
 -> dict "obs" đúng 6 khoá field mà scoring/scorer.py cần
 (tong_luong_may/do_cao_man_may/hien_tuong/huong_gio/toc_do_gio/tam_nhin) +
 "hour" + "buoi" (buổi tự suy từ giờ, xem sub_of_hour() bên scoring/scorer.py)
-+ "station". build_obs() chỉ biến đổi ĐÚNG 1 quan trắc (1 dòng, 1 trạm, 1
-giờ) - không biết gì về phía dự báo. build_scalar_history() lặp thêm 1
-tầng: tự quét 1 thư mục, MỖI GIỜ lấy 1 trạm đại diện (chưa phân biệt nhiều
-trạm - việc ghép trạm để sau, xem pipeline/match_score.py) - trả về 1
-dict/ngày, mỗi ngày 1 list cùng hình dạng build_hourly_table() bên
++ "station_code". build_obs() chỉ biến đổi ĐÚNG 1 quan trắc (1 dòng, 1
+trạm, 1 giờ) - không biết gì về phía dự báo. build_scalar_history() lặp
+thêm 1 tầng: tự quét 1 thư mục, giữ MỌI trạm báo cáo mỗi giờ (không chỉ 1
+đại diện), nhóm theo station_code - trả về 1 dict/ngày, mỗi ngày 1 list
+(station_code × 24 giờ) cùng hình dạng build_hourly_table() bên
 pipeline/forecast.py.
 
 Chạy trực tiếp (python -m pipeline.obs) để xem demo trên
@@ -144,19 +144,22 @@ def build_obs(record: dict, hour: int) -> dict:
     thẳng từ hour qua sub_of_hour() - scorer.py so buổi 2 phía trực tiếp,
     không tự suy từ hour nữa.
 
-    "station": record.get("station") - giữ tên trạm để pipeline/match_score.py
-    surface được, đối xứng với "station" (luôn None) bên
-    pipeline/forecast.py::build_hourly_table() - 2 bên phải cùng bộ khóa,
-    khác nhau ở giá trị."""
+    "station_code": lấy từ record["location"]["station_code"] (mã trạm, KHÔNG
+    phải record["station"] - đó là TÊN đã giải mã, chỉ để hiển thị, không
+    đáng tin làm khoá ghép) - đối xứng với "station_code" bên
+    pipeline/forecast.py::build_hourly_table() để
+    pipeline/match_score.py::join_forecast_obs() ghép thẳng theo
+    (station_code, hour)."""
     head        = record.get("head") or {}
     wind        = record.get("wind") or {}
     weather     = record.get("weather") or {}
     total_cloud = record.get("total_cloud") or {}
+    location    = record.get("location") or {}
 
     return {
         "hour": hour,
         "buoi": sub_of_hour(hour),
-        "station": record.get("station"),
+        "station_code": location.get("station_code"),
         "tong_luong_may": total_cloud.get("total_cloud_N"),
         "do_cao_man_may": solve_ceiling(record.get("cloud")),
         "hien_tuong":     ww_code_to_mega(weather.get("ww_code")),
@@ -166,16 +169,17 @@ def build_obs(record: dict, hour: int) -> dict:
     }
 
 
-def _empty_obs_row(hour: int) -> dict:
-    """Giờ không có dữ liệu (file thiếu, hoặc không bản ghi nào có
-    "location"): vẫn trả đủ khoá như build_obs() - "hour"/"buoi" luôn suy
-    được từ chính hour, còn lại None - cùng bộ khóa với
-    pipeline/forecast.py's dòng giờ thiếu dữ liệu (đối xứng 2 bên, xem
-    build_obs())."""
+def _empty_obs_row(hour: int, station_code) -> dict:
+    """Trạm station_code không báo cáo giờ hour (file thiếu, hoặc trạm đó
+    không có mặt trong file giờ đó): vẫn trả đủ khoá như build_obs() -
+    "hour"/"buoi" luôn suy được từ chính hour, "station_code" giữ nguyên
+    (đã biết trạm nào, chỉ thiếu dữ liệu giờ này), 6 field còn lại None -
+    cùng bộ khóa với pipeline/forecast.py's dòng giờ thiếu dữ liệu (đối
+    xứng 2 bên, xem build_obs())."""
     return {
         "hour": hour,
         "buoi": sub_of_hour(hour),
-        "station": None,
+        "station_code": station_code,
         "tong_luong_may": None,
         "do_cao_man_may": None,
         "hien_tuong": None,
@@ -194,19 +198,21 @@ def build_scalar_history(local_dir: str) -> dict:
     quantrac_filename_at() rồi kiểm tra tồn tại).
 
     Với MỖI ngày tìm thấy (còn ít nhất 1 file parse được thuộc ngày đó):
-    dựng đủ 24 dòng/giờ - giờ có file thì lấy bản ghi ĐẦU TIÊN có "location"
-    trong file đó (1 trạm đại diện/giờ - matcher hiện chưa cần phân biệt
-    nhiều trạm, xem pipeline/match_score.py) rồi build_obs(); giờ không có
-    file (hoặc file không có bản ghi nào "location") thì dòng đó là
-    _empty_obs_row(), không bỏ qua và không raise.
+    gom TẬP HỢP mọi station_code xuất hiện ở BẤT KỲ giờ nào trong ngày đó
+    (mỗi giờ 1 file có thể có nhiều trạm báo cáo - không còn chỉ lấy 1 bản
+    ghi đại diện), rồi dựng đủ 24 dòng/giờ CHO MỖI trạm đó: giờ trạm đó có
+    báo cáo (bản ghi "location".station_code khớp) thì build_obs(); giờ
+    trạm đó không báo cáo (file thiếu, hoặc trạm không có mặt giờ đó) thì
+    _empty_obs_row(hour, station_code), không bỏ qua và không raise.
 
-    Trả về: {"YYYY-MM-DD": [24 dict, CÙNG HÌNH DẠNG build_hourly_table()
-    (pipeline/forecast.py) - mỗi phần tử 1 giờ, đủ khoá "hour"/"buoi"/
-    "station" + 6 field, sắp theo giờ tăng dần], ...} - 1 entry/ngày thực
-    sự có ít nhất 1 file trong local_dir. local_dir rỗng (hoặc không file
-    nào parse được) -> {}. 2 bên forecast/obs luôn cùng bộ giờ + cùng bộ
-    khóa trong mỗi dòng, khác nhau ở giá trị - để pipeline/match_score.py's
-    join_forecast_obs() ghép thẳng không cần xử lý giờ lệch/khóa lệch.
+    Trả về: {"YYYY-MM-DD": [(station_code × 24) dict, CÙNG HÌNH DẠNG
+    build_hourly_table() (pipeline/forecast.py) - mỗi phần tử 1 (trạm,
+    giờ), đủ khoá "station_code"/"hour"/"buoi" + 6 field, sắp theo
+    (station_code, hour) tăng dần], ...} - 1 entry/ngày thực sự có ít nhất
+    1 file trong local_dir. local_dir rỗng (hoặc không file nào parse
+    được) -> {}. 2 bên forecast/obs cùng bộ khóa (station_code, hour) trong
+    mỗi dòng, khác nhau ở giá trị - để pipeline/match_score.py's
+    join_forecast_obs() ghép thẳng theo khóa đó.
     """
     by_date_hour = {}
     for name in os.listdir(local_dir):
@@ -217,13 +223,24 @@ def build_scalar_history(local_dir: str) -> dict:
 
     result = {}
     for date, hour_to_path in sorted(by_date_hour.items()):
+        # 1 lượt quét: giải mã mọi file có trong ngày, gom bản ghi theo
+        # (hour, station_code) và tập hợp mọi station_code xuất hiện.
+        record_at = {}   # (hour, station_code) -> decoded record
+        stations = set()
+        for hour, path in hour_to_path.items():
+            for r in decode_qt_file(path):
+                location = r.get("location")
+                code = location.get("station_code") if location else None
+                if code:
+                    record_at[(hour, code)] = r
+                    stations.add(code)
+
         rows = []
-        for hour in range(24):
-            path = hour_to_path.get(hour)
-            record = None
-            if path:
-                record = next((r for r in decode_qt_file(path) if r.get("location")), None)
-            rows.append(build_obs(record, hour=hour) if record is not None else _empty_obs_row(hour))
+        for station_code in sorted(stations):
+            for hour in range(24):
+                record = record_at.get((hour, station_code))
+                rows.append(build_obs(record, hour=hour) if record is not None
+                            else _empty_obs_row(hour, station_code))
         result[date.strftime("%Y-%m-%d")] = rows
     return result
 

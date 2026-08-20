@@ -29,42 +29,43 @@ FORECAST_CSV = "tests/fixtures/forecast_sample.csv"
 # tests/test_scorer.py, reused here so score_history()'s dispatch is
 # checked against an already-trusted forecast/obs pair.
 _ALL_TRUE_FORECAST = {
-    "hour": 1, "buoi": "dem", "tong_luong_may": 2, "do_cao_man_may": 1, "hien_tuong": "N_0",
-    "huong_gio": 0, "toc_do_gio": 2, "tam_nhin": 1,
+    "station_code": "k31", "hour": 1, "buoi": "dem", "tong_luong_may": 2, "do_cao_man_may": 1,
+    "hien_tuong": "N_0", "huong_gio": 0, "toc_do_gio": 2, "tam_nhin": 1,
 }
 _ALL_TRUE_OBS = {
-    "hour": 1, "buoi": "dem", "tong_luong_may": 5, "do_cao_man_may": 50, "hien_tuong": "N_0",
-    "huong_gio": 15, "toc_do_gio": 5, "tam_nhin": 0.5,
+    "station_code": "k31", "hour": 1, "buoi": "dem", "tong_luong_may": 5, "do_cao_man_may": 50,
+    "hien_tuong": "N_0", "huong_gio": 15, "toc_do_gio": 5, "tam_nhin": 0.5,
 }
 _ALL_NONE_ROW = {
-    "hour": 1, "buoi": None, "tong_luong_may": None, "do_cao_man_may": None, "hien_tuong": None,
-    "huong_gio": None, "toc_do_gio": None, "tam_nhin": None,
+    "station_code": "k31", "hour": 1, "buoi": None, "tong_luong_may": None, "do_cao_man_may": None,
+    "hien_tuong": None, "huong_gio": None, "toc_do_gio": None, "tam_nhin": None,
 }
 
 
 def test_score_history_dispatches_each_field_correctly():
-    joined = [{"hour": 1, "forecast": _ALL_TRUE_FORECAST, "obs": _ALL_TRUE_OBS}]
+    joined = [{"station_code": "k31", "hour": 1, "forecast": _ALL_TRUE_FORECAST, "obs": _ALL_TRUE_OBS}]
     scores = {r["field_name"]: r["score"] for r in score_history(joined)}
 
     assert scores == {field: True for field in FIELD_ORDER}
 
 
 def test_score_history_missing_data_scores_none_not_false():
-    joined = [{"hour": 1, "forecast": _ALL_NONE_ROW, "obs": _ALL_NONE_ROW}]
+    joined = [{"station_code": "k31", "hour": 1, "forecast": _ALL_NONE_ROW, "obs": _ALL_NONE_ROW}]
     scores = {r["field_name"]: r["score"] for r in score_history(joined)}
 
     assert scores == {field: None for field in FIELD_ORDER}
 
 
 def test_score_history_row_shape_and_order():
-    joined = [{"hour": 1, "forecast": _ALL_TRUE_FORECAST, "obs": _ALL_TRUE_OBS}]
+    joined = [{"station_code": "k31", "hour": 1, "forecast": _ALL_TRUE_FORECAST, "obs": _ALL_TRUE_OBS}]
     rows = score_history(joined)
 
     assert len(rows) == len(FIELD_ORDER)
     assert [r["field_name"] for r in rows] == list(FIELD_ORDER)
     for r in rows:
-        assert set(r.keys()) == {"hour", "field_name", "score"}
+        assert set(r.keys()) == {"station_code", "hour", "field_name", "score"}
         assert r["hour"] == 1
+        assert r["station_code"] == "k31"
 
 
 def test_score_history_hien_tuong_reads_buoi_independently_from_each_side():
@@ -76,7 +77,7 @@ def test_score_history_hien_tuong_reads_buoi_independently_from_each_side():
     "hour" (nếu suy lại từ "hour" dùng chung, 2 buổi sẽ luôn trùng nhau)."""
     forecast_row = dict(_ALL_TRUE_FORECAST, buoi="chieu")
     obs_row = dict(_ALL_TRUE_OBS, buoi="dem")
-    joined = [{"hour": 1, "forecast": forecast_row, "obs": obs_row}]
+    joined = [{"station_code": "k31", "hour": 1, "forecast": forecast_row, "obs": obs_row}]
 
     rows = {r["field_name"]: r["score"] for r in score_history(joined)}
     assert rows["hien_tuong"] is False
@@ -84,8 +85,8 @@ def test_score_history_hien_tuong_reads_buoi_independently_from_each_side():
 
 def test_score_history_multiple_hours_processed_in_order():
     joined = [
-        {"hour": 1, "forecast": _ALL_TRUE_FORECAST, "obs": _ALL_TRUE_OBS},
-        {"hour": 2, "forecast": _ALL_NONE_ROW, "obs": _ALL_NONE_ROW},
+        {"station_code": "k31", "hour": 1, "forecast": _ALL_TRUE_FORECAST, "obs": _ALL_TRUE_OBS},
+        {"station_code": "k31", "hour": 2, "forecast": _ALL_NONE_ROW, "obs": _ALL_NONE_ROW},
     ]
     rows = score_history(joined)
 
@@ -102,16 +103,26 @@ def test_score_history_empty_joined_rows_returns_empty_list():
 # =============================================================================
 
 def test_join_and_score_full_day_smoke(full_day_dir):
+    """forecast_sample.csv chỉ dự báo cho k31 - join_forecast_obs() do OBS
+    dẫn dắt nên vẫn ra 1 dòng/trạm quan trắc (kể cả trạm không có dự báo,
+    ghép với dự báo rỗng -> điểm toàn bỏ cặp)."""
     forecast_rows = build_hourly_table(load_records_csv("tests/fixtures/forecast_sample.csv"))
     scalar_history = build_scalar_history(full_day_dir)["2026-08-10"]
+    num_stations = len({r["station_code"] for r in scalar_history})
 
-    scores = score_history(join_forecast_obs(forecast_rows, scalar_history))
+    joined = join_forecast_obs(forecast_rows, scalar_history)
+    scores = score_history(joined)
 
-    assert len(scores) == 24 * len(FIELD_ORDER)
+    assert len(joined) == len(scalar_history) == num_stations * 24
+    assert len(scores) == num_stations * 24 * len(FIELD_ORDER)
     for r in scores:
         assert 0 <= r["hour"] <= 23
         assert r["field_name"] in FIELD_ORDER
         assert r["score"] in (True, False, None)
+
+    other_station = next(r["station_code"] for r in scalar_history if r["station_code"] != "k31")
+    other_scores = [r["score"] for r in scores if r["station_code"] == other_station]
+    assert all(s is None for s in other_scores)   # không dự báo -> bỏ cặp toàn bộ
 
 
 # =============================================================================
@@ -123,14 +134,21 @@ def _read_csv_rows(path):
         return list(csv.DictReader(f))
 
 
-def test_export_forecast_score_full_day_writes_one_csv_with_24_rows(tmp_path, full_day_qt_files):
+def test_export_forecast_score_full_day_writes_one_csv_with_rows_per_station(tmp_path, full_day_qt_files, full_day_dir):
+    num_stations = len({r["station_code"] for r in build_scalar_history(full_day_dir)["2026-08-10"]})
+
     exported = export_forecast_score(full_day_qt_files, FORECAST_CSV, str(tmp_path))
 
     assert list(exported.keys()) == ["2026-08-10"]
-    assert exported["2026-08-10"]["records"] == 24
+    assert exported["2026-08-10"]["records"] == num_stations * 24
     rows = _read_csv_rows(exported["2026-08-10"]["csv"])
-    assert [int(r["hour"]) for r in rows] == list(range(24))
-    expected_cols = {"date", "hour", "buoi", "station"} | \
+    by_station = {}
+    for r in rows:
+        by_station.setdefault(r["station_code"], []).append(r)
+    assert len(by_station) == num_stations
+    for station_code, srows in by_station.items():
+        assert [int(r["hour"]) for r in srows] == list(range(24))
+    expected_cols = {"date", "station_code", "hour", "buoi"} | \
         {f"forecast_{f}" for f in FIELD_ORDER} | \
         {f"obs_{f}" for f in FIELD_ORDER} | \
         {f"score_{f}" for f in FIELD_ORDER}
@@ -146,20 +164,22 @@ def test_export_forecast_score_writes_score_prefixed_csv_filename(tmp_path, full
     assert os.path.basename(exported["2026-08-10"]["csv"]) == "score_20260810.csv"
 
 
-def test_export_forecast_score_station_populated_on_real_data(tmp_path, full_day_qt_files):
-    """Hour 0's representative station is Yên Bái - same fixture record
+def test_export_forecast_score_station_code_populated_on_real_data(tmp_path, full_day_qt_files):
+    """Yên Bái (k31), giờ 0 - same fixture record
     test_build_obs_real_fixture_yenbai (tests/test_pipeline_obs.py) hand-verifies."""
     exported = export_forecast_score(full_day_qt_files, FORECAST_CSV, str(tmp_path))
     rows = _read_csv_rows(exported["2026-08-10"]["csv"])
 
-    assert rows[0]["station"] == "Yên Bái"
-    assert all(r["station"] for r in rows)   # every hour has a file in this fixture
+    yenbai_row = next(r for r in rows if r["station_code"] == "k31" and r["hour"] == "0")
+    assert yenbai_row["station_code"] == "k31"
+    assert all(r["station_code"] for r in rows)   # mọi dòng đều biết trạm, kể cả trạm không có dự báo
 
 
 def test_export_forecast_score_missing_obs_hour_scores_none(tmp_path, full_day_dir):
     """Only 2/24 obs files present - the other 22 hours must still produce a
-    row (not be dropped), with obs/station blank and every field's score
-    blank (CSV empty string == None)."""
+    row per station (not be dropped), with obs blank and every field's
+    score blank (CSV empty string == None) - station_code stays populated
+    (đã biết trạm nào từ 2 file có mặt, chỉ thiếu dữ liệu giờ đó)."""
     kept_hours = [0, 12]
     dl_dir = tmp_path / "dl"
     dl_dir.mkdir()
@@ -172,24 +192,30 @@ def test_export_forecast_score_missing_obs_hour_scores_none(tmp_path, full_day_d
     out_dir = tmp_path / "out"
     out_dir.mkdir()
     exported = export_forecast_score(local_files, FORECAST_CSV, str(out_dir))
-    rows = {int(r["hour"]): r for r in _read_csv_rows(exported["2026-08-10"]["csv"])}
+    rows = _read_csv_rows(exported["2026-08-10"]["csv"])
+    by_station = {}
+    for r in rows:
+        by_station.setdefault(r["station_code"], []).append(r)
 
-    assert len(rows) == 24
-    for hour in range(24):
-        r = rows[hour]
-        if hour in kept_hours:
-            assert r["station"]
-        else:
-            assert r["station"] == ""
-            assert r["obs_tong_luong_may"] == ""
-            assert all(r[f"score_{f}"] == "" for f in FIELD_ORDER)
+    assert by_station
+    for station_code, srows in by_station.items():
+        by_hour = {int(r["hour"]): r for r in srows}
+        assert list(by_hour) == list(range(24))
+        for hour in range(24):
+            r = by_hour[hour]
+            assert r["station_code"] == station_code
+            if hour not in kept_hours:
+                assert r["obs_tong_luong_may"] == ""
+                assert all(r[f"score_{f}"] == "" for f in FIELD_ORDER)
 
 
-def test_export_forecast_score_no_forecast_csv_path_still_24_rows(tmp_path, full_day_qt_files):
+def test_export_forecast_score_no_forecast_csv_path_still_has_rows(tmp_path, full_day_qt_files, full_day_dir):
+    num_stations = len({r["station_code"] for r in build_scalar_history(full_day_dir)["2026-08-10"]})
+
     exported = export_forecast_score(full_day_qt_files, None, str(tmp_path))
     rows = _read_csv_rows(exported["2026-08-10"]["csv"])
 
-    assert [int(r["hour"]) for r in rows] == list(range(24))
+    assert len(rows) == num_stations * 24
     for r in rows:
         assert r["forecast_tong_luong_may"] == ""
         assert all(r[f"score_{f}"] == "" for f in FIELD_ORDER)
@@ -204,7 +230,7 @@ def test_export_forecast_score_empty_local_files_returns_empty_dict(tmp_path):
 
 def test_export_forecast_score_multi_date_writes_one_csv_per_date(tmp_path, qt_00, qt_other_day):
     """qt_00 is 2026-08-10 hour 0, qt_other_day is 2026-08-11 hour 0 - two
-    distinct dates, 1 CSV each, 24 rows each, no hour collision between them."""
+    distinct dates, 1 CSV each, no hour/date collision between them."""
     dl_dir = tmp_path / "dl"
     dl_dir.mkdir()
     shutil.copy(qt_00, dl_dir / os.path.basename(qt_00))
@@ -213,13 +239,14 @@ def test_export_forecast_score_multi_date_writes_one_csv_per_date(tmp_path, qt_0
 
     out_dir = tmp_path / "out"
     out_dir.mkdir()
+    history_by_date = build_scalar_history(str(dl_dir))
     exported = export_forecast_score(local_files, None, str(out_dir))
 
     assert set(exported.keys()) == {"2026-08-10", "2026-08-11"}
     for date_str, info in exported.items():
-        assert info["records"] == 24
+        num_stations = len({r["station_code"] for r in history_by_date[date_str]})
+        assert info["records"] == num_stations * 24
         rows = _read_csv_rows(info["csv"])
-        assert [int(r["hour"]) for r in rows] == list(range(24))
         assert all(r["date"] == date_str for r in rows)
 
 
