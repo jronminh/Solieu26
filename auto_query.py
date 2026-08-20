@@ -9,7 +9,7 @@ Reaches into the App instance (see main.py) for app.v["auto_value"]/
 
 pause()/resume() are the only entry points other modules should use to stop
 and restart the timer (e.g. while the "Tải số liệu" advanced-mode dialog is
-open) — they keep auto_job/auto_next_run consistent instead of callers
+open); they keep auto_job/auto_next_run consistent instead of callers
 poking those fields directly.
 """
 
@@ -75,7 +75,7 @@ class AutoQuery:
             return 0
 
     def pause(self):
-        """Cancel any pending tick and clear auto_next_run — used while advanced
+        """Cancel any pending tick and clear auto_next_run: used while advanced
         (date-range) mode is on, so a background tick can't re-fire a fetch the
         user is busy configuring."""
         app = self.app

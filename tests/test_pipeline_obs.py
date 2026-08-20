@@ -30,7 +30,7 @@ def test_wind_dd_to_huong_gio_cardinals():
 
 
 def test_wind_dd_to_huong_gio_n_wraps_both_neighbouring_decades():
-    """N owns 3 decades (350, 0, 10) — both the decade just below 360 and
+    """N owns 3 decades (350, 0, 10): both the decade just below 360 and
     the one just above 0 must resolve to N."""
     assert wind_dd_to_huong_gio(350) == LABELS.index("N")
     assert wind_dd_to_huong_gio(10) == LABELS.index("N")
@@ -76,7 +76,7 @@ def test_ww_code_to_mega_n_0_group():
 
 def test_ww_code_to_mega_distinguishes_identical_labels_by_raw_code():
     """64/65 and 82 both decode to the Vietnamese label 'Mưa to' but must
-    land in different mega-buckets — this only works if the lookup keys on
+    land in different mega-buckets; this only works if the lookup keys on
     the raw ww code, not the translated label."""
     assert ww_code_to_mega("64") == "mua_mua_phun"
     assert ww_code_to_mega("65") == "mua_mua_phun"
@@ -99,7 +99,7 @@ def test_ww_code_to_mega_unknown_code():
 # =============================================================================
 
 def test_build_obs_real_fixture_yenbai(qt_00):
-    """Hand-verified against Qt26081000.txt's first (Yên Bái) record — same
+    """Hand-verified against Qt26081000.txt's first (Yên Bái) record: same
     record test_pipeline_decode.py's flatten_record test is anchored to."""
     records = decode_qt_file(qt_00)
     obs = build_obs(records[0], hour=0)
@@ -117,7 +117,7 @@ def test_build_obs_real_fixture_yenbai(qt_00):
 
 
 def test_build_obs_missing_groups_come_back_none_except_hien_tuong_and_buoi():
-    """A record with none of the optional groups reported (only location) —
+    """A record with none of the optional groups reported (only location):
     5 field ra None (thiếu dữ liệu thật), không raise trên dict thiếu.
     Riêng hien_tuong ra "N_0" (không báo cáo ww = không có gì đáng kể, xem
     ww_code_to_mega()) và buoi luôn tính được từ hour truyền vào (giờ 5 ->

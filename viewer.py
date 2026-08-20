@@ -29,19 +29,19 @@ from utils.ini_utils import update_ini_key
 class HistoryViewer:
     def __init__(self, app):
         self.app = app
-        # Columns hidden in the CSV viewer — shared across all viewer windows
+        # Columns hidden in the CSV viewer: shared across all viewer windows
         # (every history_*.csv has the same schema); loaded from config, saved back on change.
         self.hidden_cols = set(config.CONFIG.get("viewer_hidden_columns", []))
 
     # ----- Entry points ---------------------------------------------------
     def open_latest(self):
-        """'Xem số liệu' — opens the history viewer showing the MOST RECENT day
+        """'Xem số liệu' opens the history viewer showing the MOST RECENT day
         available on disk. pipeline.decode_files.export_history_by_date() writes one
         history_YYYYMMDD.csv per day, so a multi-day advanced query leaves several
-        files behind — the 'Ngày' dropdown inside the viewer switches between them."""
+        files behind. The 'Ngày' dropdown inside the viewer switches between them."""
         history_files = self._available_history_files()
         if not history_files:
-            self.app._log("WARN", "Xem số liệu: chưa có file lịch sử nào — hãy 'Làm mới' trước")
+            self.app._log("WARN", "Xem số liệu: chưa có file lịch sử nào, hãy 'Làm mới' trước")
             messagebox.showwarning("Chưa có dữ liệu",
                                    "Chưa có file lịch sử nào.\n\nHãy bấm 'Làm mới' để tạo file trước.")
             return
@@ -55,7 +55,7 @@ class HistoryViewer:
         filename = f"history_{date_key.replace('-', '')}.csv"
         self.app._log("ACT", f"Xem {filename}")
         if not path or not os.path.isfile(path):
-            self.app._log("ERR", f"Chưa có {filename} trong {self._current_output_dir()} — hãy Làm mới trước")
+            self.app._log("ERR", f"Chưa có {filename} trong {self._current_output_dir()}, hãy Làm mới trước")
             messagebox.showwarning(
                 "Chưa có file",
                 f"Không có dữ liệu ngày {date_key}.\n\nHãy bấm 'Làm mới' để tạo file trước.")
@@ -81,7 +81,6 @@ class HistoryViewer:
         win._header, win._data = [], []
         win._sort_col, win._sort_reverse = None, False   # column currently sorted & direction
 
-        # Toolbar
         bar = ttk.Frame(win, padding=(8, 6))
         bar.pack(fill="x")
         win._toggle_btn = ttk.Button(bar, text="Xem raw",
@@ -94,7 +93,7 @@ class HistoryViewer:
         ttk.Button(bar, text="Hiển thị",
                    command=lambda: self._open_column_picker(win)).pack(side="left", padx=6)
 
-        # Station filter — post-process filter over the loaded day's file (which
+        # Station filter: post-process filter over the loaded day's file (which
         # already holds every station); default to the station_code configured
         # in config.ini.
         default_code = (config.CONFIG.get("station_code") or "").strip()
@@ -106,11 +105,11 @@ class HistoryViewer:
                     width=16).pack(side="left")
         win._station_filter.trace_add("write", lambda *_: self._on_station_filter_change(win))
 
-        # Hour filter — same post-process idea as the station filter above, but over
+        # Hour filter: same post-process idea as the station filter above, but over
         # the "hour" column (always present, just hidden from the rendered table).
         # Its own options depend on the station filter: a specific station locks
         # giờ to "Tất cả các giờ" (one station's whole history), while "Tất cả các
-        # trạm" hides that option and forces a specific giờ — otherwise the table
+        # trạm" hides that option and forces a specific giờ. Otherwise the table
         # would be every station × every hour at once.
         win._hour_filter = tk.StringVar(value=ALL_HOURS)
         ttk.Label(bar, text="Giờ:").pack(side="left", padx=(12, 2))
@@ -122,7 +121,7 @@ class HistoryViewer:
 
         self._sync_hour_filter_for_station(win)
 
-        # Date filter — NOT a row filter: each history_YYYYMMDD.csv is already one
+        # Date filter is NOT a row filter: each history_YYYYMMDD.csv is already one
         # day, so picking a date here switches WHICH FILE is loaded, same idea as
         # a file picker rather than a post-process filter like Trạm/Giờ above.
         win._date_filter = tk.StringVar(value=date_key)
@@ -135,10 +134,11 @@ class HistoryViewer:
         win._status = ttk.Label(bar, text="")
         win._status.pack(side="right")
 
-        # Table + two scrollbars
         tf = ttk.Frame(win, padding=(8, 0, 8, 8))
         tf.pack(fill="both", expand=True)
         tree = ttk.Treeview(tf, show="headings")
+        # vsb: history files can run to thousands of rows. hsb: raw mode's single
+        # column is 560px wide (see width below), often wider than the window.
         vsb = ttk.Scrollbar(tf, orient="vertical", command=tree.yview)
         hsb = ttk.Scrollbar(tf, orient="horizontal", command=tree.xview)
         tree.configure(yscrollcommand=vsb.set, xscrollcommand=hsb.set)
@@ -148,7 +148,7 @@ class HistoryViewer:
         tf.rowconfigure(0, weight=1)
         tf.columnconfigure(0, weight=1)
         win._tree = tree
-        # Zebra striping — tags live on the widget, so this only needs setting once.
+        # Zebra striping: tags live on the widget, so this only needs setting once.
         tree.tag_configure("odd", background="#f3f4f6")
         tree.tag_configure("even", background="#ffffff")
 
@@ -165,7 +165,7 @@ class HistoryViewer:
     def _available_history_files(self) -> dict:
         """Scan the current output dir for history_YYYYMMDD.csv files (one per
         day, written by pipeline.decode_files.export_history_by_date). Returns {"YYYY-MM-DD": path},
-        sorted by nothing in particular — callers sort the keys as needed."""
+        sorted by nothing in particular; callers sort the keys as needed."""
         out_dir = self._current_output_dir()
         found = {}
         try:
@@ -220,7 +220,7 @@ class HistoryViewer:
     def _toggle_viewer_mode(self, win):
         """Switch between Data mode (hides raw) and Raw mode (identity cols + raw)."""
         win._mode = "raw" if win._mode == "data" else "data"
-        self.app._log("ACT", f"Xem CSV — chế độ {'Raw' if win._mode == 'raw' else 'Số liệu'}")
+        self.app._log("ACT", f"Xem CSV: chế độ {'Raw' if win._mode == 'raw' else 'Số liệu'}")
         self._render_viewer(win)
 
     def _open_csv_external(self, path: str):
@@ -336,7 +336,7 @@ class HistoryViewer:
     def _apply_column_selection(self, col_vars: dict):
         """Read checkbox states → update self.hidden_cols, redraw every open viewer, save to config."""
         self.hidden_cols = {c for c, v in col_vars.items() if not v.get()}
-        self.app._log("ACT", f"Áp dụng hiển thị cột — ẩn {len(self.hidden_cols)} cột")
+        self.app._log("ACT", f"Áp dụng hiển thị cột, ẩn {len(self.hidden_cols)} cột")
         for key, w in self.app._dialogs.items():
             if key.startswith("view_") and w.winfo_exists():
                 self._render_viewer(w)
@@ -370,7 +370,7 @@ class HistoryViewer:
                 h_idx = header.index("hour")
                 data = [r for r in data if h_idx < len(r) and r[h_idx] == hour]
 
-        # No date filter here — win._date_filter picks WHICH FILE is loaded,
+        # No date filter here: win._date_filter picks WHICH FILE is loaded,
         # not a row filter within it.
 
         if mode == "raw":
@@ -379,7 +379,7 @@ class HistoryViewer:
             cols = [c for c in prefer if c in header]
         else:
             cols = [c for c in header if c != "raw"]   # data mode: all columns, minus raw
-        # ALWAYS_HIDDEN_VIEWER_COLUMNS are dropped in both modes — they stay in the
+        # ALWAYS_HIDDEN_VIEWER_COLUMNS are dropped in both modes; they stay in the
         # CSV file, just never rendered here (see the constant's docstring above).
         cols = [c for c in cols
                 if c not in ALWAYS_HIDDEN_VIEWER_COLUMNS and c not in self.hidden_cols]
@@ -388,7 +388,7 @@ class HistoryViewer:
 
         tree.delete(*tree.get_children())
         tree["columns"] = cols
-        # Width from the ACTUAL DATA, not the header text — a header like
+        # Width from the ACTUAL DATA, not the header text: a header like
         # "temperature_c" is much longer than any value it holds, so sizing off
         # the header (the old behavior) left short numeric columns wide and sparse.
         # Falls back to the header length only when a column has no data to sample
@@ -413,6 +413,6 @@ class HistoryViewer:
                         values=[r[idx[c]] if idx[c] < len(r) else "" for c in cols])
 
         tree.xview_moveto(0)
-        win._status.config(text=f"Chế độ: {'Raw' if mode == 'raw' else 'Số liệu'} — "
+        win._status.config(text=f"Chế độ: {'Raw' if mode == 'raw' else 'Số liệu'}, "
                                 f"{len(data)} dòng × {len(cols)} cột")
         win._toggle_btn.config(text="Xem số liệu" if mode == "raw" else "Xem raw")

@@ -1,7 +1,7 @@
 """
 test_encode.py
 ====================
-encode.py is the reverse of decode.py — the main thing worth testing is that
+encode.py is the reverse of decode.py: the main thing worth testing is that
 encode_record() -> decode_record() round-trips back to the values that went
 in (within the format's own precision), plus the validation errors each
 encoder raises for out-of-range input.
@@ -42,7 +42,7 @@ def test_encode_decode_roundtrip_basic():
 
 def test_encode_decode_roundtrip_negative_temperature():
     """Real August data has no negative temps, so this path is otherwise
-    untested — exercise it directly through the encode/decode round trip."""
+    untested; exercise it directly through the encode/decode round trip."""
     raw = encode_record(
         station_code="k31", lat=21.7, lon=104.85,
         vv_code="00", total_cloud_N_code="0", wind_dd=0, wind_ff=0,
@@ -55,7 +55,7 @@ def test_encode_decode_roundtrip_negative_temperature():
 
 def test_encode_decode_roundtrip_against_real_fixture(qt_00):
     """Re-encode the hand-verified Yên Bái record's decoded values and check
-    it decodes back to the same numbers — ties encode.py to the same real
+    it decodes back to the same numbers; ties encode.py to the same real
     data decode.py is tested against."""
     from bulletin.decode import decode_qt_file
 

@@ -2,17 +2,17 @@
 scorer.py
 ====================
 Bộ máy chấm điểm cho 6 trường dự báo: solve_ceiling (giải trần từ các lớp
-mây, dùng khi giải quan trắc trước khi chấm) và 6 hàm score_<field> — mỗi
+mây, dùng khi giải quan trắc trước khi chấm) và 6 hàm score_<field>, mỗi
 hàm ứng với đúng 1 trường, xem chi tiết ngay tại từng hàm.
 
-Mô hình chung: mỗi hàm score_<field> nhận THẲNG 2 DÒNG đã ghép theo giờ —
+Mô hình chung: mỗi hàm score_<field> nhận THẲNG 2 DÒNG đã ghép theo giờ:
 `forecast_row` (đầu ra pipeline/forecast.py::build_hourly_table()) và
 `obs` (đầu ra pipeline/obs.py::build_obs()/build_scalar_history()), đúng
 những gì pipeline/match_score.py::join_forecast_obs() đã ghép sẵn. Cả 2 dòng
 cùng khoá theo tên 6 trường (`tong_luong_may`, `do_cao_man_may`,
 `hien_tuong`, `huong_gio`, `toc_do_gio`, `tam_nhin`) cộng `"hour"`/`"buoi"`.
 Mỗi hàm score_<field> tự đọc đúng entry BUCKETS["<field>"] của mình và tự
-lấy trong MỖI BÊN những gì nó cần — kể cả từ trường khác của phía kia, như
+lấy trong MỖI BÊN những gì nó cần, kể cả từ trường khác của phía kia, như
 score_huong_gio cần obs["toc_do_gio"] để xét regime gió.
 
 Mọi hàm score_* trả về True/False, hoặc None nếu bỏ cặp (thiếu dữ liệu/na).
@@ -34,39 +34,18 @@ CEILING_LOW    = {"Cu", "Sc", "St", "Cb"}   # mây dưới
 CEILING_MIDDLE = {"As", "Ac", "Ns"}          # mây giữa
 # Mây trên (Ci, Cc, Cs) KHÔNG tính vào màn.
 
-CEILING_THRESHOLD = 6   # 6/10 — cùng thang phần mười với lượng mây đã giải
+CEILING_THRESHOLD = 6   # 6/10, cùng thang phần mười với lượng mây đã giải
 
 
 def solve_ceiling(layers):
     """
-    Tính độ cao màn mây từ các lớp mây riêng lẻ (theo mô tả nghiệp vụ).
+    Tính độ cao màn mây (trần) từ danh sách các lớp mây quan trắc.
 
-    Tham số
-    -------
-    layers : list[dict] | None
-        Mỗi lớp: {"type": <tên loại "Cu"/"Sc"/...>,
-                   "amount": <lượng, PHẦN MƯỜI 0-10>,
-                   "height": <độ cao, MÉT>}
-        - "type"   : tên loại đã giải (bảng cloud_type). Nếu decode trả CODE
-                     thì map qua TABLES["cloud_type"] TRƯỚC khi gọi hàm này.
-        - "amount" : phải cùng thang phần mười với CEILING_THRESHOLD. Nếu
-                     decode trả octa/khác thì quy về phần mười trước.
-        - None     : không có dữ liệu để tính -> trả None (bỏ cặp).
-        - []       : quan sát được nhưng không có lớp mây dưới/giữa -> NO_CEILING.
-
-    Trả về
-    ------
-    float | int   : có màn -> độ cao trần (mét)
-    NO_CEILING    : quan sát được nhưng không thành màn ("không màn", có chấm)
-    None          : thiếu dữ liệu -> bỏ cặp (KHÁC "không màn")
-
-    Quy tắc (đúng theo nghiệp vụ):
-      1. Là "màn" khi TỔNG lượng mây dưới (Cu,Sc,St,Cb) + mây giữa
-         (As,Ac,Ns) >= 6/10. Không đạt -> "không màn".
-      2. Có lớp tự nó >= 6/10 -> lấy độ cao LỚP THẤP NHẤT trong số đó.
-      3. Không lớp nào >= 6/10 (nhưng tổng >= 6/10) -> lấy độ cao lớp có
-         LƯỢNG LỚN NHẤT.
-      4. Lượng bằng nhau -> lấy lớp THẤP HƠN.
+    Trần không đọc thẳng từ mã quan trắc: phải suy ra từ tổ hợp nhiều lớp
+    mây dưới và giữa cùng lúc, theo quy tắc nghiệp vụ áp dụng ngay trong
+    thân hàm dưới đây.
+    Trả về độ cao trần (mét), NO_CEILING nếu quan trắc được nhưng không
+    thành màn, hoặc None nếu thiếu dữ liệu để tính.
     """
     if layers is None:
         return None
@@ -91,7 +70,7 @@ def solve_ceiling(layers):
 
 
 # ====================================================================== #
-# HELPER DÙNG CHUNG — chỉ vì phép toán giống hệt nhau giữa 2 trường,      #
+# HELPER DÙNG CHUNG: chỉ vì phép toán giống hệt nhau giữa 2 trường,       #
 # tham số truyền tường minh (không dispatch theo field/kind).            #
 # ====================================================================== #
 
@@ -111,7 +90,7 @@ def _window_hit(windows, forecast_idx, obs_value, tolerance):
 
 
 # ====================================================================== #
-# TỔNG LƯỢNG MÂY — dự báo CHỌN 1 CỬA SỔ trong 9 cửa chồng nhau (idx 0=0-2 #
+# TỔNG LƯỢNG MÂY: dự báo CHỌN 1 CỬA SỔ trong 9 cửa chồng nhau (idx 0=0-2  #
 # ... idx 8=8-10); quan trắc là số nguyên 0-10, so trực tiếp (không       #
 # bucket hóa). ±1 áp cho CỬA SỔ dự báo, không phải cho giá trị.           #
 # ====================================================================== #
@@ -128,9 +107,9 @@ def score_tong_luong_may(forecast_row, obs):
 
 
 # ====================================================================== #
-# ĐỘ CAO MÀN MÂY (trần) — quan trắc phải qua solve_ceiling() trước khi    #
+# ĐỘ CAO MÀN MÂY (trần): quan trắc phải qua solve_ceiling() trước khi    #
 # gọi hàm này (ra mét, hoặc NO_CEILING, hoặc None nếu thiếu dữ liệu).     #
-# "Không màn" là BUCKET TRÊN CÙNG, kề bucket cao nhất — ±1 vẫn chạy qua   #
+# "Không màn" là BUCKET TRÊN CÙNG, kề bucket cao nhất, ±1 vẫn chạy qua    #
 # giữa 2 trạng thái đó, không phải bỏ cặp.                                #
 # ====================================================================== #
 
@@ -150,7 +129,7 @@ def score_do_cao_man_may(forecast_row, obs):
 
 
 # ====================================================================== #
-# TẦM NHÌN — biến thẳng, quan trắc là 1 số km, bucket hóa rồi so ±1       #
+# TẦM NHÌN: biến thẳng, quan trắc là 1 số km, bucket hóa rồi so ±1        #
 # bucket với bucket dự báo.                                               #
 # ====================================================================== #
 
@@ -167,12 +146,12 @@ def score_tam_nhin(forecast_row, obs):
 
 
 # ====================================================================== #
-# GIÓ (tốc độ + hướng) — regime theo TỐC ĐỘ QUAN TRẮC (xem TODO.md: cơ sở #
+# GIÓ (tốc độ + hướng): regime theo TỐC ĐỘ QUAN TRẮC (xem TODO.md: cơ sở #
 # này còn chờ xác nhận):                                                  #
 #   - obs_speed <= 2 m/s : CHỈ chấm tốc độ, bỏ hướng                     #
 #   - obs_speed > 15 m/s : CHỈ chấm hướng, bỏ tốc độ                     #
 #   - 2 < obs_speed <= 15: chấm cả hai                                   #
-# score_huong_gio() tự đọc obs["toc_do_gio"] để xét regime — không có 1  #
+# score_huong_gio() tự đọc obs["toc_do_gio"] để xét regime, không có 1   #
 # hàm riêng "ghép cặp" đứng ngoài gọi cả hai.                             #
 # ====================================================================== #
 
@@ -199,7 +178,7 @@ def score_huong_gio(forecast_row, obs):
     """
     forecast_row["huong_gio"]: hướng dự báo viên chọn (chỉ số 0..15).
     obs["huong_gio"]: hướng quan trắc. obs["toc_do_gio"]: tốc độ quan trắc,
-    dùng để xét regime — <= WIND_NO_DIR_MAX thì không chấm hướng.
+    dùng để xét regime: <= WIND_NO_DIR_MAX thì không chấm hướng.
     """
     spec = BUCKETS["huong_gio"]
     forecast_idx = forecast_row.get("huong_gio")
@@ -217,7 +196,7 @@ def score_huong_gio(forecast_row, obs):
 
 
 # ====================================================================== #
-# HIỆN TƯỢNG — 2 tầng: MEGA (loại, khớp chính xác) × SUB (buổi, ±1 kẹp   #
+# HIỆN TƯỢNG: 2 tầng, MEGA (loại, khớp chính xác) × SUB (buổi, ±1 kẹp    #
 # mép). GIỜ quan trắc -> buổi bằng sub_of_hour() (ánh xạ trong config).   #
 # Đúng khi MEGA khớp đúng VÀ buổi lệch <= 1.                              #
 # ====================================================================== #
@@ -248,21 +227,10 @@ def sub_of_hour(hour):
 
 def score_hien_tuong(forecast_row, obs):
     """
-    forecast_row["hien_tuong"] : nhãn mega-bucket (loại hiện tượng) dự báo
-        viên chọn.
-    forecast_row["buoi"] : buổi dự báo ('toi'/'dem'/'sang'/'trua'/'chieu') -
-        pipeline/forecast.py::build_hourly_table() tự suy từ giờ của
-        chính dòng đó (sub_of_hour()) - dự báo viên chỉ chọn MEGA cho 1
-        khoảng giờ, KHÔNG tự chọn buổi.
-    obs["hien_tuong"] : mega ĐÃ quy đổi sẵn từ mã ww gốc — adapter
-        (pipeline/obs.py::ww_code_to_mega()) làm việc này trước khi gọi vào
-        đây, không phải mã ww thô. Không báo cáo ww cũng ra "N_0", không
-        phải None (xem ww_code_to_mega()).
-    obs["buoi"] : buổi quan trắc - pipeline/obs.py::build_obs() tự suy từ
-        giờ quan trắc, cùng cách tính sub_of_hour() như bên dự báo.
-
-    Đúng khi: MEGA khớp CHÍNH XÁC (tolerance 0) VÀ buổi lệch <= sub_tolerance
-    (kẹp mép, KHÔNG cuộn vòng).
+    Đúng khi MEGA khớp chính xác (tolerance 0) và buổi lệch không quá
+    sub_tolerance (kẹp mép, không cuộn vòng).
+    obs["hien_tuong"] đã được adapter quy đổi mega từ mã ww gốc trước khi
+    gọi tới đây, không phải mã ww thô.
     Trả True/False, hoặc None nếu thiếu dữ liệu.
     """
     spec = BUCKETS["hien_tuong"]

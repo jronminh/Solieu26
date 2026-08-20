@@ -4,8 +4,8 @@ test_bulletin_generator.py
 bulletin_generator.py's table backbone stores {start, end, field, value} rows
 and merges them into one encode_record() call per hour any row's range
 touches. This tests only that pure merge/encode logic (_covered_hours,
-_merge_at_hour, _encode_state, _row_value_str, the FIELD_DEFS registry) —
-no Tkinter widgets are built or shown, so no display is required.
+_merge_at_hour, _encode_state, _row_value_str, the FIELD_DEFS registry).
+No Tkinter widgets are built or shown, so no display is required.
 
 Two of these cases (inclusive end-hour, per-hour breakpoints instead of
 per-row-start) are regression tests for bugs a user caught by hand: a
@@ -66,7 +66,7 @@ def test_merge_at_hour_combines_different_fields():
 
 
 def test_encode_state_defaults_mandatory_fields_when_uncovered():
-    """vv/N_total/wind_dd/wind_ff are mandatory tokens in every record — an
+    """vv/N_total/wind_dd/wind_ff are mandatory tokens in every record; an
     uncovered hour must still encode (using the documented 0/"0" defaults),
     not raise."""
     raw = _encode_state({}, "k31", 21.7, 104.85, "Yên Bái")
@@ -116,7 +116,7 @@ def test_encode_state_orders_cloud_layers_by_slot():
 
 def test_full_scenario_matches_reported_example():
     """The scenario a user reported by hand: wind 5 m/s from 07-09, then
-    7 m/s from 09-11 — must yield 5 hourly codes (07..11), each with the
+    7 m/s from 09-11; must yield 5 hourly codes (07..11), each with the
     right wind speed, and the shared boundary hour (09) uses the
     later-starting row's value."""
     rows = [_row(7, 9, "wind_ff", 5.0, 1), _row(9, 11, "wind_ff", 7.0, 2)]

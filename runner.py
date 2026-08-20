@@ -9,15 +9,15 @@ the log helper, and the "Làm mới" button; main.py starts its poll loop from
 App.__init__.
 
 Anti-freeze contract: _work() runs on a worker thread and never touches
-widgets — it only pushes events onto self.q; the main thread's _poll() reads
+widgets, it only pushes events onto self.q; the main thread's _poll() reads
 them back via root.after() and applies UI updates itself. It is the ONLY
-place that ties the 2 independent pipeline modules together —
+place that ties the 2 independent pipeline modules together:
 pipeline/fetch.py (FTP download) and pipeline/decode_files.py (decode + CSV export)
 don't import each other and neither knows about the other; a decode failure
 can't take down a download already in progress. It runs them as 2 stages and
 reports them as 2 separate outcomes: 'fetch_done' (always, once download
 finishes) then either 'export_done' or 'export_error' (only if there were
-files to process) — on top of the always-available 'log' / 'progress' /
+files to process), on top of the always-available 'log' / 'progress' /
 'error' (connect/login failure) events.
 """
 
@@ -37,7 +37,7 @@ class Runner:
         self.app = app
         self.q = queue.Queue()
         self.worker = None
-        self._run_in_progress = False  # mirrors _set_actions_enabled — feeds advanced_dialog.refresh_controls_state
+        self._run_in_progress = False  # mirrors _set_actions_enabled, feeds advanced_dialog.refresh_controls_state
         self.last_output_dir = None
         self.last_result = None     # result dict from the last completed run (for the info panel)
         self.last_cfg = None        # cfg dict from the last _on_run (carries the queried date)
@@ -47,7 +47,7 @@ class Runner:
     def _build_cfg(self) -> dict:
         """Read the form → cfg dict; local_dir/timeout/retry come from config's fixed constants.
 
-        Always sets start_date/end_date — pipeline_fetch.download_files() takes the fast
+        Always sets start_date/end_date: pipeline_fetch.download_files() takes the fast
         single-day path when they're equal. Normal mode: always "today", no date
         field to read. Advanced mode (self.app.v["advanced_mode"], on while the "Tải
         số liệu" dialog is open): reads them from that dialog's fields instead.
@@ -82,7 +82,7 @@ class Runner:
         return cfg
 
     def _set_actions_enabled(self, enabled: bool):
-        """Toggle 'Làm mới' — locked while a run is in progress. 'Bắt đầu' (trong
+        """Toggle 'Làm mới': locked while a run is in progress. 'Bắt đầu' (trong
         dialog 'Tải số liệu', nếu đang mở) khóa/mở theo cùng trạng thái qua
         advanced_dialog.refresh_controls_state()."""
         app = self.app
@@ -91,7 +91,7 @@ class Runner:
         app.advanced_dialog.refresh_controls_state()
 
     def _on_run(self) -> bool:
-        """Returns True iff a worker thread was actually started — False if
+        """Returns True iff a worker thread was actually started, False if
         skipped (a run is already in progress) or rejected (bad input). Callers
         that need to know whether the query truly started (e.g.
         AdvancedDialog._on_advanced_start, to decide whether to close the 'Tải
@@ -126,10 +126,10 @@ class Runner:
 
     def _work(self, cfg):
         """
-        Worker thread — only pushes events onto the queue, never touches widgets.
+        Worker thread: only pushes events onto the queue, never touches widgets.
 
-        pipeline.decode_files được import TRỄ, ngay ở đây (không phải ở đầu file) —
-        một lỗi decode (import lỗi hay exception lúc chạy) chỉ làm hỏng giai
+        pipeline.decode_files được import TRỄ, ngay ở đây (không phải ở đầu file).
+        Một lỗi decode (import lỗi hay exception lúc chạy) chỉ làm hỏng giai
         đoạn export, không đụng tới giai đoạn fetch đã báo xong lẫn việc
         main.py tự khởi động (xem module docstring: fetch/decode không import
         lẫn nhau).
@@ -184,7 +184,7 @@ class Runner:
         app.root.after(100, self._poll)
 
     def _on_fetch_done(self, dl: dict):
-        """Giai đoạn 1 (fetch) xong — LUÔN cập nhật files/missing bất kể giai
+        """Giai đoạn 1 (fetch) xong: LUÔN cập nhật files/missing bất kể giai
         đoạn 2 sau đó thế nào. Giữ đúng hình dạng dict cũ (ok/history_files/
         history_records) để _refresh_info_panel() không phải sửa; _on_export_done()/
         _on_export_error() sẽ cập nhật tiếp lên self.last_result này."""
@@ -217,11 +217,11 @@ class Runner:
         app.status.config(text="Hoàn tất")
         parts = [f"{os.path.basename(hinfo['csv'])} ({hinfo['records']} record)"
                  for _, hinfo in sorted(history_files.items())]
-        app._log("OK", "Hoàn tất — đã xuất: " + (", ".join(parts) if parts else "(không có)"))
+        app._log("OK", "Hoàn tất, đã xuất: " + (", ".join(parts) if parts else "(không có)"))
 
     def _on_export_error(self, msg: str):
-        """Khối 1 đã xong (self.last_result đã có files/missing từ _on_fetch_done)
-        — lỗi ở đây chỉ là khối 2 (xử lý readable), không xoá kết quả tải đã có."""
+        """Khối 1 đã xong (self.last_result đã có files/missing từ _on_fetch_done),
+        lỗi ở đây chỉ là khối 2 (xử lý readable), không xoá kết quả tải đã có."""
         app = self.app
         self._set_actions_enabled(True)
         app._log("ERR", f"Xử lý số liệu thất bại (đã tải xong file, chỉ bước xử lý lỗi): {msg}")

@@ -1,21 +1,10 @@
 """
 pipeline/decode_files.py
 ====================
-Khối 2 (xử lý số liệu thành readable) — decode file bulletin đã có sẵn trên
-đĩa (`bulletin/decode.py`, KHÔNG PHẢI module này dù trùng tên "decode") rồi
-làm phẳng thành CSV. Nhận thẳng 1 list đường dẫn file cục bộ; không biết gì
-về FTP (khối 1, xem `pipeline/fetch.py`) và không import module đó — độc
-lập hoàn toàn, module này vỡ không ảnh hưởng khối lấy file, và ngược lại.
-This module produces the display-oriented CSV export only, unaffected by
-the type coercion bulletin/decode.py does for score_tables.py's benefit.
-
-Built on bulletin/decode.py (bulletin → dict decoding) only — no
-config_utils.py dependency, no log(level, msg) callback (unlike
-pipeline/fetch.py, nothing here reports progress; a caller that wants
-per-step logging does it around these calls).
-GUI-only — not runnable standalone. runner.py imports this module lazily (right
-where export_history_by_date() is called) so a decode-layer failure here
-can't take down the fetch step or main.py's own startup — see runner.py::_work().
+Khối 2: decode file bulletin đã tải sẵn trên đĩa thành CSV hiển thị (khác luồng
+type-coercion bulletin/decode.py dùng cho chấm điểm), độc lập hoàn toàn với tầng FTP.
+GUI-only, không chạy standalone; runner.py import lazily nên lỗi decode ở đây
+không ảnh hưởng bước tải file hay khởi động main.py.
 """
 
 import os
@@ -44,19 +33,16 @@ def _num_or_none(v):
 def flatten_record(record: dict, source_file: str = None,
                    max_cloud_layers: int = 4) -> dict:
     """
-    Flatten a record into one CSV row with a clean schema:
+    Flatten a record into one CSV row: time/meta columns first (obs_time/date/hour/
+    source_file), lat/lon in decimal degrees, unit-bearing column names (drops the
+    duplicate 'iii' column and the debug 'pressure_raw'), *_hshs columns kept purely
+    numeric (rare qualitative values left blank), and 'raw' pushed to the end for
+    lookup only.
 
-      - Time & meta come FIRST (obs_time / date / hour / source_file).
-      - lat/lon coordinates are DECIMAL DEGREES (already converted upstream).
-      - Column names carry their UNIT; drops the duplicate 'iii' column and the
-        debug column 'pressure_raw'.
-      - *_hshs columns stay PURELY NUMERIC (rare qualitative values → left blank).
-      - 'raw' is pushed to the END (for lookup only, not mixed into clean data).
-
-    max_cloud_layers is normally computed per batch by cloud_layers_needed()
-    below (so a day with only 1-layer reports doesn't drag along empty
-    cloud_2_*/cloud_3_*/cloud_4_* columns) — the default of 4 here only
-    applies when flatten_record is called on its own.
+    max_cloud_layers sets how many cloud_N_* column groups get emitted; it is
+    normally computed per batch by cloud_layers_needed() below so a day with only
+    1-layer reports doesn't drag along empty cloud_2_*/cloud_3_*/cloud_4_* columns.
+    The default of 4 here only applies when flatten_record is called on its own.
     """
     location    = record.get("location") or {}
     head        = record.get("head") or {}
@@ -115,14 +101,14 @@ def flatten_record(record: dict, source_file: str = None,
         flat[f"cloud_{i+1}_C"]    = cloud.get("type")
         flat[f"cloud_{i+1}_hshs"] = _num_or_none(cloud.get("height"))
 
-    # 'raw' goes last — for looking up the original bulletin only.
+    # 'raw' goes last, for looking up the original bulletin only.
     flat["raw"] = record.get("raw")
     return flat
 
 
 def cloud_layers_needed(records: list, cap: int = 4) -> int:
     """How many cloud_N_* column groups a batch actually needs (>=1, capped at
-    `cap`). Keeps the common case — 0 or 1 reported layer — from carrying
+    `cap`). Keeps the common case (0 or 1 reported layer) from carrying
     always-empty cloud_2_*/cloud_3_*/cloud_4_* columns into the CSV/viewer."""
     longest = max((len(r.get("cloud") or []) for r in records), default=0)
     return max(1, min(longest, cap))
@@ -131,9 +117,9 @@ def cloud_layers_needed(records: list, cap: int = 4) -> int:
 def export_history_by_date(local_files: list, out_dir: str) -> dict:
     """
     Decode every downloaded file (decode.decode_history) and split the result
-    into one history_YYYYMMDD.csv per observation date — a day only gets
-    written once every file belonging to it has been decoded, so a query
-    spanning N days produces N files instead of one growing history.csv.
+    into one history_YYYYMMDD.csv per observation date, written only once every
+    file belonging to it has been decoded, so a query spanning N days produces
+    N files instead of one growing history.csv.
 
     The sole remaining CSV-producing function now that "latest" export is gone.
     Returns {"YYYY-MM-DD": {"csv": path, "records": n}, ...}, one entry per date

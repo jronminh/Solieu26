@@ -96,7 +96,7 @@ def test_hshs_value_ranges():
 # =============================================================================
 
 def test_decode_head():
-    """VV is already the resolved km float (vv_value) — no separate raw code
+    """VV is already the resolved km float (vv_value): no separate raw code
     kept alongside it."""
     assert decode_head("k3158", TABLES) == {"iii": "k31", "VV": 8.0}
     assert decode_head(None, TABLES) is None
@@ -104,7 +104,7 @@ def test_decode_head():
 
 
 def test_decode_total_cloud():
-    """total_cloud_N is the N_oktas value coerced to an int — the first char
+    """total_cloud_N is the N_oktas value coerced to an int: the first char
     of the combined total-cloud+wind token, split out from decode_wind()."""
     assert decode_total_cloud("60000", TABLES) == {"total_cloud_N": 8}
     assert decode_total_cloud("21211", TABLES) == {"total_cloud_N": 3}
@@ -113,7 +113,7 @@ def test_decode_total_cloud():
 
 
 def test_decode_total_cloud_obscured_sky_keeps_slash_sentinel():
-    """N_oktas code '9' maps to '/' (obscured sky) — total_cloud_N must pass
+    """N_oktas code '9' maps to '/' (obscured sky); total_cloud_N must pass
     it through unchanged (not None), since score_tables.py's tong_luong_may
     treats '/' as its own distinct na-sentinel, not "missing data"."""
     assert decode_total_cloud("90000", TABLES) == {"total_cloud_N": "/"}
@@ -142,7 +142,7 @@ def test_decode_cloud():
 
 
 def test_decode_storm():
-    """A + dd + L + Cg — hướng/khoảng cách/xu thế mây dông quanh trạm.
+    """A + dd + L + Cg: hướng/khoảng cách/xu thế mây dông quanh trạm.
     'A1411': dd=14 -> 140 deg, L='1' -> 10-20km, Cg='1' -> phát triển chậm."""
     assert decode_storm("A1411", TABLES) == {
         "storm_dd": 140, "storm_L": "10-20km", "storm_Cg": "Phát triển chậm",
@@ -176,7 +176,7 @@ def test_decode_tail():
 
 
 # =============================================================================
-# decode_record — hand-verified against the first record of Qt26081000.txt
+# decode_record: hand-verified against the first record of Qt26081000.txt
 # =============================================================================
 
 def test_decode_record_yenbai():
@@ -213,7 +213,7 @@ def test_decode_record_name_only_station():
 
 def test_decode_indicators_ignores_unknown_groups():
     """Group codes other than 1/2/7/8/A (e.g. '9' supplementary data) must be
-    silently ignored, not raise — see TODO.md for the pending indicators."""
+    silently ignored, not raise; see TODO.md for the pending indicators."""
     record = "k3158 60000 90000 7453 tYên Bái  k31214410453"
     decoded = decode_record(record)
     assert decoded["temperature"] is None
@@ -243,7 +243,7 @@ def test_get_qt_data_semicolon_separator(qt_00):
 
 def test_get_qt_data_equals_separator(qt_eq_sep):
     """Qt26081023.txt is one of the real files that uses '=' instead of ';'
-    as the record terminator — get_qt_data must fall back to it."""
+    as the record terminator; get_qt_data must fall back to it."""
     with open(qt_eq_sep, encoding="utf-8") as f:
         raw = f.read()
     assert ";" not in raw
@@ -284,8 +284,8 @@ def test_decode_history_sorts_and_tags_source_file(all_qt_files):
 
 
 def test_decode_history_drops_records_without_location():
-    """decode_history keeps only records whose tail decoded into a location
-    — this is the one filtering step it does. Build a tiny fake file with one
+    """decode_history keeps only records whose tail decoded into a location:
+    this is the one filtering step it does. Build a tiny fake file with one
     good and one malformed (no k-tail) record to exercise that branch."""
     import os as _os
     import tempfile

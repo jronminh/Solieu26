@@ -1,15 +1,9 @@
 """
 pipeline/forecast.py
 ====================
-Việc dựng lại pipeline dự báo (bản trước đã xoá - xem TODO.md mục VỠ).
-Input: nhiều bản ghi {station_code, start_hour, end_hour, field_name,
-bucket_selected} - dự báo viên chọn 1 BUCKET (không nhập giá trị vô hướng
-tự do) cho 1 trạm cụ thể, hợp lệ theo scoring/score_tables.py.BUCKETS[field_name].
-build_hourly_table() gộp lại thành 1 dòng/(trạm, giờ), đủ 6 khoá field +
-"buoi" (tự suy từ giờ dòng đó, xem scoring/scorer.py::sub_of_hour()) - cùng
-hình dạng obs bên pipeline/obs.py, để gọi thẳng score_<field>(forecast_row,
-obs_row) không cần biến đổi thêm.
-
+Dựng bảng dự báo theo giờ từ các bản ghi {station_code, start_hour, end_hour,
+field_name, bucket_selected} do dự báo viên chọn (mỗi field 1 bucket rời rạc,
+không nhập giá trị tự do).
 Chạy trực tiếp (python -m pipeline.forecast) để xem demo trên
 tests/fixtures/forecast_sample.csv.
 """
@@ -73,27 +67,20 @@ def _build_station_block(station_code, station_records: list) -> list:
 def build_hourly_table(records: list) -> list:
     """
     records: list các dict {station_code, start_hour, end_hour, field_name,
-    bucket_selected} - bucket_selected áp dụng cho MỌI giờ trong đoạn
-    [start_hour, end_hour] (bao gồm 2 đầu), CỦA ĐÚNG station_code đó.
-    Validate từng bản ghi TRƯỚC khi gộp - sai bất kỳ bản ghi nào (field_name
-    lạ hoặc bucket_selected ngoài phạm vi BUCKETS) thì raise ValueError
-    ngay, không nhận 1 phần.
+    bucket_selected}, mỗi bản ghi áp dụng cho MỌI giờ trong đoạn [start_hour,
+    end_hour] (bao gồm 2 đầu) của đúng station_code đó. Validate từng bản ghi
+    trước khi gộp: sai bất kỳ bản ghi nào (field_name lạ hoặc bucket_selected
+    ngoài phạm vi BUCKETS) thì raise ValueError ngay, không nhận 1 phần.
 
-    Trả về: 24 dòng (giờ 0-23) CHO MỖI station_code tìm thấy trong records -
-    sort theo (station_code, hour). records rỗng -> [] (không trạm nào để
-    dựng bảng - khác trước đây khi hàm còn ngầm định "1 trạm ẩn danh", nay
-    dữ liệu do TRẠM dẫn dắt nên không trạm thì không có dòng nào). Mỗi dòng
-    đủ khoá "station_code" + "hour" + "buoi" (tự suy từ hour qua
-    sub_of_hour(), không phải dự báo viên chọn) + 6 tên field trong BUCKETS
-    - giờ không có bản ghi nào phủ (kể cả TOÀN BỘ giờ của 1 trạm không có
-    bản ghi field đó) -> None. Bộ khoá "station_code"/"hour" đối xứng với
-    pipeline/obs.py::build_scalar_history() để
-    pipeline/match_score.py::join_forecast_obs() ghép thẳng theo
-    (station_code, hour) không cần xử lý lệch khóa.
+    Trả về 24 dòng (giờ 0-23) cho mỗi station_code tìm thấy trong records, sort
+    theo (station_code, hour); records rỗng thì trả về [] (không trạm nào để
+    dựng bảng). Mỗi dòng đủ khoá "station_code"+"hour"+"buoi" (buoi tự suy từ
+    hour qua sub_of_hour(), không phải dự báo viên chọn) cộng 6 tên field
+    trong BUCKETS; giờ không có bản ghi nào phủ thì field đó là None.
 
-    2 bản ghi CÙNG (station_code, field_name) chồng giờ nhau: bản ghi
+    2 bản ghi cùng (station_code, field_name) chồng giờ nhau: bản ghi
     start_hour muộn hơn thắng (duyệt theo thứ tự start_hour tăng dần, ghi
-    đè bản ghi cũ) - luật này áp riêng trong phạm vi từng trạm.
+    đè bản ghi cũ), luật này áp riêng trong phạm vi từng trạm.
     """
     for r in records:
         if r["field_name"] not in BUCKETS:
@@ -141,19 +128,16 @@ def load_records_csv(path: str) -> list:
 
 
 def export_forecast_table(records: list, date_str: str, out_dir: str) -> dict:
-    """Lưu records (đúng shape load_records_csv() đọc/trả về - 4 khoá
-    start_hour/end_hour/field_name/bucket_selected, CHƯA qua
-    build_hourly_table()) ra out_dir/forecast_YYYYMMDD.csv - archive độc
-    lập cho 1 ngày dự báo viên chọn, không gắn với obs (obs có thể chưa
-    tồn tại - dự báo cho ngày tương lai). Đọc lại bằng chính
-    load_records_csv(), không cần hàm đọc riêng.
+    """Lưu records (đúng shape load_records_csv() đọc/trả về, chưa qua
+    build_hourly_table()) ra out_dir/forecast_YYYYMMDD.csv: archive độc lập
+    cho 1 ngày dự báo viên chọn, không gắn với obs (obs có thể chưa tồn tại
+    khi dự báo cho ngày tương lai).
 
-    date_str: "YYYY-MM-DD" do dự báo viên chọn (hàm này không tự suy được
-    ngày từ records - records chỉ có giờ trong ngày, không có ngày).
+    date_str: "YYYY-MM-DD" do dự báo viên chọn, vì records chỉ mang giờ
+    trong ngày, không mang ngày.
 
-    Trả về {"csv": path, "records": len(records)} - records rỗng ->
-    write_csv() no-op (out_path không được tạo trên đĩa), cùng hành vi
-    write_csv() ở mọi chỗ gọi khác."""
+    Trả về {"csv": path, "records": len(records)}; records rỗng thì
+    write_csv() không tạo file trên đĩa."""
     out_path = os.path.join(out_dir, f"forecast_{date_str.replace('-', '')}.csv")
     write_csv(out_path, records)
     return {"csv": out_path, "records": len(records)}

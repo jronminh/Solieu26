@@ -2,9 +2,9 @@
 test_pipeline_decode_files.py
 ====================
 Unit tests for pipeline/decode_files.py (flatten_record, cloud_layers_needed,
-write_csv, export_history_by_date) — the "xử lý số liệu thành readable"
+write_csv, export_history_by_date): the "xử lý số liệu thành readable"
 block, independent from FTP. The filename<->datetime helpers
-(quantrac_filename_at/parse_obs_dt) live in utils/filename_utils.py now —
+(quantrac_filename_at/parse_obs_dt) live in utils/filename_utils.py now;
 see test_filename_utils.py. The FTP layer (pipeline/fetch.py's download_files/
 fetch_files) and runner.py's _work() orchestration need a live/mocked server
 (and a mocked worker-thread/queue) and aren't covered here.
@@ -23,7 +23,7 @@ from pipeline.decode_files import (
 
 
 # =============================================================================
-# flatten_record — hand-verified against Qt26081000.txt's first (Yên Bái) record
+# flatten_record: hand-verified against Qt26081000.txt's first (Yên Bái) record
 # =============================================================================
 
 def test_flatten_record_yenbai(qt_00):
@@ -70,8 +70,8 @@ def test_flatten_record_yenbai(qt_00):
 
 
 def test_flatten_record_pads_missing_cloud_layers():
-    """max_cloud_layers controls how many cloud_N_* column groups get created
-    — layers beyond what the record reported come back as None, not missing."""
+    """max_cloud_layers controls how many cloud_N_* column groups get created;
+    layers beyond what the record reported come back as None, not missing."""
     records = [{"cloud": [{"amount": 8, "type": "Sc", "height": 1400}]}]
     flat = flatten_record(records[0], max_cloud_layers=3)
     assert flat["cloud_2_Ns"] is None
@@ -134,7 +134,7 @@ def test_write_csv_no_rows_does_not_create_file(tmp_path):
 
 
 # =============================================================================
-# export_history_by_date — real files spanning two different dates
+# export_history_by_date: real files spanning two different dates
 # =============================================================================
 
 def test_export_history_by_date_splits_per_date(qt_00, qt_other_day, tmp_path):
@@ -153,7 +153,7 @@ def test_export_history_by_date_splits_per_date(qt_00, qt_other_day, tmp_path):
 def test_export_history_by_date_full_day_continuity(full_day_qt_files, tmp_path):
     """A full, uninterrupted day (24 real hourly files, 20 stations each)
     must roll up into one CSV covering every hour 00-23 with no gaps or
-    duplicates, and each station present in every hour — the 2-file test
+    duplicates, and each station present in every hour; the 2-file test
     above only proves two isolated hours split into separate dates; it can't
     catch a bug that only shows up once a whole day's worth of consecutive
     hours accumulate (e.g. an off-by-one dropping/duplicating a boundary

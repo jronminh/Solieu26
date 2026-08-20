@@ -1,45 +1,29 @@
 """
 score_tables.py
 ====================
-Cấu hình bucket cho 6 trường dự báo được chấm điểm: tổng lượng mây, độ cao
-màn mây (trần), hiện tượng, hướng gió, tốc độ gió, tầm nhìn.
-
-Chỉ chứa dữ liệu (BUCKETS + hằng số NO_CEILING) — không có hàm chấm điểm ở
-đây; mỗi trường có 1 hàm chấm riêng trong scorer.py, tự đọc đúng entry của
-mình (không có field chung nào điều khiển cách đọc bảng).
-
-Mô hình chung: dự báo viên chọn thẳng 1 bucket (không nhập số); quan trắc là
-1 giá trị vô hướng, được quy về dạng so được rồi so lệch với bucket dự báo
-trong phạm vi tolerance của trường đó.
-
-Vài mốc nghiệp vụ (đơn vị gió/tầm nhìn, mép 6000m/10km) còn chờ xác nhận —
-xem TODO.md.
-
-Lược đồ mỗi trường (field nào có thì scorer.py mới cần, không phải trường
-nào cũng có đủ):
-  tolerance : số bucket lệch vẫn tính đúng. 1 = luật ±1; 0 = phải khớp đúng bucket.
-  na        : các giá trị coi là "không chấm" -> scorer BỎ CẶP ở trường này
-  bounds    : ngưỡng TRONG, tăng dần; n ngưỡng -> n+1 bucket (trường tuyến tính)
-  side      : "right": [dưới, trên); "left": (dưới, trên]
-  n, labels : số hướng, nhãn từng hướng (trường vòng). Giá trị là CHỈ SỐ hướng
-              0..n-1 (hoặc nhãn), KHÔNG phải độ; ±1 cuộn vòng.
-  windows   : [(lo,hi),...] cửa sổ chồng nhau (quan trắc so trực tiếp, không bucket hóa)
-
-Quy đổi từ MÃ QUAN TRẮC THÔ (độ gió, mã ww...) sang từ vựng bucket ở đây
-KHÔNG nằm trong module này - đó là việc của adapter (pipeline/obs.py), xem
-vd wind_dd_to_huong_gio()/ww_code_to_mega() ở đó. Module này chỉ mô tả HÌNH
-DẠNG bucket (dự báo viên chọn gì), không biết quan trắc thô ánh xạ vào đó
-thế nào.
+Cấu hình BUCKETS cho 6 trường dự báo được chấm điểm, cộng hằng số sentinel
+NO_CEILING. Không có hàm chấm điểm ở đây, chỉ dữ liệu.
+Vài mốc nghiệp vụ trong bảng còn chờ xác nhận, xem TODO.md.
 """
 
-# Sentinel cho trạng thái "không có trần" (trường do_cao_man_may) — là một
+# Sentinel cho trạng thái "không có trần" (trường do_cao_man_may), là một
 # BUCKET (trên cùng), không phải "thiếu số liệu".
 NO_CEILING = "không màn"
 
+# Lược đồ mỗi entry trong BUCKETS (field nào có thì scorer.py mới cần):
+#   tolerance : số bucket lệch vẫn tính đúng. 1 = luật ±1; 0 = phải khớp đúng bucket.
+#   na        : các giá trị coi là "không chấm" -> scorer BỎ CẶP ở trường này.
+#   bounds    : ngưỡng TRONG, tăng dần; n ngưỡng -> n+1 bucket (trường tuyến tính).
+#   side      : "right": [dưới, trên); "left": (dưới, trên].
+#   n, labels : số hướng, nhãn từng hướng (trường vòng); giá trị là CHỈ SỐ hướng
+#               0..n-1 (hoặc nhãn), KHÔNG phải độ; ±1 cuộn vòng.
+#   windows   : [(lo,hi),...] cửa sổ chồng nhau (quan trắc so trực tiếp, không bucket hóa).
+# Quy đổi từ mã quan trắc thô sang từ vựng bucket ở đây không nằm trong module
+# này; đó là việc của lớp adapter quan trắc.
 BUCKETS = {
 
     # ------------------------------------------------------------------ #
-    # 1. TỔNG LƯỢNG MÂY — chấm khác 5 trường kia. Đơn vị: phần bầu trời   #
+    # 1. TỔNG LƯỢNG MÂY, chấm khác 5 trường kia. Đơn vị: phần bầu trời    #
     #    (0-10).                                                          #
     #                                                                    #
     #    Dự báo viên CHỌN 1 CỬA SỔ (không nhập số): 9 cửa sổ chồng nhau,  #
@@ -50,7 +34,7 @@ BUCKETS = {
     #    dải chấp nhận là hợp của cửa i-1, i, i+1 (kẹp mép ở idx 0 và 8).  #
     #    VD: dự báo "2-4" (idx 2) -> đúng nếu số thực rơi trong [1,5].     #
     #                                                                    #
-    #    Chấm bằng score_tong_luong_may() — trường này không có bounds/side.#
+    #    Chấm bằng score_tong_luong_may(), trường này không có bounds/side.#
     # ------------------------------------------------------------------ #
     "tong_luong_may": {
         # (lo, hi) mỗi cửa sổ, inclusive hai đầu. Index = lựa chọn dự báo viên.
@@ -61,7 +45,7 @@ BUCKETS = {
     },
 
     # ------------------------------------------------------------------ #
-    # 2. ĐỘ CAO MÀN MÂY (trần) — không lấy thẳng từ mã, cần giải qua      #
+    # 2. ĐỘ CAO MÀN MÂY (trần), không lấy thẳng từ mã, cần giải qua       #
     #    solver riêng ra mét. 15 bucket theo thứ tự:                      #
     #    <50 | 50-100 | 100-150 | 150-200 | 200-300 | 300-400 | 400-500 |#
     #    500-600 | 600-1000 | 1000-1500 | 1500-2000 | 2000-2500 |        #
@@ -72,7 +56,7 @@ BUCKETS = {
     #                                                                    #
     #    side="right": giá trị bằng ngưỡng rơi vào bucket TRÊN (khớp      #
     #    "<50", và 6000 m vào ">6000"). Nhiều mốc trùng giá trị thật có   #
-    #    thể gặp trong dữ liệu — side quyết định bucket của chúng.        #
+    #    thể gặp trong dữ liệu, side quyết định bucket của chúng.         #
     # ------------------------------------------------------------------ #
     "do_cao_man_may": {
         # 13 ngưỡng -> 14 bucket số (index 0..13); "không màn" = index 14 -> 15 lựa chọn.
@@ -80,7 +64,7 @@ BUCKETS = {
                    1000, 1500, 2000, 2500, 6000],
         "side": "right",
         "tolerance": 1,               # ±1 BUCKET (dù các bucket không chồng nhau)
-        # "không màn" là 1 bucket (index cao nhất), không phải bỏ cặp — solver
+        # "không màn" là 1 bucket (index cao nhất), không phải bỏ cặp, solver
         # trả sentinel này khi không lớp mây nào đạt ngưỡng trần, kể cả trời quang.
         "no_ceiling": NO_CEILING,
         "na": [None],                 # None = THIẾU số liệu thật (khác "không màn") -> bỏ cặp
@@ -88,18 +72,18 @@ BUCKETS = {
     },
 
     # ------------------------------------------------------------------ #
-    # 3. HIỆN TƯỢNG — 2 TẦNG: MEGA (loại) × SUB (buổi trong ngày).       #
+    # 3. HIỆN TƯỢNG, 2 TẦNG: MEGA (loại) × SUB (buổi trong ngày).        #
     #                                                                    #
-    #    TẦNG MEGA — loại hiện tượng, khớp CHÍNH XÁC 100% (tolerance 0):  #
+    #    TẦNG MEGA: loại hiện tượng, khớp CHÍNH XÁC 100% (tolerance 0):   #
     #      0 dông, mưa rào                                                #
     #      1 mưa thường, mưa phùn                                         #
     #      2 sương mù                                                     #
     #      3 mù, mù khô                                                   #
     #      4 N_0 (không có hiện tượng / không thuộc 4 nhóm trên)          #
     #                                                                    #
-    #    TẦNG SUB — buổi trong ngày, GIỐNG NHAU trong mọi mega, ±1 KẸP   #
+    #    TẦNG SUB: buổi trong ngày, GIỐNG NHAU trong mọi mega, ±1 KẸP    #
     #    MÉP (n=5): 0 tối, 1 đêm, 2 sáng, 3 trưa, 4 chiều. Dự báo cho     #
-    #    24 giờ nên đây là DÃY THẲNG — tối và chiều là hai đầu, KHÔNG kề. #
+    #    24 giờ nên đây là DÃY THẲNG, tối và chiều là hai đầu, KHÔNG kề.  #
     #                                                                    #
     #    Chấm: MEGA khớp đúng VÀ buổi lệch <= 1 -> đúng.                  #
     # ------------------------------------------------------------------ #
@@ -142,7 +126,7 @@ BUCKETS = {
     },
 
     # ------------------------------------------------------------------ #
-    # 4. HƯỚNG GIÓ — biến vòng, 16 hướng = 16 bucket.                    #
+    # 4. HƯỚNG GIÓ, biến vòng, 16 hướng = 16 bucket.                     #
     #    Index 0 = N, theo chiều kim đồng hồ (0=N,1=NNE,...,15=NNW).      #
     #    Dự báo lẫn quan trắc đều là HƯỚNG rời rạc (0..15 hoặc nhãn),     #
     #    không phải độ. ±1 hướng, cuộn vòng: N (0) kề NNW (15) và NNE(1).#
@@ -160,7 +144,7 @@ BUCKETS = {
     },
 
     # ------------------------------------------------------------------ #
-    # 5. TỐC ĐỘ GIÓ — cửa sổ chồng nhau như tổng lượng mây. Đơn vị m/s.  #
+    # 5. TỐC ĐỘ GIÓ, cửa sổ chồng nhau như tổng lượng mây. Đơn vị m/s.   #
     #    Cửa rộng 3, bước 1: 0-3,1-4,2-5,...,15-18, cửa cuối "16-21 và    #
     #    kéo dài thêm" -> coi là 16 trở lên. Quan trắc: số 0..16 m/s.     #
     #    Dự báo viên chọn 1 cửa.                                          #
@@ -177,7 +161,7 @@ BUCKETS = {
     },
 
     # ------------------------------------------------------------------ #
-    # 6. TẦM NHÌN — biến thẳng, đơn vị km.                                #
+    # 6. TẦM NHÌN, biến thẳng, đơn vị km.                                 #
     #    <0.5 | 0.5-1 | 1-1.5 | 1.5-2 | 2-4 | 4-6 | 6-10 | >10           #
     #    Dự báo viên chọn 1 trong 8 bucket; quan trắc là 1 số km -> bucket #
     #    hóa -> so ±1 bucket với bucket dự báo.                          #

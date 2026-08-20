@@ -10,7 +10,7 @@ import os
 
 
 def quantrac_filename_at(dt: datetime.datetime) -> str:
-    """Qt<YY><MM><DD><HH>.txt — e.g. datetime(2026,4,1,13) → 'Qt26040113.txt'."""
+    """Qt<YY><MM><DD><HH>.txt, e.g. datetime(2026,4,1,13) → 'Qt26040113.txt'."""
     return f"Qt{dt.strftime('%y%m%d')}{dt.hour:02}.txt"
 
 

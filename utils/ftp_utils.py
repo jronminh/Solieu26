@@ -48,7 +48,7 @@ def download_one(ftp: FTP, filename: str, local_path: str,
 def fetch_and_bucket(ftp: FTP, filename: str, local_dir: str, retry_temp: int, retry_wait: int,
                       log, buckets: dict) -> int:
     """Download one file, log the outcome, and sort it into the right bucket
-    (buckets = {"files","downloaded","skipped","missing"}, each a list — shared
+    (buckets = {"files","downloaded","skipped","missing"}, each a list, shared
     across the whole batch). Returns the raw status for the progress callback."""
     local_path = os.path.join(local_dir, filename)
     status = download_one(ftp, filename, local_path, retry_temp=retry_temp, retry_wait=retry_wait)

@@ -1,39 +1,9 @@
 """
-forecast_bucket_generator.py — FILE THAM KHẢO, KHÔNG CHẠY ĐƯỢC
-====================
-Archived 2026-08-18: its logic module `pipeline_forecast.py` (the imports
-below) was deleted after `scoring/score_tables.py` dropped the "kind" field
-its dispatch depended on and the tool was judged not worth fixing — it had
-never been integrated into main.py/dialogs.py anyway (see TODO.md). Kept here
-only as a design reference for the widget layout / CRUD shape when stage 2
-("Dự báo") of the scoring pipeline gets a real UI.
-
-Standalone Tkinter tool that lets a dự báo viên (forecaster) pick a bucket
-for each of the 6 scored fields over a time range, and exports the result
-to CSV - a hand-built stand-in for the "Dự báo" stage of the scoring
-pipeline, which has no other UI yet (see TODO.md).
-
-GUI vs helper split: this file is Tkinter ONLY - every non-widget rule
-(bucket labels, hour-range merge, CSV shape/import/export, record CRUD)
-lives in a separate logic module and is imported here, not reimplemented.
-This file only adds: 4 widget-builder functions (one per bucket "kind")
-that wrap a logic label-list in a Combobox, and the RowEditorPanel/App
-classes that wire widgets to the imported CRUD functions.
-
-Data model: the whole program is 1 micro-database - a list of dicts
-{start_hour, end_hour, data_name, bucket_selected}. This App operates
-directly on that list, no separate copy: add/remove/edit all go through
-the imported CRUD functions, which take/return a plain list index, not a
-synthetic id. The table is never re-sorted, so a row's index stays stable
-as long as no row before it is removed.
-
-No station/trạm or ngày dự báo anywhere - the micro-database is scoped to
-1 station/1 day implicitly (by whoever is running the tool); the schema
-intentionally carries only start_hour/end_hour/data_name/bucket_selected.
-
-Imports only the logic module above and nothing else project-local — that
-module no longer exists, so this file cannot run (see the archive note
-above).
+forecast_bucket_generator.py: FILE THAM KHẢO, KHÔNG CHẠY ĐƯỢC (reference
+only, does not run). Its logic module pipeline_forecast.py was deleted after
+scoring/score_tables.py dropped the "kind" field it depended on, so the
+imports below no longer resolve; kept only as a design reference for the
+widget layout / CRUD shape of a future "Dự báo" stage UI (see TODO.md).
 """
 
 import os
@@ -221,6 +191,12 @@ class RowEditorPanel(ttk.Frame):
         self.on_save(record, self.editing_index)
 
 
+# Data model: the whole program is 1 micro-database, a list of dicts
+# {start_hour, end_hour, data_name, bucket_selected}, scoped implicitly to
+# 1 station/1 day. App operates directly on that list (no separate copy);
+# add/remove/edit go through the imported CRUD functions, which take/return
+# a plain list index, not a synthetic id, and the table is never re-sorted
+# so an index stays stable as long as no row before it is removed.
 class App:
     def __init__(self, root: tk.Tk):
         self.root = root

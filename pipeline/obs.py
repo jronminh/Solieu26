@@ -1,16 +1,11 @@
 """
 pipeline/obs.py
 ====================
-Adapter: 1 bản ghi quan trắc đã decode (bulletin/decode.py) + giờ quan trắc
--> dict "obs" đúng 6 khoá field mà scoring/scorer.py cần
-(tong_luong_may/do_cao_man_may/hien_tuong/huong_gio/toc_do_gio/tam_nhin) +
-"hour" + "buoi" (buổi tự suy từ giờ, xem sub_of_hour() bên scoring/scorer.py)
-+ "station_code". build_obs() chỉ biến đổi ĐÚNG 1 quan trắc (1 dòng, 1
-trạm, 1 giờ) - không biết gì về phía dự báo. build_scalar_history() lặp
-thêm 1 tầng: tự quét 1 thư mục, giữ MỌI trạm báo cáo mỗi giờ (không chỉ 1
-đại diện), nhóm theo station_code - trả về 1 dict/ngày, mỗi ngày 1 list
-(station_code × 24 giờ) cùng hình dạng build_hourly_table() bên
-pipeline/forecast.py.
+Adapter: 1 bản ghi quan trắc đã decode + giờ quan trắc -> dict "obs" đủ 6
+field chấm điểm (tong_luong_may/do_cao_man_may/hien_tuong/huong_gio/toc_do_gio/
+tam_nhin) cộng "hour"+"buoi"+"station_code". build_obs() xử lý đúng 1 quan
+trắc (1 dòng, 1 trạm, 1 giờ); build_scalar_history() quét cả thư mục, giữ
+mọi trạm báo cáo mỗi giờ, và trả về 1 dict/ngày (station_code × 24 giờ).
 
 Chạy trực tiếp (python -m pipeline.obs) để xem demo trên
 tests/fixtures/qt_files/Qt26081000.txt và
@@ -134,22 +129,17 @@ def ww_code_to_mega(ww_code):
 
 
 def build_obs(record: dict, hour: int) -> dict:
-    """record: 1 phần tử decode_qt_file()/decode_record() (1 trạm, 1 giờ).
-    hour: giờ quan trắc (0-23) - decode_record() không tự mang giờ (giờ nằm
-    ở TÊN FILE, xem utils/filename_utils.py::parse_obs_dt()), nên truyền riêng.
+    """record: 1 phần tử decode_qt_file()/decode_record() (1 trạm, 1 giờ);
+    hour: giờ quan trắc (0-23), truyền riêng vì record không tự mang giờ
+    (giờ nằm ở tên file).
 
-    tốc độ gió (wind_ff) không quy đổi - bulletin đã cho sẵn đơn vị m/s.
-    hien_tuong quy ra MEGA ngay tại đây (ww_code_to_mega()) - scoring/scorer.py
-    (score_hien_tuong()) nhận thẳng mega, không tự quy đổi nữa. "buoi" quy
-    thẳng từ hour qua sub_of_hour() - scorer.py so buổi 2 phía trực tiếp,
-    không tự suy từ hour nữa.
+    wind_ff giữ nguyên đơn vị m/s có sẵn từ bulletin, không quy đổi;
+    hien_tuong quy ra mega ngay tại đây (ww_code_to_mega()) nên phía chấm
+    điểm nhận thẳng mega; "buoi" suy thẳng từ hour qua sub_of_hour().
 
-    "station_code": lấy từ record["location"]["station_code"] (mã trạm, KHÔNG
-    phải record["station"] - đó là TÊN đã giải mã, chỉ để hiển thị, không
-    đáng tin làm khoá ghép) - đối xứng với "station_code" bên
-    pipeline/forecast.py::build_hourly_table() để
-    pipeline/match_score.py::join_forecast_obs() ghép thẳng theo
-    (station_code, hour)."""
+    "station_code" lấy từ record["location"]["station_code"] (mã trạm dùng
+    làm khoá ghép), không phải record["station"] (tên đã giải mã, chỉ để
+    hiển thị, không đáng tin làm khoá)."""
     head        = record.get("head") or {}
     wind        = record.get("wind") or {}
     weather     = record.get("weather") or {}
@@ -191,28 +181,21 @@ def _empty_obs_row(hour: int, station_code) -> dict:
 
 def build_scalar_history(local_dir: str) -> dict:
     """
-    local_dir: thư mục chứa file QtYYMMDDHH.txt (cùng quy ước tham số với
-    pipeline/fetch.py::download_files()). Không còn nhận date - tự quét
-    local_dir, parse mỗi tên file qua parse_obs_dt() để biết nó thuộc
-    ngày/giờ nào (không còn tự dựng tên file kỳ vọng qua
-    quantrac_filename_at() rồi kiểm tra tồn tại).
+    local_dir: thư mục chứa file QtYYMMDDHH.txt; tự quét và parse mỗi tên
+    file qua parse_obs_dt() để biết nó thuộc ngày/giờ nào (không nhận date
+    riêng, không tự dựng tên file kỳ vọng rồi kiểm tra tồn tại).
 
-    Với MỖI ngày tìm thấy (còn ít nhất 1 file parse được thuộc ngày đó):
-    gom TẬP HỢP mọi station_code xuất hiện ở BẤT KỲ giờ nào trong ngày đó
-    (mỗi giờ 1 file có thể có nhiều trạm báo cáo - không còn chỉ lấy 1 bản
-    ghi đại diện), rồi dựng đủ 24 dòng/giờ CHO MỖI trạm đó: giờ trạm đó có
-    báo cáo (bản ghi "location".station_code khớp) thì build_obs(); giờ
-    trạm đó không báo cáo (file thiếu, hoặc trạm không có mặt giờ đó) thì
-    _empty_obs_row(hour, station_code), không bỏ qua và không raise.
+    Với mỗi ngày tìm thấy (còn ít nhất 1 file parse được thuộc ngày đó): gom
+    tập hợp mọi station_code xuất hiện ở bất kỳ giờ nào trong ngày đó, rồi
+    dựng đủ 24 dòng/giờ cho mỗi trạm đó, dùng build_obs() khi trạm có báo
+    cáo giờ đó và _empty_obs_row(hour, station_code) khi không, không bỏ
+    qua và không raise.
 
-    Trả về: {"YYYY-MM-DD": [(station_code × 24) dict, CÙNG HÌNH DẠNG
-    build_hourly_table() (pipeline/forecast.py) - mỗi phần tử 1 (trạm,
-    giờ), đủ khoá "station_code"/"hour"/"buoi" + 6 field, sắp theo
-    (station_code, hour) tăng dần], ...} - 1 entry/ngày thực sự có ít nhất
-    1 file trong local_dir. local_dir rỗng (hoặc không file nào parse
-    được) -> {}. 2 bên forecast/obs cùng bộ khóa (station_code, hour) trong
-    mỗi dòng, khác nhau ở giá trị - để pipeline/match_score.py's
-    join_forecast_obs() ghép thẳng theo khóa đó.
+    Trả về {"YYYY-MM-DD": [(station_code × 24) dict, mỗi phần tử 1 (trạm,
+    giờ) đủ khoá "station_code"/"hour"/"buoi"+6 field, sắp theo
+    (station_code, hour) tăng dần], ...}, 1 entry/ngày thực sự có ít nhất 1
+    file trong local_dir; local_dir rỗng hoặc không file nào parse được thì
+    trả về {}.
     """
     by_date_hour = {}
     for name in os.listdir(local_dir):

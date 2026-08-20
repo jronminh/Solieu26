@@ -195,7 +195,7 @@ class AdvancedDialog:
         win = make_dialog(app.root, app._dialogs, "advanced", "Tải số liệu")
         if win is None:
             return
-        app._log("ACT", "Mở hộp thoại Tải số liệu — tạm dừng tự động truy vấn")
+        app._log("ACT", "Mở hộp thoại Tải số liệu, tạm dừng tự động truy vấn")
 
         frm = ttk.Frame(win, padding=12)
         frm.pack(fill="both", expand=True)
@@ -237,7 +237,7 @@ class AdvancedDialog:
 
     def _on_mode_changed(self):
         """Pauses/resumes auto-query to match app.v["advanced_mode"] (mutually
-        exclusive — a background auto tick shouldn't re-fire a date-range fetch
+        exclusive: a background auto tick shouldn't re-fire a date-range fetch
         the user is busy configuring), then refreshes the date-range controls
         and info panel. advanced_mode simply tracks whether this dialog is open."""
         app = self.app
@@ -251,7 +251,7 @@ class AdvancedDialog:
     def refresh_controls_state(self):
         """'Bắt đầu' bị khóa khi đang có tác vụ chạy; ngày bắt đầu/kết thúc +
         'Về hiện tại' luôn bật vì dialog 'Tải số liệu' chỉ tồn tại khi đang ở chế
-        độ tải số liệu. No-op nếu dialog chưa từng mở (hoặc đã bị đóng) — các
+        độ tải số liệu. No-op nếu dialog chưa từng mở (hoặc đã bị đóng), các
         widget bên dưới chỉ tồn tại từ lúc open() dựng chúng."""
         if self.start_date_entry is None or not self.start_date_entry.winfo_exists():
             return
@@ -267,10 +267,10 @@ class AdvancedDialog:
         app._dialogs["advanced"].destroy()
         app.v["advanced_mode"].set(False)
         self._on_mode_changed()
-        app._log("ACT", "Đóng hộp thoại Tải số liệu — tiếp tục tự động truy vấn")
+        app._log("ACT", "Đóng hộp thoại Tải số liệu, tiếp tục tự động truy vấn")
 
     def _on_advanced_start(self):
-        """'Bắt đầu': chạy truy vấn theo khoảng ngày đã nhập, rồi đóng dialog —
+        """'Bắt đầu': chạy truy vấn theo khoảng ngày đã nhập, rồi đóng dialog.
         NHƯNG chỉ khi truy vấn thực sự bắt đầu được. app.runner._on_run() build cfg
         từ start_date/end_date trước khi dialog đóng, nên khoảng ngày vẫn đúng
         (đóng trước sẽ tắt advanced_mode → cfg rơi về "hôm nay"). Nếu ngày nhập

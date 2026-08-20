@@ -2,9 +2,9 @@
 common.py
 ====================
 Constants + small helpers shared across the GUI modules. No Tkinter App state
-lives here (only the stdlib `tkinter` messagebox, used by report_open) — keeps
+lives here (only the stdlib `tkinter` messagebox, used by report_open), which keeps
 this module import-safe from all of them without any risk of a circular
-import. OS-level file/folder operations live in utils/file_utils.py instead —
+import. OS-level file/folder operations live in utils/file_utils.py instead:
 this module only reports their result (report_open).
 """
 
@@ -14,7 +14,7 @@ from tkinter import messagebox
 
 
 # =============================================================================
-# LOG COLORS — Tkinter Text tag color per log level (INFO/OK/SKIP/MISS/WARN/ERR/ACT)
+# LOG COLORS: Tkinter Text tag color per log level (INFO/OK/SKIP/MISS/WARN/ERR/ACT)
 # =============================================================================
 
 LOG_COLORS = {
@@ -32,7 +32,7 @@ LOG_COLORS = {
 # STATION LIST (code → name)
 # -----------------------------------------------------------------------------
 # Feeds the station filter dropdown in the "Xem lịch sử" viewer (each history_*.csv
-# holds every station already — the dropdown just filters rows client-side, it no
+# holds every station already; the dropdown just filters rows client-side, it no
 # longer drives what gets downloaded/decoded). Add/remove a station by editing this table.
 # =============================================================================
 STATIONS = {
@@ -45,14 +45,14 @@ STATIONS = {
     "k92": "Trường Sa",  "k93": "Thuyền Chài",
 }
 
-# Names feed the dropdown — order KEPT the same as the STATIONS table above;
+# Names feed the dropdown, order KEPT the same as the STATIONS table above;
 # also builds the reverse lookup name → code.
 STATION_NAMES = list(STATIONS.values())
 NAME_TO_CODE  = {name: code for code, name in STATIONS.items()}
 
 ALL_STATIONS = "Tất cả các trạm"   # station-filter dropdown option that disables filtering
 
-# Hours feed the hour-filter dropdown in the "Xem lịch sử" viewer — each
+# Hours feed the hour-filter dropdown in the "Xem lịch sử" viewer: each
 # history_*.csv's "hour" column is a zero-padded string ("00".."23"), so the
 # dropdown values match.
 HOURS = [f"{h:02d}" for h in range(24)]
@@ -64,7 +64,7 @@ ALL_HOURS = "Tất cả các giờ"   # hour-filter dropdown option that disable
 HISTORY_CSV_RE = re.compile(r"^history_(\d{8})\.csv$")
 
 
-# Numeric columns in the CSV viewer — right-aligned + compared as NUMBERS when
+# Numeric columns in the CSV viewer: right-aligned + compared as NUMBERS when
 # sorting (instead of as strings). *_hshs columns are numeric too but their names
 # aren't fixed (cloud_1_hshs, cloud_2_hshs...) so they're detected by suffix instead
 # of being listed here.
@@ -74,7 +74,7 @@ NUMERIC_VIEWER_COLUMNS = {
     "cloud_layers", "hour",
 }
 
-# Columns that never appear in the CSV viewer — not shown in either mode, and
+# Columns that never appear in the CSV viewer: not shown in either mode, and
 # not offered in the "Hiển thị" picker either, so they can't be toggled back on
 # from the GUI. They stay in the exported CSV file untouched; the only way to
 # see them is opening a history_*.csv file directly (e.g. in Excel).

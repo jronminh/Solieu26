@@ -1,37 +1,11 @@
 """
 pipeline/match_score.py
 ====================
-Matcher (join_forecast_obs) + chấm điểm (score_history) - xem TODO.md mục
-"Matcher ghép cặp dự báo ↔ quan trắc". pipeline/forecast.py::build_hourly_table()
-và pipeline/obs.py::build_scalar_history() đều trả về 1 list (station_code ×
-24 giờ), cùng bộ khóa "station_code"+"hour"+"buoi"+6 field (khác nhau ở
-giá trị):
-
-  join_forecast_obs()    ghép 2 list đó theo khoá (station_code, hour),
-                          KHÔNG tự decode/đọc file gì cả. Ghép do OBS dẫn
-                          dắt (duyệt scalar_history - vốn đã bao MỌI trạm
-                          thực sự báo cáo hôm đó, xem build_scalar_history()):
-                          trạm nào không có dự báo tương ứng thì ghép với 1
-                          "dự báo rỗng" (6 field None) thay vì bị bỏ qua -
-                          giống cách history_YYYYMMDD.csv liệt kê mọi trạm
-                          quan trắc được, không riêng trạm có dự báo.
-  score_history()         chấm từng cặp (forecast, obs) đã ghép bằng
-                          scoring/scorer.py's score_<field>(), pivot ngược
-                          lại thành 1 dòng/(trạm, giờ, field).
-  export_forecast_score() điểm vào cho caller (runner.py) - nhận đường dẫn
-                          1 file CSV dự báo (đúng shape
-                          pipeline/forecast.py::load_records_csv() đọc được -
-                          file dự báo viên nhập trực tiếp HOẶC file archive
-                          từ pipeline/forecast.py::export_forecast_table(),
-                          cùng shape nên dùng chung 1 tham số), tự load rồi
-                          gọi build_hourly_table/build_scalar_history/
-                          join_forecast_obs/score_<field> bên trên, làm
-                          phẳng thành cột rồi GHI 1 file score_YYYYMMDD.csv/
-                          ngày ra out_dir (nhiều trạm/file, phân biệt bằng
-                          cột station_code - cùng quy ước history_YYYYMMDD.csv
-                          đang dùng), trả về {"YYYY-MM-DD": {"csv","records"}}
-                          - đúng vai trò + đúng quy ước trả về
-                          pipeline/decode_files.py::export_history_by_date().
+Matcher (join_forecast_obs) + chấm điểm (score_history): ghép bảng dự báo và
+quan trắc theo khoá (station_code, hour) rồi chấm 6 field bằng
+scoring/scorer.py; export_forecast_score() là điểm vào cho caller, nhận file
+CSV dự báo và danh sách file quan trắc cục bộ, ghi ra 1 file
+score_YYYYMMDD.csv/ngày.
 
 Chạy trực tiếp (python -m pipeline.match_score) để xem demo trên
 tests/fixtures/forecast_sample.csv ghép với
@@ -82,20 +56,19 @@ def _empty_forecast_row(station_code, hour: int) -> dict:
 
 def join_forecast_obs(forecast_rows: list, scalar_history: list) -> list:
     """
-    forecast_rows: đầu ra pipeline/forecast.py::build_hourly_table() (1
-    dict/(trạm, giờ), đủ "station_code"+"hour"+"buoi"+6 field) - CÓ THỂ chỉ
-    phủ 1 phần các trạm quan trắc được (chỉ trạm có dự báo).
-    scalar_history: đầu ra pipeline/obs.py::build_scalar_history() - cùng
-    hình dạng, bao MỌI trạm thực sự báo cáo hôm đó.
+    forecast_rows: 1 dict/(trạm, giờ) đủ "station_code"+"hour"+"buoi"+6
+    field, có thể chỉ phủ 1 phần các trạm quan trắc được (chỉ trạm có dự
+    báo). scalar_history: cùng hình dạng nhưng bao mọi trạm thực sự báo cáo
+    hôm đó.
 
-    Ghép do OBS DẪN DẮT theo khoá (station_code, hour): mỗi phần tử
-    scalar_history tra vào forecast_rows theo khoá đó - trạm/giờ nào không
-    có dự báo tương ứng thì ghép với 1 dự báo rỗng (_empty_forecast_row()),
-    KHÔNG raise và KHÔNG bỏ qua - giữ đúng mọi trạm quan trắc kể cả chưa ai
-    dự báo (điểm sẽ tự bỏ cặp ở tầng scorer).
+    Ghép do obs dẫn dắt theo khoá (station_code, hour): mỗi phần tử
+    scalar_history tra vào forecast_rows theo khoá đó; trạm/giờ nào không có
+    dự báo tương ứng thì ghép với 1 dự báo rỗng (_empty_forecast_row())
+    thay vì raise hay bỏ qua, giữ đúng mọi trạm quan trắc kể cả chưa ai dự
+    báo (điểm sẽ tự bỏ cặp ở tầng scorer).
 
-    Trả về: list dict {"station_code": str, "hour": int, "forecast": <dict>,
-    "obs": <dict>}. scalar_history rỗng -> trả về [].
+    Trả về list dict {"station_code": str, "hour": int, "forecast": <dict>,
+    "obs": <dict>}; scalar_history rỗng thì trả về [].
     """
     forecast_by_key = {(r["station_code"], r["hour"]): r for r in forecast_rows}
 
@@ -114,20 +87,17 @@ def join_forecast_obs(forecast_rows: list, scalar_history: list) -> list:
 
 def score_history(joined_rows: list) -> list:
     """
-    joined_rows: đầu ra join_forecast_obs() - mỗi phần tử {"station_code",
+    joined_rows: đầu ra join_forecast_obs(), mỗi phần tử {"station_code",
     "hour", "forecast", "obs"}.
 
-    Chấm cả 6 field/dòng bằng scoring/scorer.py's score_<field>() - mỗi hàm
-    nhận THẲNG forecast_row/obs_row (2 dòng đã ghép theo (trạm, giờ)), tự
-    đọc field nó cần từ mỗi bên (kể cả hien_tuong - đọc thêm "buoi", đã tự
-    suy sẵn bởi build_hourly_table()/build_obs()) - dispatch đồng nhất,
-    không còn ngoại lệ nào.
+    Chấm cả 6 field/dòng bằng score_<field>() tương ứng: mỗi hàm nhận thẳng
+    forecast_row/obs_row (2 dòng đã ghép theo (trạm, giờ)) và tự đọc field
+    nó cần từ mỗi bên (kể cả hien_tuong, đọc thêm "buoi").
 
-    Trả về: list dict {"station_code": str, "hour": int, "field_name": str,
-    "score": bool|None} - 1 phần tử/(trạm, giờ, field), theo đúng
-    FIELD_ORDER trong mỗi (trạm, giờ). score None nghĩa là BỎ CẶP (thiếu dữ
-    liệu hoặc rơi vào regime không chấm - vd tốc độ gió >15 m/s thì bỏ chấm
-    tốc độ), không phải False.
+    Trả về list dict {"station_code": str, "hour": int, "field_name": str,
+    "score": bool|None}, 1 phần tử/(trạm, giờ, field) theo đúng FIELD_ORDER;
+    score None nghĩa là bỏ cặp (thiếu dữ liệu hoặc rơi vào regime không
+    chấm, vd tốc độ gió >15 m/s thì bỏ chấm tốc độ), không phải False.
     """
     rows = []
     for joined in joined_rows:
@@ -145,37 +115,27 @@ def score_history(joined_rows: list) -> list:
 
 def export_forecast_score(local_files: list, forecast_csv_path: str, out_dir: str) -> dict:
     """
-    local_files: list đường dẫn file QtYYMMDDHH.txt cục bộ đã tải sẵn - cùng
-    quy ước với pipeline/decode_files.py::export_history_by_date(); chỉ
-    dùng để xác định thư mục chứa chúng (build_scalar_history() tự quét
-    thư mục đó để tìm mọi ngày có mặt, có thể nhiều ngày trong 1 lần gọi).
-    forecast_csv_path: đường dẫn 1 file CSV đúng shape
-    pipeline/forecast.py::load_records_csv() đọc được - có thể là file dự
-    báo viên nhập trực tiếp hoặc file archive từ
-    pipeline/forecast.py::export_forecast_table(), cùng shape nên dùng
-    chung tham số này. Falsy (None/"") -> coi như chưa có dự báo (records
-    rỗng). 1 bảng dự báo dùng CHUNG cho MỌI ngày tìm thấy (chưa có khái
-    niệm dự báo riêng theo ngày ở đâu trong code - build_hourly_table()
-    cũng không có tham số ngày).
-    out_dir: thư mục ghi CSV ra - cùng vai trò out_dir của
-    export_history_by_date().
+    local_files: list đường dẫn file QtYYMMDDHH.txt cục bộ đã tải sẵn, chỉ
+    dùng để xác định thư mục chứa chúng (build_scalar_history() tự quét thư
+    mục đó để tìm mọi ngày có mặt, có thể nhiều ngày trong 1 lần gọi).
+    forecast_csv_path: đường dẫn 1 file CSV đúng shape load_records_csv()
+    đọc được (dự báo viên nhập trực tiếp hoặc file archive từ
+    export_forecast_table(), cùng shape nên dùng chung tham số này); falsy
+    (None/"") thì coi như chưa có dự báo (records rỗng), và 1 bảng dự báo
+    dùng chung cho mọi ngày tìm thấy (chưa có khái niệm dự báo riêng theo
+    ngày). out_dir: thư mục ghi CSV ra.
 
-    Với MỖI ngày tìm thấy: ghép forecast+obs theo (station_code, hour)
-    (join_forecast_obs() - do obs dẫn dắt, phủ MỌI trạm quan trắc thực sự
-    báo cáo, kể cả trạm chưa ai dự báo), chấm cả 6 field/dòng
-    (scoring/scorer.py's score_<field>() qua _SCORERS), làm phẳng 3 dict
+    Với mỗi ngày tìm thấy: ghép forecast+obs theo (station_code, hour) do
+    obs dẫn dắt (phủ mọi trạm quan trắc thực sự báo cáo, kể cả trạm chưa ai
+    dự báo), chấm cả 6 field/dòng qua _SCORERS, làm phẳng 3 dict
     forecast/obs/score thành các cột (forecast_<field>/obs_<field>/
-    score_<field>, theo FIELD_ORDER) + cột date/station_code/hour/buoi, rồi
-    ghi ra 1 file score_YYYYMMDD.csv/ngày (write_csv(), cùng hàm
-    export_history_by_date() dùng) - "buoi" ghi 1 lần (2 bên luôn tính
-    giống nhau qua sub_of_hour() ở thực tế). Số dòng/ngày = (số trạm quan
-    trắc thực sự báo cáo hôm đó × 24), không cố định - kể cả khi
-    forecast_csv_path rỗng, output vẫn đủ dòng theo số trạm quan trắc thật
+    score_<field> theo FIELD_ORDER, cộng date/station_code/hour/buoi), rồi
+    ghi ra 1 file score_YYYYMMDD.csv/ngày. Số dòng/ngày bằng số trạm quan
+    trắc thực sự báo cáo hôm đó nhân 24, kể cả khi forecast_csv_path rỗng
     (forecast toàn None, score toàn bỏ cặp).
 
-    Trả về: {"YYYY-MM-DD": {"csv": path, "records": n}, ...} - đúng quy ước
-    export_history_by_date(). local_files rỗng (hoặc thư mục không có ngày
-    nào parse được) -> {}.
+    Trả về {"YYYY-MM-DD": {"csv": path, "records": n}, ...}; local_files
+    rỗng hoặc thư mục không có ngày nào parse được thì trả về {}.
     """
     forecast_records = load_records_csv(forecast_csv_path) if forecast_csv_path else []
     forecast_rows = build_hourly_table(forecast_records)

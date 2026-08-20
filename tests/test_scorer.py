@@ -162,7 +162,7 @@ def test_score_toc_do_gio_missing_data_is_none():
 # =============================================================================
 
 def test_score_huong_gio_wraps_around_compass():
-    """N (idx 0) and NNW (idx 15) are adjacent on the compass — ±1 must wrap."""
+    """N (idx 0) and NNW (idx 15) are adjacent on the compass; ±1 must wrap."""
     assert score_huong_gio({"huong_gio": 0}, {"huong_gio": 15, "toc_do_gio": 5}) is True
 
 

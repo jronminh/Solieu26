@@ -10,7 +10,7 @@ import os
 def update_ini_key(path: str, section: str, key: str, value: str):
     """
     Update/add a SINGLE key in an .ini file, preserving every other line (including
-    comments) — unlike configparser.write(), which rewrites the whole file and
+    comments), unlike configparser.write(), which rewrites the whole file and
     drops all comments. Missing file/section → created at the end.
     """
     section_header = f"[{section}]"

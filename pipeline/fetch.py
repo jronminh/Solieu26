@@ -1,24 +1,8 @@
 """
 pipeline/fetch.py
 ====================
-Khối 1 (lấy file số liệu) — toàn bộ tầng FTP, đứng độc lập hoàn toàn: không
-import pipeline/decode_files.py, bulletin/decode.py hay bất cứ gì thuộc khối "xử lý
-readable" (pipeline/decode_files.py) hay khối chấm điểm (pipeline/match_score.py/
-scoring/). Module này vỡ hay lành không phụ thuộc 2 khối kia, và ngược lại.
-
-fetch_files() là điểm vào duy nhất caller (runner.py) cần: connect FTP → login
-→ download_files() → quit, trả về danh sách file cục bộ đã có sẵn (tải mới
-hoặc đã tồn tại từ trước). Không biết gì về decode/CSV — "tải xong" ở đây
-chỉ có nghĩa là "có file trên đĩa hay không", ai dùng file đó làm gì là việc
-của caller.
-
-Mỗi lời gọi log(level, msg) dùng LEVEL 4 ký tự cố định:
-    INFO  general info            OK    success
-    SKIP  skipped (already there) MISS  file missing on server
-    WARN  warning                 ERR   error
-
-Chạy trực tiếp (python -m pipeline.fetch) không có demo CLI — cần config FTP
-thật, dùng qua main.py.
+Khối 1 (lấy file số liệu): toàn bộ tầng FTP, độc lập hoàn toàn với khối decode và khối chấm điểm.
+Dùng qua fetch_files() (đầu vào cfg, log callback dùng level cố định INFO/OK/SKIP/MISS/WARN/ERR); không có demo CLI, chạy trực tiếp cần config FTP thật qua main.py.
 """
 
 import datetime
@@ -31,7 +15,7 @@ from utils.ftp_utils import fetch_and_bucket
 
 
 # =============================================================================
-# FTP LAYER — FILE DOWNLOAD  (log/progress via callback)
+# FTP LAYER: FILE DOWNLOAD  (log/progress via callback)
 # =============================================================================
 
 def download_files(ftp: FTP, cfg: dict, log, progress=None) -> dict:
@@ -39,14 +23,11 @@ def download_files(ftp: FTP, cfg: dict, log, progress=None) -> dict:
     Download hourly bulletin files into cfg['local_dir'], from cfg['start_date']
     through cfg['end_date'] (inclusive).
 
-    Same day (start_date == end_date): fast path — cwd ONCE into that date's
-    remote directory and download the full day [00:00 → 23:00]; if the
-    directory is unreachable, bail out early.
-
-    Different days: walks every hour from 00:00 of start_date through 23:00 of
-    end_date. The remote directory is "<remote_dir>/YYYY/MM" per timestamp, so
-    it cwd's again only when the year/month actually changes (a range can span
-    multiple months/years).
+    Same day (start_date == end_date): cwd once into that date's remote
+    directory and download the full day [00:00, 23:00], bailing out early if
+    the directory is unreachable. Different days: walks every hour from
+    00:00 of start_date through 23:00 of end_date, cwd'ing into
+    "<remote_dir>/YYYY/MM" again only when the year/month actually changes.
 
     Returns a dict: {"files","downloaded","skipped","missing"}.
     """
@@ -119,18 +100,18 @@ def download_files(ftp: FTP, cfg: dict, log, progress=None) -> dict:
 
 
 # =============================================================================
-# ĐIỂM VÀO CHO CALLER — vòng đời FTP trọn vẹn (connect → login → download → quit)
+# ĐIỂM VÀO CHO CALLER: vòng đời FTP trọn vẹn (connect → login → download → quit)
 # =============================================================================
 
 def fetch_files(cfg: dict, log, progress=None) -> dict:
     """
     Connect FTP (cfg['ftp_host']/ftp_user/ftp_pass/ftp_timeout) → login →
-    download_files() → quit. Raises on connect/login failure — caller (runner.py)
-    tự bắt và báo lỗi riêng, KHÔNG ảnh hưởng gì tới việc khối này đã tự chứa
+    download_files() → quit. Raises on connect/login failure; caller (runner.py)
+    tự bắt và báo lỗi riêng, không ảnh hưởng gì tới việc khối này đã tự chứa
     trọn vẹn tầng FTP.
 
     Trả về đúng dict bucket của download_files()
-    ({"files","downloaded","skipped","missing"}) — "files" là MỌI file cục bộ
+    ({"files","downloaded","skipped","missing"}): "files" là MỌI file cục bộ
     có sẵn (tải mới lẫn đã có từ trước), không phải chỉ file tải mới.
     """
     log("INFO", f"Thư mục tải tạm: {cfg.get('local_dir')}")

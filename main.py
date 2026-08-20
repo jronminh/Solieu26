@@ -1,23 +1,9 @@
 """
-main.py
-===================
-Tkinter GUI entry point + the App class (the spine): main window, logging,
-info panel, and wiring for the other pieces.
+main.py: Tkinter GUI entry point, holding the App class (main window, logging,
+info panel) and wiring up runner.Runner, auto_query.AutoQuery, viewer.HistoryViewer,
+dialogs.SettingsDialog, and dialogs.AdvancedDialog. Run: python main.py [config.ini path].
 
-Heavier pieces live in their own modules as standalone classes — runner.Runner
-(pipeline run + worker thread + queue poll), auto_query.AutoQuery (the
-"Tự động truy vấn" timer), viewer.HistoryViewer ("Xem số liệu"),
-dialogs.SettingsDialog ("Thiết lập") and dialogs.AdvancedDialog ("Tải số
-liệu") — each constructed once in App.__init__ and holding the `app` instance
-so it can reach back into shared state (self.app.v, self.app._log,
-self.app._dialogs, ...).
-
-Run:  python main.py [config.ini path]
-Requires utils/config_utils.py/common.py/runner.py/auto_query.py/
-viewer.py/dialogs.py, plus the bulletin/ and utils/ packages, in the
-same folder.
-
-Tác giả: congminh9981 (congminh9981@gmail.com); Claude (Anthropic) — đồng tác giả.
+Tác giả: congminh9981 (congminh9981@gmail.com); Claude (Anthropic), đồng tác giả.
 """
 
 import datetime
@@ -45,7 +31,7 @@ class App:
         # Load the external config (if any) BEFORE prefilling the form. The log
         # widget doesn't exist yet at this point, so buffer any per-key WARNs
         # (bad config.ini values) and flush them into it once _build_ui() runs
-        # below — otherwise they'd only reach stdout, which a windowed build
+        # below, otherwise they'd only reach stdout, which a windowed build
         # (console=False) has no visible console for at all.
         config_log_buffer = []
         self.cfg_path, self.cfg_overrides = config.apply_config_file(
@@ -58,9 +44,9 @@ class App:
             try:
                 root.iconbitmap(icon_path)
             except tk.TclError:
-                pass   # e.g. platform without .ico support — window just keeps the default icon
+                pass   # e.g. platform without .ico support, window just keeps the default icon
 
-        # CSV viewer Treeview look — taller rows + bold headings read better than
+        # CSV viewer Treeview look: taller rows + bold headings read better than
         # the ttk defaults across the many columns a data row can have.
         style = ttk.Style(root)
         style.configure("Treeview", rowheight=22)
@@ -75,7 +61,7 @@ class App:
             "ftp_pass":    tk.StringVar(value=d.get("ftp_pass", "")),
             "remote_dir":  tk.StringVar(value=d.get("remote_dir", "/Quantrac")),
             "output_dir":  tk.StringVar(value=d.get("output_dir") or config.DEFAULT_OUTPUT_DIR),
-            # Advanced mode (date-range query) — off by default; normal mode always
+            # Advanced mode (date-range query), off by default; normal mode always
             # queries "today", no date field shown.
             "advanced_mode": tk.BooleanVar(value=False),
             "start_date":  tk.StringVar(value=today.strftime("%Y-%m-%d")),
@@ -85,16 +71,16 @@ class App:
             "auto_on_startup": tk.BooleanVar(value=bool(d.get("auto_query_on_startup", True))),
         }
 
-        # Read-only labels in the "Thông tin truy vấn" panel — recomputed by
+        # Read-only labels in the "Thông tin truy vấn" panel, recomputed by
         # _refresh_info_panel() whenever the underlying state changes.
         self.info = {
-            "csv_result":    tk.StringVar(value="—"),
+            "csv_result":    tk.StringVar(value="-"),
             "data_status":   tk.StringVar(value="Chưa có dữ liệu"),
-            "auto_status":   tk.StringVar(value="—"),
-            "missing":       tk.StringVar(value="—"),
+            "auto_status":   tk.StringVar(value="-"),
+            "missing":       tk.StringVar(value="-"),
         }
 
-        # The 3 heavier UI pieces — constructed once and kept for the app's
+        # The 3 heavier UI pieces, constructed once and kept for the app's
         # lifetime, so each one's own state (HistoryViewer.hidden_cols,
         # AdvancedDialog's widget refs...) survives across open/close cycles.
         self.history_viewer = HistoryViewer(self)
@@ -108,11 +94,11 @@ class App:
         self.root.after(100, self.runner._poll)
         for level, msg in config_log_buffer:
             self._log(level, msg)
-        self._log("INFO", "Khởi động xong — sẵn sàng. Điền thông tin rồi bấm 'Làm mới'.")
+        self._log("INFO", "Khởi động xong, sẵn sàng. Điền thông tin rồi bấm 'Làm mới'.")
         if self.cfg_overrides:
             self._log("OK", f"Đã nạp {len(self.cfg_overrides)} thiết lập từ config: {self.cfg_path}")
         else:
-            self._log("INFO", f"Không thấy config ({self.cfg_path}) — dùng mặc định trong mã.")
+            self._log("INFO", f"Không thấy config ({self.cfg_path}), dùng mặc định trong mã.")
         self.auto_query._schedule_auto_tick()   # also refreshes the info panel's auto-query status
 
         if self.v["auto_on_startup"].get():
@@ -129,7 +115,7 @@ class App:
         content_row.pack(fill="x")
 
         # --- Thông tin truy vấn --- (read-only status; recomputed by _refresh_info_panel)
-        # No LabelFrame border — laid directly on content_row.
+        # No LabelFrame border, laid directly on content_row.
         top = ttk.Frame(content_row)
         top.pack(side="left", fill="both", expand=True)
 
@@ -168,7 +154,7 @@ class App:
         self.status.pack(side="right")
 
         # --- Log (fills the middle, sits above the status bar) ---
-        # No LabelFrame border — built regardless.
+        # No LabelFrame border, built regardless.
         self.log = scrolledtext.ScrolledText(frm, height=12, state="disabled",
                                              wrap="word", font=("Consolas", 9))
         self.log.pack(side="top", fill="both", expand=True, pady=(8, 0))
@@ -191,7 +177,7 @@ class App:
         """Write one log line in the standard format:  HH:MM:SS  LEVEL  message.
 
         Inserts 3 separately-tagged chunks (time / level / content) so each part
-        gets its own color. ONLY call from the main thread — the worker must push
+        gets its own color. ONLY call from the main thread; the worker must push
         onto the queue and let _poll call this on its behalf.
         """
         level = level.upper()
@@ -215,7 +201,7 @@ class App:
     # ----- Info panel ("Thông tin truy vấn") --------------------------
     def _refresh_info_panel(self):
         """Recompute every label in the info panel from current state (last run result,
-        auto-query schedule). Cheap — just StringVar.set() calls — safe to call often."""
+        auto-query schedule). Cheap: just StringVar.set() calls, safe to call often."""
         result = self.runner.last_result or {}
 
         if self.runner.last_result is not None:
@@ -225,8 +211,8 @@ class App:
             missing = len(result.get("missing") or [])
             self.info["missing"].set("Không thiếu" if missing == 0 else f"{missing} file")
         else:
-            self.info["csv_result"].set("—")
-            self.info["missing"].set("—")
+            self.info["csv_result"].set("-")
+            self.info["missing"].set("-")
 
         if self.runner.last_cfg and self.runner.last_updated_at:
             start, end = self.runner.last_cfg["start_date"], self.runner.last_cfg["end_date"]
@@ -234,12 +220,12 @@ class App:
                 rng = f"Ngày {start:%Y-%m-%d}"
             else:
                 rng = f"{start:%Y-%m-%d} → {end:%Y-%m-%d}"
-            self.info["data_status"].set(f"{rng} — cập nhật lúc {self.runner.last_updated_at:%H:%M:%S}")
+            self.info["data_status"].set(f"{rng}, cập nhật lúc {self.runner.last_updated_at:%H:%M:%S}")
         else:
             self.info["data_status"].set("Chưa có dữ liệu")
 
         if self.v["advanced_mode"].get():
-            self.info["auto_status"].set("Tạm dừng — đang tải số liệu")
+            self.info["auto_status"].set("Tạm dừng, đang tải số liệu")
             return
 
         if self.auto_query._auto_effective_minutes() <= 0:
@@ -248,7 +234,7 @@ class App:
             v, unit = self.v["auto_value"].get(), self.v["auto_unit"].get().lower()
             next_run = self.auto_query.auto_next_run
             next_run_txt = f" (tiếp theo: {next_run:%H:%M:%S})" if next_run else ""
-            self.info["auto_status"].set(f"Bật — mỗi {v} {unit}{next_run_txt}")
+            self.info["auto_status"].set(f"Bật, mỗi {v} {unit}{next_run_txt}")
 
 
 def main():

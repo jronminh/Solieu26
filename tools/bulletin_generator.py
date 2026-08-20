@@ -2,23 +2,22 @@
 bulletin_generator.py
 ====================
 Standalone Tkinter tool that generates synthetic raw "Qt..." bulletin
-records — the reverse of decode.py — for testing without needing a real
-FTP download.
+records for testing without needing a real FTP download, using the reverse
+encoding path (encode.py).
 
 The backbone is a table of Thời gian / Trường dữ liệu / Giá trị: each row
 says "field F holds value V from giờ START to giờ END, both included" for
 the (single, fixed) station entered at the top. Rows can be added, edited
 (double-click, or "Sửa dòng") and deleted freely. Editing happens in the
-"Thêm / sửa dòng" panel docked on the right — always visible, not a popup.
+always-visible "Thêm / sửa dòng" side panel, not a popup.
 
-"Sinh tất cả mã" merges the rows into one record per hour (see
-_covered_hours/_merge_at_hour for the merge rule) and decodes each one back
-for a live sanity preview. "Lưu vào file..." appends the generated records
-to a .txt file, so you can feed it into the same decode pipeline used for
-real downloads to sanity-check against a hand-built time series.
+"Sinh tất cả mã" merges the rows into one record per hour and decodes each
+one back for a live sanity preview. "Lưu vào file..." appends the generated
+records to a .txt file, so you can feed it into the same decode pipeline
+used for real downloads to sanity-check against a hand-built time series.
 
-Standalone — does not import main.py/pipeline/decode_files.py/config_utils.py, does not touch FTP
-or the app's config. Run:  python -m tools.bulletin_generator
+Standalone: does not import main.py/pipeline/decode_files.py/config_utils.py,
+does not touch FTP or the app's config. Run: python -m tools.bulletin_generator
 """
 
 import json
@@ -33,16 +32,16 @@ from bulletin.code_tables import TABLES
 
 
 def _code_desc_values(table: dict) -> list:
-    """'code — description' strings for a Combobox, in table order."""
-    return [f"{code} — {desc}" for code, desc in table.items()]
+    """'code - description' strings for a Combobox, in table order."""
+    return [f"{code} - {desc}" for code, desc in table.items()]
 
 
 def _code_from_selection(text: str) -> str:
-    return text.split(" — ", 1)[0].strip()
+    return text.split(" - ", 1)[0].strip()
 
 
 def _select_code(combo: ttk.Combobox, table: dict, code: str):
-    """Point a 'code — desc' Combobox at the entry whose code matches."""
+    """Point a 'code - desc' Combobox at the entry whose code matches."""
     for i, k in enumerate(table.keys()):
         if k == code:
             combo.current(i)
@@ -58,7 +57,7 @@ def _set_text(widget: tk.Text, text: str):
 
 
 # =============================================================================
-# FIELD REGISTRY — one entry per selectable "trường dữ liệu". Each builder
+# FIELD REGISTRY: one entry per selectable "trường dữ liệu". Each builder
 # creates the value-editing widget(s) for that field inside a given parent
 # and returns (widget, get() -> value, set(value)) so RowEditorPanel can stay
 # generic across every field type (code lookups, floats, composite cloud).
@@ -185,10 +184,10 @@ FIELD_DEFS = {
     "w1":      {"label": "Thời tiết đã qua 1", "builder": _build_code_field(TABLES["W1W2"], 22), "default": "0"},
     "w2":      {"label": "Thời tiết đã qua 2", "builder": _build_code_field(TABLES["W1W2"], 22), "default": "0"},
     "pressure": {"label": "Áp suất (mmHg)", "builder": _build_float_field(), "default": 754.0},
-    "cloud1":  {"label": "Mây — lớp 1", "builder": _build_cloud_field, "default": {"N": "0", "C": "0", "hshs": "00"}},
-    "cloud2":  {"label": "Mây — lớp 2", "builder": _build_cloud_field, "default": {"N": "0", "C": "0", "hshs": "00"}},
-    "cloud3":  {"label": "Mây — lớp 3", "builder": _build_cloud_field, "default": {"N": "0", "C": "0", "hshs": "00"}},
-    "cloud4":  {"label": "Mây — lớp 4", "builder": _build_cloud_field, "default": {"N": "0", "C": "0", "hshs": "00"}},
+    "cloud1":  {"label": "Mây - lớp 1", "builder": _build_cloud_field, "default": {"N": "0", "C": "0", "hshs": "00"}},
+    "cloud2":  {"label": "Mây - lớp 2", "builder": _build_cloud_field, "default": {"N": "0", "C": "0", "hshs": "00"}},
+    "cloud3":  {"label": "Mây - lớp 3", "builder": _build_cloud_field, "default": {"N": "0", "C": "0", "hshs": "00"}},
+    "cloud4":  {"label": "Mây - lớp 4", "builder": _build_cloud_field, "default": {"N": "0", "C": "0", "hshs": "00"}},
 }
 
 CLOUD_FIELD_KEYS = ("cloud1", "cloud2", "cloud3", "cloud4")
@@ -209,14 +208,14 @@ def _row_value_str(row: dict) -> str:
                 f"{TABLES['cloud_type'].get(v['C'], v['C'])} "
                 f"h\u2248{h}m" if h is not None else f"hshs={v['hshs']}")
     if key == "N_total":
-        return f"{v} — {TABLES['N_oktas'].get(v, '?')}"
+        return f"{v} - {TABLES['N_oktas'].get(v, '?')}"
     if key == "vv":
         km = vv_value(v, TABLES)
         return f"{v} (\u2248{km} km)" if km is not None else v
     if key == "ww":
-        return f"{v} — {TABLES['ww'].get(v, '?')}"
+        return f"{v} - {TABLES['ww'].get(v, '?')}"
     if key in ("w1", "w2"):
-        return f"{v} — {TABLES['W1W2'].get(v, '?')}"
+        return f"{v} - {TABLES['W1W2'].get(v, '?')}"
     if key == "wind_dd":
         return f"{v:.0f}\u00b0"
     if key == "wind_ff":
@@ -229,10 +228,9 @@ def _row_value_str(row: dict) -> str:
 
 
 def _covered_hours(rows: list) -> list:
-    """Every hour any row's [start, end] range touches (both ends included)
-    — a mã gets generated per HOUR, not once per row: a "07–09" row covers
-    hours 07, 08 AND 09, each getting its own record (the format is
-    inherently hourly)."""
+    """Every hour any row's [start, end] range touches (both ends included).
+    A mã gets generated per HOUR, not once per row: a "07-09" row covers
+    hours 07, 08 AND 09, each getting its own record."""
     hours = set()
     for r in rows:
         hours.update(range(r["start"], r["end"] + 1))
@@ -271,14 +269,13 @@ def _encode_state(state: dict, station_code: str, lat: float, lon: float, statio
 
 class RowEditorPanel(ttk.Frame):
     """Always-visible sidebar (not a popup) for adding/editing one Thời
-    gian+Trường dữ liệu+Giá trị row — one field, one value, one [start, end]
+    gian+Trường dữ liệu+Giá trị row: one field, one value, one [start, end]
     hour range (both ends included).
 
     load_new() resets it to "add a row" mode; load_row(row) switches it to
-    "edit this row" mode. Either way, Lưu dòng calls
-    on_save(row_dict, editing_id) — editing_id is None for a new row, or the
-    _id of the row being replaced — and then resets back to add-mode so the
-    panel is immediately ready for the next row."""
+    "edit this row" mode. Either way, Lưu dòng calls on_save(row_dict,
+    editing_id), where editing_id is None for a new row or the _id of the
+    row being replaced, then resets back to add-mode."""
 
     HOURS = [f"{h:02d}" for h in range(24)]
 
@@ -340,7 +337,7 @@ class RowEditorPanel(ttk.Frame):
         """Switch the panel to edit-this-row mode, prefilled from `row`."""
         self.editing_id = row["_id"]
         self.mode_label.config(
-            text=f"Đang sửa: {row['start']:02d}–{row['end']:02d} — "
+            text=f"Đang sửa: {row['start']:02d}–{row['end']:02d} - "
                  f"{FIELD_DEFS[row['field']]['label']}")
         self.start_hour.set(f"{row['start']:02d}")
         self.end_hour.set(f"{row['end']:02d}")
@@ -424,7 +421,7 @@ class App:
 
     # ----- table backbone: thời gian / trường dữ liệu / giá trị ---------
     def _build_table_section(self, parent):
-        box = ttk.LabelFrame(parent, text="Bảng thời gian — trường dữ liệu — giá trị", padding=8)
+        box = ttk.LabelFrame(parent, text="Bảng thời gian - trường dữ liệu - giá trị", padding=8)
         box.pack(fill="both", expand=True, pady=(0, 8))
 
         toolbar = ttk.Frame(box)

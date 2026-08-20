@@ -4,8 +4,8 @@ decode.py
 Pure decoding layer: turn one raw "Qt..." bulletin record (a string) into a
 nested dict, and one downloaded bulletin file into a list of such dicts.
 
-No file I/O beyond reading the bulletin files themselves, no FTP, no config —
-this module only decodes; turning its output into CSV rows happens elsewhere.
+No file I/O beyond reading the bulletin files themselves, no FTP, no config.
+This module only decodes; turning its output into CSV rows happens elsewhere.
 
 Lookup tables (code -> human-readable value) live in a separate module, not
 here, so the reverse (encoding) direction can share them without importing
@@ -89,7 +89,7 @@ def hshs_value(code: str, tables: dict):
 def vv_value(vv_code: str, tables: dict):
     """Visibility in km (float), decoded from the raw VV code. Public: also
     used elsewhere for a live visibility preview while the user types a VV
-    code — piecewise/lossy, see encode.py for why the reverse direction
+    code; piecewise/lossy, see encode.py for why the reverse direction
     takes the raw code instead of trying to invert this."""
     if len(vv_code) < 2:
         return None
@@ -124,7 +124,7 @@ def decode_head(token: str, tables: dict):
 
 
 def decode_total_cloud(token: str, tables: dict):
-    """N (total cloud amount, tenths 0-10) — the first char of the combined
+    """N (total cloud amount, tenths 0-10): the first char of the combined
     total-cloud+wind token. Split from decode_wind() since it isn't a wind
     quantity at all (see TODO.md)."""
     if not token or len(token) < 5:
@@ -176,7 +176,7 @@ def decode_cloud(token: str, tables: dict):
 
 def decode_storm(token: str, tables: dict):
     """A + dd + L + Cg: hướng/khoảng cách/xu thế mây dông (Cb) quan sát quanh
-    trạm (không phải hiện tượng tại trạm) — vd 'A1411' -> hướng 140°, cách
+    trạm (không phải hiện tượng tại trạm), vd 'A1411' -> hướng 140°, cách
     10-20km, đang phát triển chậm."""
     if len(token) < 5:
         return None
@@ -211,7 +211,7 @@ def decode_tail(token: str):
 
     Coordinates in the bulletin are DEGREES-MINUTES (DDMM), NOT decimal. We
     convert straight to decimal degrees (dd + mm/60) so the lat/lon columns are
-    directly usable — ready for mapping / distance calculations without error.
+    directly usable, ready for mapping / distance calculations without error.
     """
     if not token or not token.startswith('k') or len(token) != 12:
         return None
@@ -226,16 +226,16 @@ def decode_tail(token: str):
 
 
 # =============================================================================
-# INDICATOR TOKENS (variable multiset after wind — 0..n tokens, any order)
+# INDICATOR TOKENS (variable multiset after wind, 0..n tokens, any order)
 # =============================================================================
 
 def decode_indicators(indicators: list, tables: dict) -> dict:
     """Only decodes indicator groups that end up as CSV columns
-    (temperature/dewpoint/weather/cloud/storm) — other group codes (e.g.
+    (temperature/dewpoint/weather/cloud/storm); other group codes (e.g.
     '9'/'5' supplementary/pressure-tendency sections) are ignored, since
     nothing downstream reads them. See TODO.md for the pending indicators.
 
-    Only '8' (cloud) can repeat (0-4 layers per record) — every other group
+    Only '8' (cloud) can repeat (0-4 layers per record). Every other group
     appears at most once, so those are assigned directly instead of through
     a repeat-handling dispatch.
     """
@@ -302,7 +302,7 @@ def decode_qt_file(file_path: str, tables: dict = TABLES) -> list:
 
 def decode_history(local_files: list) -> list:
     """
-    Decode every downloaded file and keep EVERY station's record (not just one) —
+    Decode every downloaded file and keep EVERY station's record (not just one):
     the full day's station × hour matrix. Station filtering happens later, in the
     CSV viewer, not here: the FTP download is already not station-specific (each
     hourly file bundles every station), so there is nothing to gain by filtering

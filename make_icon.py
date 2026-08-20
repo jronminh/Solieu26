@@ -1,8 +1,8 @@
 """
 make_icon.py
 ====================
-Generates icon.ico — a simple flat "download arrow" glyph (shaft + arrowhead
-over a tray bar) — used as both the app window icon (main.py) and the built
+Generates icon.ico: a simple flat "download arrow" glyph (shaft + arrowhead
+over a tray bar), used as both the app window icon (main.py) and the built
 exe's own icon (Solieu26.spec). Re-run after editing SIZE/COLOR/geometry below;
 draws at 4x and downsamples for anti-aliased edges.
 

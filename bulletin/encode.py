@@ -1,15 +1,15 @@
 """
 encode.py
 ====================
-Pure encoding layer: the reverse of decode.py — turn human-entered values
-into raw "Qt..." bulletin tokens and assemble one record string.
+Pure encoding layer: the reverse of decode.py. It turns human-entered values
+into raw "Qt..." bulletin tokens and assembles one record string.
 
 Imports TABLES from code_tables.py (the same tables decode.py decodes with)
 so the two modules can't drift out of sync. Where a decode.py table/formula
 is NOT a clean bijection (N_oktas, ww, W1W2, cloud_type all map several codes
 to the same decoded value; VV and cloud height are piecewise and lossy),
 encode.py takes the raw CODE as input rather than trying to invert the
-decoded value — callers (e.g. a GUI) should let the user pick the code,
+decoded value. Callers (e.g. a GUI) should let the user pick the code,
 showing decode.py's own output as a live preview instead of pretending the
 inverse is unambiguous.
 
@@ -21,7 +21,7 @@ from .code_tables import TABLES
 
 def _reverse_table(table: dict) -> dict:
     """value -> key, keeping the FIRST key seen for a repeated value (e.g.
-    N_oktas maps both '9' and '/' to '/' — keeping '/' as the reverse is the
+    N_oktas maps both '9' and '/' to '/'; keeping '/' as the reverse is the
     more canonical choice since it comes first in the table)."""
     rev = {}
     for k, v in table.items():
@@ -40,9 +40,9 @@ REV_W1W2       = _reverse_table(TABLES["W1W2"])
 # =============================================================================
 
 def encode_head(station_code: str, vv_code: str) -> str:
-    """station_code: 'kXX' (3 chars — matches common.STATIONS keys and
+    """station_code: 'kXX' (3 chars, matches common.STATIONS keys and
     decode_tail's station_code). vv_code: raw 2-digit VV code (00-99), NOT
-    a km value — decode.vv_value is piecewise/lossy, so there's no single
+    a km value: decode.vv_value is piecewise/lossy, so there's no single
     correct code for a given distance."""
     if not station_code or not station_code.startswith('k') or len(station_code) != 3:
         raise ValueError(f"mã trạm không hợp lệ: {station_code!r} (cần dạng 'kXX')")
@@ -73,7 +73,7 @@ def encode_total_cloud_wind(total_cloud_N_code: str, dd_deg: float, ff: float) -
     CODE, not the decoded value). dd_deg: wind direction in whole degrees
     (rounded to the nearest 10, since the token only stores tens). One
     bulletin token combines total cloud amount + wind, so this encodes all
-    three together — the reverse of decode.py's decode_total_cloud() +
+    three together: the reverse of decode.py's decode_total_cloud() +
     decode_wind(), which split back into two dicts."""
     dd_code = round(dd_deg / 10) % 100
     ff_code = round(ff) % 100
@@ -106,7 +106,7 @@ def encode_cloud(N_oktas_code: str, cloud_type_code: str, hshs_code: str) -> str
 
 def encode_pressure(mmhg: float) -> str:
     """Reverse of decode_pressure: the token IS the pressure in mmHg (to one
-    decimal) — decode_pressure just relabels it pressure_raw and additionally
+    decimal): decode_pressure just relabels it pressure_raw and additionally
     converts to pressure_hpa = raw * 4/3. Token is 4 digits (3 before + 1
     after the decimal point), so only mmhg in [700.0, 800.0) round-trips."""
     raw_x10 = round(mmhg * 10)          # round on the tenths digit FIRST so a

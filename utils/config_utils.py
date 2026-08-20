@@ -3,7 +3,7 @@ config_utils.py
 ====================
 Path/FTP constants + the CONFIG dict + config.ini load/save.
 
-No FTP calls, no decoding — this is the settings layer everything else
+No FTP calls, no decoding. This is the settings layer everything else
 (decode.py, pipeline/decode_files.py, main.py) reads from. main.py is the only writer: it calls
 apply_config_file() once at startup and write_default_config() whenever the
 user restores default settings from the "Thiết lập" dialog (saving individual
@@ -33,7 +33,7 @@ else:
 
 # Everything the app persists lives under the user's home folder (works the
 # same way on Windows and Linux via os.path.expanduser), not the OS temp dir or
-# next to the script — so it survives temp-dir cleanup and doesn't depend on
+# next to the script, so it survives temp-dir cleanup and doesn't depend on
 # where the exe/script happens to sit.
 USER_BASE_DIR = os.path.join(os.path.expanduser("~"), "solieu26_dl")
 
@@ -70,13 +70,13 @@ CONFIG = {
     "viewer_hidden_columns": [],         # GUI-only: columns hidden in the CSV viewer
 
     "auto_query_value": 15,              # GUI-only: auto-query interval (0 = disabled)
-    "auto_query_unit":  "minutes",       # GUI-only: "minutes" or "hours" — unit for auto_query_value
+    "auto_query_unit":  "minutes",       # GUI-only: "minutes" or "hours"; unit for auto_query_value
     "auto_query_on_startup": True,       # GUI-only: run once automatically right after launch
 }
 
 # Pristine snapshot of the hardcoded defaults, taken before anything (loaded
 # config.ini, in-session edits) ever mutates CONFIG. Powers "Khôi phục mặc
-# định" — restoring must come from the source code, not from whatever CONFIG
+# định": restoring must come from the source code, not from whatever CONFIG
 # currently holds.
 DEFAULT_CONFIG = dict(CONFIG)
 
@@ -87,7 +87,7 @@ DEFAULT_CONFIG = dict(CONFIG)
 # If a config.ini file exists (in TEMP_DL_DIR, or passed on the command line),
 # read it and OVERRIDE the defaults in CONFIG. Missing file → keep code defaults.
 # Only the keys you want to change need to be present; absent keys keep their default.
-# 'local_dir' is never read from config — downloads always go into TEMP_DL_DIR.
+# 'local_dir' is never read from config. Downloads always go into TEMP_DL_DIR.
 # =============================================================================
 
 CONFIG_FILENAME = "config.ini"          # default name, looked up in TEMP_DL_DIR
@@ -111,9 +111,9 @@ def _to_bool(v: str):
 def load_config_file(path: str, log) -> dict:
     """Read INI → override dict. Missing/broken file → {} (with a warning).
 
-    Every warning goes through `log`, same as the rest of the module — so a
-    caller with its own log sink (e.g. the GUI) sees WHICH key was skipped and
-    why, instead of the message only ever reaching stdout.
+    Every warning goes through `log`, same as the rest of the module. That way
+    a caller with its own log sink (e.g. the GUI) sees WHICH key was skipped
+    and why, instead of the message only ever reaching stdout.
     """
     if not path or not os.path.isfile(path):
         return {}
@@ -153,11 +153,11 @@ def load_config_file(path: str, log) -> dict:
 
 
 def _default_config_lines() -> list:
-    """Render DEFAULT_CONFIG as config.ini lines — the single source of truth
+    """Render DEFAULT_CONFIG as config.ini lines: the single source of truth
     for both auto-creating a missing config.ini and 'Khôi phục mặc định'."""
     d = DEFAULT_CONFIG
     return [
-        "# config.ini cho Solieu26 — sửa giá trị rồi lưu lại.",
+        "# config.ini cho Solieu26, sửa giá trị rồi lưu lại.",
         "# Xóa dòng nào muốn dùng mặc định trong mã.",
         f"[{CONFIG_SECTION}]",
         f"ftp_host = {d['ftp_host']}",
@@ -188,10 +188,10 @@ def apply_config_file(path: str, log):
     and override CONFIG. Returns (path_used, dict_of_overridden_keys).
 
     Default location is TEMP_DL_DIR (same place downloaded bulletins land), not
-    next to the script/exe — that folder is always writable, unlike an exe that
+    next to the script/exe: that folder is always writable, unlike an exe that
     might sit under Program Files.
 
-    `log` is forwarded to load_config_file() for its per-key WARNs — pass the
+    `log` is forwarded to load_config_file() for its per-key WARNs. Pass the
     GUI's own log sink (main.py buffers calls made before its log widget exists yet).
     """
     path = path or os.path.join(TEMP_DL_DIR, CONFIG_FILENAME)

@@ -1,13 +1,13 @@
 """
 code_tables.py
 ====================
-Lookup tables shared by decode.py (decoding) and encode.py (the reverse) —
+Lookup tables shared by decode.py (decoding) and encode.py (the reverse):
 the single source of truth for every code -> human-readable-value mapping
 in the "Qt..." bulletin format. Kept in its own module (rather than living
 in decode.py) so encode.py doesn't have to import decode.py just to reach
 the tables, and so the two stay in sync by construction.
 
-No logic here — just data.
+No logic here, just data.
 """
 
 TABLES = {
@@ -95,7 +95,7 @@ TABLES = {
         '95': '2',   '96': '4',   '97': '10',  '98': '20',  '99': '50'
     },
     # Nhóm bổ sung "A" + dd + L + Cg: hướng/khoảng cách/xu thế mây dông (Cb)
-    # quan sát quanh trạm — không phải hiện tượng tại trạm. 2 mã dùng chung
+    # quan sát quanh trạm, không phải hiện tượng tại trạm. 2 mã dùng chung
     # 1 nhãn khoảng cách (0/5, 1/6, 2/7, 3/8, 4/9).
     "storm_distance": {
         '0': '<10km',    '5': '<10km',

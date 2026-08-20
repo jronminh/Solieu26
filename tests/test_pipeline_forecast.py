@@ -19,7 +19,7 @@ def _rec(start, end, field, bucket, station_code="k31"):
 
 
 # =============================================================================
-# build_hourly_table — basic shape
+# build_hourly_table: basic shape
 # =============================================================================
 
 def test_build_hourly_table_empty_records():
@@ -102,7 +102,7 @@ def test_build_hourly_table_groups_rows_per_station_sorted():
 
 
 # =============================================================================
-# build_hourly_table — validation (field_name / bucket_selected)
+# build_hourly_table: validation (field_name / bucket_selected)
 # =============================================================================
 
 def test_build_hourly_table_rejects_unknown_field_name():
@@ -141,7 +141,7 @@ def test_build_hourly_table_rejects_non_int_bucket_for_scalar_fields():
 
 
 def test_build_hourly_table_rejects_bool_bucket_index():
-    """bool is technically an int subclass in Python — must be excluded
+    """bool is technically an int subclass in Python; must be excluded
     explicitly, not accepted as 0/1."""
     with pytest.raises(ValueError):
         build_hourly_table([_rec(0, 0, "tam_nhin", True)])
@@ -158,7 +158,7 @@ def test_build_hourly_table_hien_tuong_rejects_unknown_mega_label():
 
 
 def test_build_hourly_table_hien_tuong_rejects_int_bucket():
-    """hien_tuong buckets are mega LABELS, not indices — an int must not be
+    """hien_tuong buckets are mega LABELS, not indices; an int must not be
     accepted even if it happens to look like a valid index elsewhere."""
     with pytest.raises(ValueError):
         build_hourly_table([_rec(0, 0, "hien_tuong", 0)])

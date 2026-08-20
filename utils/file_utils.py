@@ -1,7 +1,7 @@
 """
 file_utils.py
 ====================
-OS-level file/folder operations — open a path with its default application.
+OS-level file/folder operations: open a path with its default application.
 No GUI/business-logic dependency, so it's safe to import from anywhere.
 """
 
@@ -11,7 +11,7 @@ import sys
 
 
 def _os_open(path: str):
-    """Hand `path` to the OS's default handler — file manager for a folder, the
+    """Hand `path` to the OS's default handler: file manager for a folder, the
     associated app for a file. Returns (ok: bool, reason/path)."""
     try:
         if os.name == "nt":
