@@ -15,10 +15,15 @@ giá trị):
   score_history()         chấm từng cặp (forecast, obs) đã ghép bằng
                           scoring/scorer.py's score_<field>(), pivot ngược
                           lại thành 1 dòng/(giờ, field).
-  export_forecast_score() điểm vào cho caller (runner.py) - gọi
-                          build_hourly_table/build_scalar_history/
+  export_forecast_score() điểm vào cho caller (runner.py) - nhận đường dẫn
+                          1 file CSV dự báo (đúng shape
+                          pipeline/forecast.py::load_records_csv() đọc được -
+                          file dự báo viên nhập trực tiếp HOẶC file archive
+                          từ pipeline/forecast.py::export_forecast_table(),
+                          cùng shape nên dùng chung 1 tham số), tự load rồi
+                          gọi build_hourly_table/build_scalar_history/
                           join_forecast_obs/score_<field> bên trên, làm
-                          phẳng thành cột rồi GHI 1 file forecast_YYYYMMDD.csv/
+                          phẳng thành cột rồi GHI 1 file score_YYYYMMDD.csv/
                           ngày ra out_dir, trả về {"YYYY-MM-DD": {"csv","records"}}
                           - đúng vai trò + đúng quy ước trả về
                           pipeline/decode_files.py::export_history_by_date().
@@ -30,7 +35,7 @@ tests/fixtures/qt_files/full_day_20260810/.
 
 import os
 
-from pipeline.forecast import build_hourly_table
+from pipeline.forecast import build_hourly_table, load_records_csv
 from pipeline.obs import build_scalar_history
 from utils.csv_utils import write_csv
 from scoring.scorer import (
@@ -116,16 +121,20 @@ def score_history(joined_rows: list) -> list:
     return rows
 
 
-def export_forecast_score(local_files: list, forecast_records: list, out_dir: str) -> dict:
+def export_forecast_score(local_files: list, forecast_csv_path: str, out_dir: str) -> dict:
     """
     local_files: list đường dẫn file QtYYMMDDHH.txt cục bộ đã tải sẵn - cùng
     quy ước với pipeline/decode_files.py::export_history_by_date(); chỉ
     dùng để xác định thư mục chứa chúng (build_scalar_history() tự quét
     thư mục đó để tìm mọi ngày có mặt, có thể nhiều ngày trong 1 lần gọi).
-    forecast_records: list bản ghi dự báo viên nhập - cùng hình dạng tham số
-    `records` của build_hourly_table(). 1 bảng dự báo dùng CHUNG cho MỌI
-    ngày tìm thấy (chưa có khái niệm dự báo riêng theo ngày ở đâu trong code
-    - build_hourly_table() cũng không có tham số ngày).
+    forecast_csv_path: đường dẫn 1 file CSV đúng shape
+    pipeline/forecast.py::load_records_csv() đọc được - có thể là file dự
+    báo viên nhập trực tiếp hoặc file archive từ
+    pipeline/forecast.py::export_forecast_table(), cùng shape nên dùng
+    chung tham số này. Falsy (None/"") -> coi như chưa có dự báo (records
+    rỗng). 1 bảng dự báo dùng CHUNG cho MỌI ngày tìm thấy (chưa có khái
+    niệm dự báo riêng theo ngày ở đâu trong code - build_hourly_table()
+    cũng không có tham số ngày).
     out_dir: thư mục ghi CSV ra - cùng vai trò out_dir của
     export_history_by_date().
 
@@ -133,7 +142,7 @@ def export_forecast_score(local_files: list, forecast_records: list, out_dir: st
     chấm cả 6 field/giờ (scoring/scorer.py's score_<field>() qua _SCORERS),
     làm phẳng 3 dict forecast/obs/score thành các cột
     (forecast_<field>/obs_<field>/score_<field>, theo FIELD_ORDER) + cột
-    date/hour/buoi/station, rồi ghi ra 1 file forecast_YYYYMMDD.csv/ngày
+    date/hour/buoi/station, rồi ghi ra 1 file score_YYYYMMDD.csv/ngày
     (write_csv(), cùng hàm export_history_by_date() dùng) - "buoi" ghi 1
     lần (2 bên luôn tính giống nhau qua sub_of_hour() ở thực tế), station
     lấy từ phía obs (forecast["station"] luôn None, không ghi cột riêng).
@@ -142,6 +151,7 @@ def export_forecast_score(local_files: list, forecast_records: list, out_dir: st
     export_history_by_date(). local_files rỗng (hoặc thư mục không có ngày
     nào parse được) -> {}.
     """
+    forecast_records = load_records_csv(forecast_csv_path) if forecast_csv_path else []
     forecast_rows = build_hourly_table(forecast_records)
 
     history_by_date = build_scalar_history(os.path.dirname(local_files[0])) if local_files else {}
@@ -159,7 +169,7 @@ def export_forecast_score(local_files: list, forecast_records: list, out_dir: st
             **{f"score_{field}": _SCORERS[field](j["forecast"], j["obs"]) for field in FIELD_ORDER},
         } for j in joined]
 
-        out_path = os.path.join(out_dir, f"forecast_{date_str.replace('-', '')}.csv")
+        out_path = os.path.join(out_dir, f"score_{date_str.replace('-', '')}.csv")
         write_csv(out_path, rows)
         exported[date_str] = {"csv": out_path, "records": len(rows)}
     return exported
@@ -189,6 +199,6 @@ if __name__ == "__main__":
     with tempfile.TemporaryDirectory() as tmp_dir:
         exported = export_forecast_score(
             ["tests/fixtures/qt_files/full_day_20260810/Qt26081000.txt"],
-            load_records_csv("tests/fixtures/forecast_sample.csv"),
+            "tests/fixtures/forecast_sample.csv",
             tmp_dir)
         print(f"export_forecast_score: {exported}")

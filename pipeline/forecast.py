@@ -15,9 +15,11 @@ tests/fixtures/forecast_sample.csv.
 """
 
 import csv
+import os
 
 from scoring.score_tables import BUCKETS
 from scoring.scorer import sub_of_hour
+from utils.csv_utils import write_csv
 
 FIELD_ORDER = list(BUCKETS.keys())
 
@@ -116,6 +118,25 @@ def load_records_csv(path: str) -> list:
             "bucket_selected": bucket_selected,
         })
     return records
+
+
+def export_forecast_table(records: list, date_str: str, out_dir: str) -> dict:
+    """Lưu records (đúng shape load_records_csv() đọc/trả về - 4 khoá
+    start_hour/end_hour/field_name/bucket_selected, CHƯA qua
+    build_hourly_table()) ra out_dir/forecast_YYYYMMDD.csv - archive độc
+    lập cho 1 ngày dự báo viên chọn, không gắn với obs (obs có thể chưa
+    tồn tại - dự báo cho ngày tương lai). Đọc lại bằng chính
+    load_records_csv(), không cần hàm đọc riêng.
+
+    date_str: "YYYY-MM-DD" do dự báo viên chọn (hàm này không tự suy được
+    ngày từ records - records chỉ có giờ trong ngày, không có ngày).
+
+    Trả về {"csv": path, "records": len(records)} - records rỗng ->
+    write_csv() no-op (out_path không được tạo trên đĩa), cùng hành vi
+    write_csv() ở mọi chỗ gọi khác."""
+    out_path = os.path.join(out_dir, f"forecast_{date_str.replace('-', '')}.csv")
+    write_csv(out_path, records)
+    return {"csv": out_path, "records": len(records)}
 
 
 if __name__ == "__main__":

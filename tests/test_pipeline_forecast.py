@@ -5,9 +5,12 @@ Unit tests for pipeline/forecast.py: build_hourly_table's merge/validation
 rules and load_records_csv's CSV -> records coercion.
 """
 
+import csv
+import os
+
 import pytest
 
-from pipeline.forecast import build_hourly_table, load_records_csv
+from pipeline.forecast import build_hourly_table, export_forecast_table, load_records_csv
 
 
 def _rec(start, end, field, bucket):
@@ -175,3 +178,38 @@ def test_load_records_csv_feeds_build_hourly_table_cleanly():
     records = load_records_csv("tests/fixtures/forecast_sample.csv")
     rows = build_hourly_table(records)
     assert [r["hour"] for r in rows] == list(range(24))
+
+
+# =============================================================================
+# export_forecast_table
+# =============================================================================
+
+def test_export_forecast_table_writes_records_and_round_trips(tmp_path):
+    """Written file must be readable back by load_records_csv() unchanged -
+    export_forecast_table() archives the raw records shape (start/end/field/
+    bucket), not the expanded 24-hour table."""
+    records = load_records_csv("tests/fixtures/forecast_sample.csv")
+
+    exported = export_forecast_table(records, "2026-08-10", str(tmp_path))
+
+    assert exported["records"] == len(records)
+    assert os.path.basename(exported["csv"]) == "forecast_20260810.csv"
+    assert load_records_csv(exported["csv"]) == records
+
+
+def test_export_forecast_table_empty_records_does_not_write_file(tmp_path):
+    exported = export_forecast_table([], "2026-08-10", str(tmp_path))
+
+    assert exported == {"csv": os.path.join(str(tmp_path), "forecast_20260810.csv"), "records": 0}
+    assert not os.path.exists(exported["csv"])
+
+
+def test_export_forecast_table_hien_tuong_bucket_stays_string_after_round_trip(tmp_path):
+    records = [_rec(0, 5, "hien_tuong", "suong_mu")]
+
+    exported = export_forecast_table(records, "2026-08-11", str(tmp_path))
+
+    with open(exported["csv"], newline="", encoding="utf-8-sig") as f:
+        raw_rows = list(csv.DictReader(f))
+    assert raw_rows[0]["bucket_selected"] == "suong_mu"
+    assert load_records_csv(exported["csv"]) == records

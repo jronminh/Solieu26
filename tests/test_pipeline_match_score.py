@@ -17,10 +17,12 @@ import datetime
 import os
 import shutil
 
-from pipeline.forecast import build_hourly_table, load_records_csv
+from pipeline.forecast import build_hourly_table, export_forecast_table, load_records_csv
 from pipeline.obs import build_scalar_history
 from pipeline.match_score import FIELD_ORDER, export_forecast_score, join_forecast_obs, score_history
 from utils.filename_utils import quantrac_filename_at
+
+FORECAST_CSV = "tests/fixtures/forecast_sample.csv"
 
 # hour 1 -> sub_of_hour() == "dem" (see test_sub_of_hour_covers_every_buổi).
 # Values below are the exact True-case pairs hand-verified in
@@ -122,9 +124,7 @@ def _read_csv_rows(path):
 
 
 def test_export_forecast_score_full_day_writes_one_csv_with_24_rows(tmp_path, full_day_qt_files):
-    forecast_records = load_records_csv("tests/fixtures/forecast_sample.csv")
-
-    exported = export_forecast_score(full_day_qt_files, forecast_records, str(tmp_path))
+    exported = export_forecast_score(full_day_qt_files, FORECAST_CSV, str(tmp_path))
 
     assert list(exported.keys()) == ["2026-08-10"]
     assert exported["2026-08-10"]["records"] == 24
@@ -137,12 +137,19 @@ def test_export_forecast_score_full_day_writes_one_csv_with_24_rows(tmp_path, fu
     assert set(rows[0].keys()) == expected_cols
 
 
+def test_export_forecast_score_writes_score_prefixed_csv_filename(tmp_path, full_day_qt_files):
+    """Output filename uses the score_ prefix, not forecast_ - the latter is
+    reserved for pipeline/forecast.py::export_forecast_table()'s raw-records
+    archive, to avoid the two exports colliding on the same file name."""
+    exported = export_forecast_score(full_day_qt_files, FORECAST_CSV, str(tmp_path))
+
+    assert os.path.basename(exported["2026-08-10"]["csv"]) == "score_20260810.csv"
+
+
 def test_export_forecast_score_station_populated_on_real_data(tmp_path, full_day_qt_files):
     """Hour 0's representative station is Yên Bái - same fixture record
     test_build_obs_real_fixture_yenbai (tests/test_pipeline_obs.py) hand-verifies."""
-    forecast_records = load_records_csv("tests/fixtures/forecast_sample.csv")
-
-    exported = export_forecast_score(full_day_qt_files, forecast_records, str(tmp_path))
+    exported = export_forecast_score(full_day_qt_files, FORECAST_CSV, str(tmp_path))
     rows = _read_csv_rows(exported["2026-08-10"]["csv"])
 
     assert rows[0]["station"] == "Yên Bái"
@@ -161,11 +168,10 @@ def test_export_forecast_score_missing_obs_hour_scores_none(tmp_path, full_day_d
         shutil.copy(os.path.join(full_day_dir, name), dl_dir / name)
     local_files = [str(dl_dir / quantrac_filename_at(datetime.datetime(2026, 8, 10, h)))
                    for h in kept_hours]
-    forecast_records = load_records_csv("tests/fixtures/forecast_sample.csv")
 
     out_dir = tmp_path / "out"
     out_dir.mkdir()
-    exported = export_forecast_score(local_files, forecast_records, str(out_dir))
+    exported = export_forecast_score(local_files, FORECAST_CSV, str(out_dir))
     rows = {int(r["hour"]): r for r in _read_csv_rows(exported["2026-08-10"]["csv"])}
 
     assert len(rows) == 24
@@ -179,8 +185,8 @@ def test_export_forecast_score_missing_obs_hour_scores_none(tmp_path, full_day_d
             assert all(r[f"score_{f}"] == "" for f in FIELD_ORDER)
 
 
-def test_export_forecast_score_no_forecast_records_still_24_rows(tmp_path, full_day_qt_files):
-    exported = export_forecast_score(full_day_qt_files, [], str(tmp_path))
+def test_export_forecast_score_no_forecast_csv_path_still_24_rows(tmp_path, full_day_qt_files):
+    exported = export_forecast_score(full_day_qt_files, None, str(tmp_path))
     rows = _read_csv_rows(exported["2026-08-10"]["csv"])
 
     assert [int(r["hour"]) for r in rows] == list(range(24))
@@ -190,9 +196,7 @@ def test_export_forecast_score_no_forecast_records_still_24_rows(tmp_path, full_
 
 
 def test_export_forecast_score_empty_local_files_returns_empty_dict(tmp_path):
-    forecast_records = load_records_csv("tests/fixtures/forecast_sample.csv")
-
-    exported = export_forecast_score([], forecast_records, str(tmp_path))
+    exported = export_forecast_score([], FORECAST_CSV, str(tmp_path))
 
     assert exported == {}
     assert os.listdir(tmp_path) == []
@@ -209,7 +213,7 @@ def test_export_forecast_score_multi_date_writes_one_csv_per_date(tmp_path, qt_0
 
     out_dir = tmp_path / "out"
     out_dir.mkdir()
-    exported = export_forecast_score(local_files, [], str(out_dir))
+    exported = export_forecast_score(local_files, None, str(out_dir))
 
     assert set(exported.keys()) == {"2026-08-10", "2026-08-11"}
     for date_str, info in exported.items():
@@ -217,3 +221,23 @@ def test_export_forecast_score_multi_date_writes_one_csv_per_date(tmp_path, qt_0
         rows = _read_csv_rows(info["csv"])
         assert [int(r["hour"]) for r in rows] == list(range(24))
         assert all(r["date"] == date_str for r in rows)
+
+
+def test_export_forecast_score_reads_archived_forecast_table(tmp_path, full_day_qt_files):
+    """forecast_csv_path also accepts a file written by
+    pipeline/forecast.py::export_forecast_table() (the archive of a
+    forecaster's raw bucket selections) - same shape as a hand-authored
+    records CSV, so it must produce the exact same score CSV."""
+    archive_dir = tmp_path / "archive"
+    archive_dir.mkdir()
+    archived = export_forecast_table(
+        load_records_csv(FORECAST_CSV), "2026-08-10", str(archive_dir))
+
+    direct_dir = tmp_path / "direct"
+    direct_dir.mkdir()
+    archive_dir_out = tmp_path / "from_archive"
+    archive_dir_out.mkdir()
+    direct = export_forecast_score(full_day_qt_files, FORECAST_CSV, str(direct_dir))
+    from_archive = export_forecast_score(full_day_qt_files, archived["csv"], str(archive_dir_out))
+
+    assert _read_csv_rows(direct["2026-08-10"]["csv"]) == _read_csv_rows(from_archive["2026-08-10"]["csv"])
