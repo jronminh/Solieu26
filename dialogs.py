@@ -1,12 +1,13 @@
 """
 dialogs.py
 ====================
-The "Thiết lập" (settings) Toplevel dialog hung off the main window. The
-date-range query ("Tải số liệu theo khoảng") used to be a separate dialog here
-too; it's now a panel embedded directly in main.py's main window instead.
+The "Thiết lập" tab (Kết nối / Đường dẫn / Tự động truy vấn), built once into
+a Notebook tab frame. Small one-off popups (column pickers, confirmations)
+still use common.make_dialog and stay as separate Toplevels; only this
+full-screen settings UI moved into the tabbed main window.
 
 Reaches into the App instance (see main.py) for app.v, the
-log/dialog-registry helpers, and the auto-query timer.
+log helper, and the auto-query timer.
 """
 
 import datetime
@@ -16,7 +17,7 @@ import tkinter as tk
 from tkinter import ttk, filedialog, messagebox
 
 from utils import config_utils as config
-from common import report_open, make_dialog, center_over_root
+from common import report_open
 from utils.file_utils import open_folder
 from utils.ini_utils import update_ini_key
 
@@ -24,8 +25,6 @@ from utils.ini_utils import update_ini_key
 class SettingsDialog:
     def __init__(self, app):
         self.app = app
-        # Rebuilt fresh each open() call (make_dialog only calls open() when no
-        # Toplevel is currently up), so no stale-widget risk keeping refs here.
         self._dirty_var = None
         self._dirty_label = None
         self._toast_label = None
@@ -40,21 +39,18 @@ class SettingsDialog:
             e.grid(row=r, column=1, sticky="ew", padx=6, pady=3)
         return e
 
-    def open(self):
-        """Combined settings dialog: Kết nối / Đường dẫn / Tự động truy vấn, plus
-        config.ini actions (restore-defaults at bottom-left, explicit save at bottom-right)."""
+    # ----- Tab construction -------------------------------------------------
+    def build(self, parent):
+        """Kết nối / Đường dẫn / Tự động truy vấn, plus config.ini actions
+        (restore-defaults at bottom-left, explicit save at bottom-right)."""
         app = self.app
-        app._log("ACT", "Mở hộp thoại Thiết lập")
-        win = make_dialog(app.root, app._dialogs, "settings", "Thiết lập")
-        if win is None:
-            return
-        frm = ttk.Frame(win, padding=12)
+        frm = ttk.Frame(parent)
         frm.pack(fill="both", expand=True)
 
-        # Every field below shares 1 "Lưu thiết lập" button (no more auto-apply
-        # on FocusOut/Enter for the auto-query fields specifically) - typing
-        # anywhere just marks the dirty indicator, config.ini and the running
-        # auto-query schedule only change once "Lưu thiết lập" is clicked.
+        # Every field below shares 1 "Lưu thiết lập" button (no auto-apply on
+        # FocusOut/Enter) - typing anywhere just marks the dirty indicator,
+        # config.ini and the running auto-query schedule only change once
+        # "Lưu thiết lập" is clicked.
         conn_box = ttk.LabelFrame(frm, text="Kết nối", padding=8)
         conn_box.pack(fill="x")
         host_entry = self._row(conn_box, 0, "Host",     app.v["ftp_host"])
@@ -67,7 +63,7 @@ class SettingsDialog:
         remote_dir_entry = self._row(path_box, 0, "Thư mục server",  app.v["remote_dir"])
         output_dir_entry = self._row(path_box, 1, "Thư mục xuất CSV", app.v["output_dir"])
         ttk.Button(path_box, text="Chọn...",
-                   command=lambda: self._browse_output(parent=win)).grid(row=1, column=2, padx=4)
+                   command=lambda: self._browse_output(parent=app.root)).grid(row=1, column=2, padx=4)
         ttk.Button(path_box, text="Mở thư mục data",
                    command=self._on_open_data).grid(
                    row=2, column=0, sticky="w", pady=(6, 0))
@@ -104,14 +100,11 @@ class SettingsDialog:
         ttk.Button(btn_bar, text="Lưu thiết lập",
                    command=self._on_save_settings).pack(side="right")
 
-        win.minsize(420, 0)
-        center_over_root(app.root, win)
-
     def _on_save_settings(self):
-        """Persist every field in the Thiết lập dialog to config.ini in one shot."""
+        """Persist every field in the Thiết lập tab to config.ini in one shot."""
         app = self.app
         app._log("ACT", "Lưu thiết lập")
-        v = app._auto_effective_value()
+        v = app.auto_query._auto_effective_value()
         app.v["auto_value"].set(str(v))
         unit_key = "hours" if app.v["auto_unit"].get() == "Giờ" else "minutes"
         values = {
@@ -143,7 +136,7 @@ class SettingsDialog:
         app.auto_query._schedule_auto_tick()
 
     def _mark_dirty(self, event=None):
-        """Any field changed since the dialog opened (or since the last save)."""
+        """Any field changed since the tab was built (or since the last save)."""
         if self._dirty_var is not None:
             self._dirty_var.set(True)
         if self._dirty_label is not None and self._dirty_label.winfo_exists():
@@ -161,15 +154,14 @@ class SettingsDialog:
         """"Đã lưu thiết lập lúc HH:MM", auto-hides after a few seconds."""
         if self._toast_label is None or not self._toast_label.winfo_exists():
             return
-        win = self._toast_label.winfo_toplevel()
         now = datetime.datetime.now().strftime("%H:%M")
         self._toast_label.config(text=f"Đã lưu thiết lập lúc {now}")
-        win.after(3000, lambda: self._toast_label.config(text="")
-                  if self._toast_label.winfo_exists() else None)
+        self.app.root.after(3000, lambda: self._toast_label.config(text="")
+                             if self._toast_label.winfo_exists() else None)
 
     def _on_restore_defaults(self):
         """Overwrite config.ini with the hardcoded defaults (config.DEFAULT_CONFIG)
-        and reflect them back into the open Thiết lập dialog."""
+        and reflect them back into the Thiết lập tab."""
         app = self.app
         app._log("ACT", "Khôi phục thiết lập mặc định")
         if not messagebox.askyesno(

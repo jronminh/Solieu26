@@ -1,13 +1,13 @@
 """
 score_viewer.py
 ====================
-The "Xem chấm điểm dự báo" window: đọc score_YYYYMMDD.csv (chỉ đọc, không tự
-chạy pipeline/match_score.py::export_forecast_score()), lọc theo trạm/ngày/
-trường, tô màu theo Đạt/Không đạt/Bỏ cặp. Theo khuôn mẫu viewer.py nhưng đọc
-1 loại file khác và có quy tắc tô màu riêng.
+The "Xem chấm điểm" tab: đọc score_YYYYMMDD.csv (chỉ đọc, không tự chạy
+pipeline/match_score.py::export_forecast_score()), lọc theo trạm/ngày/trường,
+tô màu theo Đạt/Không đạt/Bỏ cặp. Theo khuôn mẫu viewer.py nhưng đọc 1 loại
+file khác và có quy tắc tô màu riêng.
 
 Reaches into the App instance (see main.py) for the root window, the shared
-log/dialog-registry helpers, và output-dir/config state.
+log helper, và output-dir/config state.
 """
 
 import csv
@@ -78,90 +78,72 @@ def _score_label(v) -> str:
 class ScoreViewer:
     def __init__(self, app):
         self.app = app
+        self._rows = []
+        self._sort_col, self._sort_reverse = None, False
+        self._hidden_field_groups = set()   # "Tất cả 6 trường" mode: field key -> ẩn 3 cột của field đó
 
-    # ----- Entry point ----------------------------------------------------
-    def open(self):
-        app = self.app
-        key = "score_viewer"
-        existing = app._dialogs.get(key)
-        if existing is not None and existing.winfo_exists():
-            existing.deiconify(); existing.lift(); existing.focus_set()
-            return
-        app._log("ACT", "Mở cửa sổ Xem chấm điểm")
-
-        win = tk.Toplevel(app.root)
-        win.title("Xem chấm điểm dự báo")
-        win.transient(app.root)
-        win.geometry("1000x520")
-        win.minsize(680, 360)
-        app._dialogs[key] = win
-
-        win._rows = []
-        win._sort_col, win._sort_reverse = None, False
-        win._hidden_field_groups = set()   # "Tất cả 6 trường" mode: field key -> ẩn 3 cột của field đó
-
-        bar = ttk.Frame(win, padding=(8, 6))
+    # ----- Tab construction -------------------------------------------------
+    def build(self, parent):
+        bar = ttk.Frame(parent, padding=(0, 0, 0, 6))
         bar.pack(fill="x")
 
         ttk.Label(bar, text="Trạm:").pack(side="left")
-        win._station_filter = tk.StringVar(value=ALL_STATIONS)
-        ttk.Combobox(bar, textvariable=win._station_filter,
+        self._station_filter = tk.StringVar(value=ALL_STATIONS)
+        ttk.Combobox(bar, textvariable=self._station_filter,
                     values=[ALL_STATIONS] + STATION_NAMES, state="readonly",
                     width=16).pack(side="left", padx=(2, 12))
-        win._station_filter.trace_add("write", lambda *_: self._render_table(win))
+        self._station_filter.trace_add("write", lambda *_: self._render_table())
 
         ttk.Label(bar, text="Ngày:").pack(side="left")
-        win._date_filter = tk.StringVar()
-        win._date_combo = ttk.Combobox(bar, textvariable=win._date_filter,
+        self._date_filter = tk.StringVar()
+        self._date_combo = ttk.Combobox(bar, textvariable=self._date_filter,
                                        state="readonly", width=12)
-        win._date_combo.pack(side="left", padx=(2, 12))
-        win._date_filter.trace_add("write", lambda *_: self._on_date_change(win))
+        self._date_combo.pack(side="left", padx=(2, 12))
+        self._date_filter.trace_add("write", lambda *_: self._on_date_change())
 
         ttk.Label(bar, text="Trường:").pack(side="left")
-        win._field_filter = tk.StringVar()
-        win._field_combo = ttk.Combobox(
-            bar, textvariable=win._field_filter,
+        self._field_filter = tk.StringVar()
+        self._field_combo = ttk.Combobox(
+            bar, textvariable=self._field_filter,
             values=[FIELD_LABELS[f] for f in FIELD_ORDER] + [_ALL_FIELDS_LABEL],
             state="readonly", width=18)
-        win._field_combo.pack(side="left", padx=(2, 12))
-        win._field_filter.trace_add("write", lambda *_: self._render_table(win))
+        self._field_combo.pack(side="left", padx=(2, 12))
+        self._field_filter.trace_add("write", lambda *_: self._render_table())
 
         ttk.Button(bar, text="Thiết lập...",
-                  command=lambda: self._open_column_picker(win)).pack(side="left")
+                  command=lambda: self._open_column_picker()).pack(side="left")
 
-        win._summary = ttk.Label(win, padding=(8, 4), background="#dce9f4")
-        win._summary.pack(fill="x")
+        self._summary = ttk.Label(parent, padding=(8, 4), background="#dce9f4")
+        self._summary.pack(fill="x")
 
-        win._empty_label = ttk.Label(
-            win, text="Chưa có dữ liệu chấm điểm", foreground="#6b7280", padding=(8, 24))
+        self._empty_label = ttk.Label(
+            parent, text="Chưa có dữ liệu chấm điểm", foreground="#6b7280", padding=(8, 24))
 
-        win._table_frame = ttk.Frame(win, padding=(8, 0, 8, 8))
-        tree = ttk.Treeview(win._table_frame, show="headings")
-        vsb = ttk.Scrollbar(win._table_frame, orient="vertical", command=tree.yview)
+        self._table_frame = ttk.Frame(parent, padding=(0, 4, 0, 0))
+        tree = ttk.Treeview(self._table_frame, show="headings")
+        vsb = ttk.Scrollbar(self._table_frame, orient="vertical", command=tree.yview)
         tree.configure(yscrollcommand=vsb.set)
         tree.grid(row=0, column=0, sticky="nsew")
         vsb.grid(row=0, column=1, sticky="ns")
-        win._table_frame.rowconfigure(0, weight=1)
-        win._table_frame.columnconfigure(0, weight=1)
-        win._tree = tree
+        self._table_frame.rowconfigure(0, weight=1)
+        self._table_frame.columnconfigure(0, weight=1)
+        self._tree = tree
         tree.tag_configure("pass", background="#dff0d8")
         tree.tag_configure("fail", background="#f2dede")
         tree.tag_configure("skip", background="#eeeeee")
 
-        statusbar = ttk.Frame(win, padding=(8, 0, 8, 6))
+        statusbar = ttk.Frame(parent, padding=(0, 4, 0, 0))
         statusbar.pack(side="bottom", fill="x")
-        win._status = ttk.Label(statusbar, text="", anchor="e")
-        win._status.pack(side="right")
+        self._status = ttk.Label(statusbar, text="", anchor="e")
+        self._status.pack(side="right")
 
-        center_over_root(app.root, win)
-
-        win._field_filter.set(FIELD_LABELS[FIELD_ORDER[0]])
-        self._refresh_date_options(win)
+        self._field_filter.set(FIELD_LABELS[FIELD_ORDER[0]])
+        self._refresh_date_options()
         dates = sorted(self._available_score_files())
         if dates:
-            win._date_filter.set(dates[-1])
+            self._date_filter.set(dates[-1])
         else:
-            self._show_empty(win)
+            self._show_empty(reset_status=True)
 
     # ----- File discovery ---------------------------------------------------
     def _current_output_dir(self) -> str:
@@ -183,75 +165,76 @@ class ScoreViewer:
                 found[f"{ymd[0:4]}-{ymd[4:6]}-{ymd[6:8]}"] = os.path.join(out_dir, name)
         return found
 
-    def _refresh_date_options(self, win):
-        win._date_combo["values"] = sorted(self._available_score_files())
+    def _refresh_date_options(self):
+        self._date_combo["values"] = sorted(self._available_score_files())
 
     # ----- Loading a day -----------------------------------------------
-    def _on_date_change(self, win):
-        date_str = win._date_filter.get()
+    def _on_date_change(self):
+        date_str = self._date_filter.get()
         path = self._available_score_files().get(date_str)
         if not path or not os.path.isfile(path):
-            win._rows = []
-            self._show_empty(win)
+            self._rows = []
+            self._show_empty(reset_status=True)
             return
         try:
-            win._rows = _load_score_csv(path)
+            self._rows = _load_score_csv(path)
         except (OSError, KeyError, ValueError) as e:
             self.app._log("ERR", f"Không đọc được {os.path.basename(path)}: {e}")
-            win._rows = []
-            self._show_empty(win)
+            self._rows = []
+            self._show_empty(reset_status=True)
             return
-        self.app._log("ACT", f"Xem chấm điểm: {os.path.basename(path)} ({len(win._rows)} dòng)")
-        self._show_table(win)
-        self._render_table(win)
+        self.app._log("ACT", f"Xem chấm điểm: {os.path.basename(path)} ({len(self._rows)} dòng)")
+        self._show_table()
+        self._render_table()
 
-    def _show_empty(self, win):
-        win._table_frame.pack_forget()
-        win._summary.config(text="")
-        win._status.config(text="")
-        win._empty_label.pack(fill="both", expand=True)
+    def _show_empty(self, reset_status=False):
+        self._table_frame.pack_forget()
+        if reset_status:
+            self._summary.config(text="")
+            self._status.config(text="")
+        self._empty_label.pack(fill="both", expand=True)
 
-    def _show_table(self, win):
-        win._empty_label.pack_forget()
-        win._table_frame.pack(fill="both", expand=True)
+    def _show_table(self):
+        self._empty_label.pack_forget()
+        self._table_frame.pack(fill="both", expand=True)
 
     # ----- Filter helpers ----------------------------------------------
-    def _field_filter_key(self, win):
-        label = win._field_filter.get()
+    def _field_filter_key(self):
+        label = self._field_filter.get()
         return "ALL" if label == _ALL_FIELDS_LABEL else _LABEL_TO_FIELD.get(label)
 
-    def _filtered_rows(self, win):
-        rows = win._rows
-        station = win._station_filter.get()
+    def _filtered_rows(self):
+        rows = self._rows
+        station = self._station_filter.get()
         if station != ALL_STATIONS:
             code = NAME_TO_CODE.get(station)
             rows = [r for r in rows if r["station_code"] == code]
         return rows
 
     # ----- Sort -----------------------------------------------------------
-    def _on_sort(self, win, col):
-        if win._sort_col == col:
-            win._sort_reverse = not win._sort_reverse
+    def _on_sort(self, col):
+        if self._sort_col == col:
+            self._sort_reverse = not self._sort_reverse
         else:
-            win._sort_col, win._sort_reverse = col, False
-        self._render_table(win)
+            self._sort_col, self._sort_reverse = col, False
+        self._render_table()
 
-    def _sorted(self, win, rows):
-        col = win._sort_col
+    def _sorted(self, rows):
+        col = self._sort_col
         if col == "hour":
-            return sorted(rows, key=lambda r: r["hour"], reverse=win._sort_reverse)
+            return sorted(rows, key=lambda r: r["hour"], reverse=self._sort_reverse)
         if col == "buoi":
-            return sorted(rows, key=lambda r: r["buoi"], reverse=win._sort_reverse)
+            return sorted(rows, key=lambda r: r["buoi"], reverse=self._sort_reverse)
         return rows   # cột DB/QT/Điểm là giá trị tổng hợp lúc render, không hỗ trợ sort
 
-    def _heading_text(self, win, col, label):
-        if win._sort_col == col:
-            return label + (" ▼" if win._sort_reverse else " ▲")
+    def _heading_text(self, col, label):
+        if self._sort_col == col:
+            return label + (" ▼" if self._sort_reverse else " ▲")
         return label
 
     # ----- Summary bar ---------------------------------------------------
-    def _render_summary(self, win, rows):
-        field_key = self._field_filter_key(win)
+    def _render_summary(self, rows):
+        field_key = self._field_filter_key()
         fields = FIELD_ORDER if field_key == "ALL" else (field_key,)
         dat = khong_dat = bo_cap = 0
         for r in rows:
@@ -266,27 +249,27 @@ class ScoreViewer:
         total = dat + khong_dat
         pct = (dat / total * 100) if total else 0
         field_txt = _ALL_FIELDS_LABEL.lower() if field_key == "ALL" else FIELD_LABELS[field_key]
-        win._summary.config(
+        self._summary.config(
             text=f"Đạt {dat}/{total} ({pct:.1f}%) — bỏ cặp {bo_cap}, trường {field_txt}")
 
     # ----- Table rendering ------------------------------------------------
-    def _render_table(self, win):
-        if not win._rows:
+    def _render_table(self):
+        if not self._rows:
             return
-        field_key = self._field_filter_key(win)
+        field_key = self._field_filter_key()
         if field_key is None:
             return   # field_filter chưa set xong (đang khởi tạo)
-        rows = self._sorted(win, self._filtered_rows(win))
-        tree = win._tree
+        rows = self._sorted(self._filtered_rows())
+        tree = self._tree
 
         # Trạm = "Tất cả các trạm" trộn nhiều trạm vào cùng bảng - thêm cột Trạm
         # để phân biệt; ẩn khi đã lọc còn 1 trạm cụ thể (khi đó thừa, mọi dòng
         # cùng 1 trạm).
-        show_station_col = win._station_filter.get() == ALL_STATIONS
+        show_station_col = self._station_filter.get() == ALL_STATIONS
         base_cols = ["station", "hour", "buoi"] if show_station_col else ["hour", "buoi"]
 
         if field_key == "ALL":
-            visible = [f for f in FIELD_ORDER if f not in win._hidden_field_groups]
+            visible = [f for f in FIELD_ORDER if f not in self._hidden_field_groups]
             columns = base_cols + [f"{f}__{part}" for f in visible for part in ("db", "qt", "diem")]
         else:
             visible = [field_key]
@@ -298,11 +281,11 @@ class ScoreViewer:
         if show_station_col:
             tree.heading("station", text="Trạm")
             tree.column("station", width=100, anchor="w")
-        tree.heading("hour", text=self._heading_text(win, "hour", "Giờ"),
-                     command=lambda: self._on_sort(win, "hour"))
+        tree.heading("hour", text=self._heading_text("hour", "Giờ"),
+                     command=lambda: self._on_sort("hour"))
         tree.column("hour", width=50, anchor="center")
-        tree.heading("buoi", text=self._heading_text(win, "buoi", "Buổi"),
-                     command=lambda: self._on_sort(win, "buoi"))
+        tree.heading("buoi", text=self._heading_text("buoi", "Buổi"),
+                     command=lambda: self._on_sort("buoi"))
         tree.column("buoi", width=70, anchor="w")
 
         if field_key == "ALL":
@@ -338,11 +321,11 @@ class ScoreViewer:
                 tag = "pass" if sc is True else ("fail" if sc is False else "skip")
             tree.insert("", "end", values=values, tags=(tag,))
 
-        win._status.config(text=f"{len(rows)} dòng")
-        self._render_summary(win, rows)
+        self._status.config(text=f"{len(rows)} dòng")
+        self._render_summary(rows)
 
     # ----- "Thiết lập...": nhóm cột theo trường (chỉ có ý nghĩa ở chế độ Tất cả 6 trường) ---
-    def _open_column_picker(self, win):
+    def _open_column_picker(self):
         app = self.app
         app._log("ACT", "Mở hộp thoại Thiết lập (Xem chấm điểm)")
         dlg = make_dialog(app.root, app._dialogs, "score_columns", "Thiết lập")
@@ -355,13 +338,13 @@ class ScoreViewer:
 
         field_vars = {}
         for f in FIELD_ORDER:
-            var = tk.BooleanVar(value=f not in win._hidden_field_groups)
+            var = tk.BooleanVar(value=f not in self._hidden_field_groups)
             field_vars[f] = var
             ttk.Checkbutton(frm, text=FIELD_LABELS[f], variable=var).pack(anchor="w", pady=2)
 
         def apply_and_close():
-            win._hidden_field_groups = {f for f, v in field_vars.items() if not v.get()}
-            self._render_table(win)
+            self._hidden_field_groups = {f for f, v in field_vars.items() if not v.get()}
+            self._render_table()
             dlg.destroy()
 
         btns = ttk.Frame(frm)

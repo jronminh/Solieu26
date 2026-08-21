@@ -18,6 +18,22 @@ from utils.ftp_utils import fetch_and_bucket
 # FTP LAYER: FILE DOWNLOAD  (log/progress via callback)
 # =============================================================================
 
+def expected_hours(start_date: datetime.datetime, end_date: datetime.datetime) -> list:
+    """Every hourly timestamp download_files() will attempt, in order (inclusive
+    of both ends). Exposed so callers (the "Hàng đợi" queue table in main.py)
+    can preview the file list before a download actually starts."""
+    if start_date.date() == end_date.date():
+        return [start_date.replace(hour=h) for h in range(24)]
+    hours = []
+    day = start_date.replace(hour=0, minute=0, second=0, microsecond=0)
+    last_day = end_date.replace(hour=0, minute=0, second=0, microsecond=0)
+    while day <= last_day:
+        for hour in range(24):
+            hours.append(day.replace(hour=hour))
+        day += datetime.timedelta(days=1)
+    return hours
+
+
 def download_files(ftp: FTP, cfg: dict, log, progress=None) -> dict:
     """
     Download hourly bulletin files into cfg['local_dir'], from cfg['start_date']
@@ -43,7 +59,7 @@ def download_files(ftp: FTP, cfg: dict, log, progress=None) -> dict:
     origin = ftp.pwd()
 
     if start_date.date() == end_date.date():
-        hours = [start_date.replace(hour=h) for h in range(24)]
+        hours = expected_hours(start_date, end_date)
         total = len(hours)
 
         target_dir = f"{remote_dir}/{start_date:%Y}/{start_date:%m}"
@@ -58,18 +74,12 @@ def download_files(ftp: FTP, cfg: dict, log, progress=None) -> dict:
                 filename = quantrac_filename_at(ts)
                 status = fetch_and_bucket(ftp, filename, local_dir, retry_temp, retry_wait, log, buckets)
                 if progress:
-                    progress(i + 1, total, status)
+                    progress(i + 1, total, status, filename)
         finally:
             ftp.cwd(origin)
         return buckets
 
-    hours = []
-    day = start_date.replace(hour=0, minute=0, second=0, microsecond=0)
-    last_day = end_date.replace(hour=0, minute=0, second=0, microsecond=0)
-    while day <= last_day:
-        for hour in range(24):
-            hours.append(day.replace(hour=hour))
-        day += datetime.timedelta(days=1)
+    hours = expected_hours(start_date, end_date)
     total = len(hours)
 
     current_dir = None
@@ -87,12 +97,12 @@ def download_files(ftp: FTP, cfg: dict, log, progress=None) -> dict:
                     current_dir = target_dir   # avoid retrying cwd for every hour in this month
                     buckets["missing"].append(filename)
                     if progress:
-                        progress(i + 1, total, 2)
+                        progress(i + 1, total, 2, filename)
                     continue
 
             status = fetch_and_bucket(ftp, filename, local_dir, retry_temp, retry_wait, log, buckets)
             if progress:
-                progress(i + 1, total, status)
+                progress(i + 1, total, status, filename)
     finally:
         ftp.cwd(origin)
 

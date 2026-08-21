@@ -1,9 +1,9 @@
 """
-main.py: Tkinter GUI entry point, holding the App class (main window, logging,
-info panel, embedded "Tải số liệu theo khoảng" panel) and wiring up runner.Runner,
-auto_query.AutoQuery, viewer.HistoryViewer, dialogs.SettingsDialog,
-forecast_editor.ForecastEditor, and score_viewer.ScoreViewer. Run:
-python main.py [config.ini path].
+main.py: Tkinter GUI entry point, holding the App class (single main window with
+a ttk.Notebook: Số liệu / Dự báo / Xem chấm điểm / Tải số liệu theo khoảng / Log /
+Thiết lập) and wiring up runner.Runner, auto_query.AutoQuery, viewer.HistoryViewer,
+dialogs.SettingsDialog, forecast_editor.ForecastEditor, score_viewer.ScoreViewer.
+Run: python main.py [config.ini path].
 
 Tác giả: congminh9981 (congminh9981@gmail.com); Claude (Anthropic), đồng tác giả.
 """
@@ -17,6 +17,8 @@ from tkinter import ttk, scrolledtext
 
 from utils import config_utils as config
 from common import LOG_COLORS
+from pipeline.fetch import expected_hours
+from utils.filename_utils import quantrac_filename_at
 from runner import Runner
 from auto_query import AutoQuery
 from viewer import HistoryViewer
@@ -26,11 +28,14 @@ from score_viewer import ScoreViewer
 
 MAX_LOG_LINES = 2000   # oldest lines get trimmed past this (see _log())
 
+# Hàng đợi status codes from pipeline.fetch's progress callback (see utils/ftp_utils.py).
+_QUEUE_STATUS_LABEL = {0: "Đã tải", 1: "Đã có sẵn", 2: "Không tải được"}
+
 
 class App:
     def __init__(self, root: tk.Tk, config_path: str = None):
         self.root = root
-        self._dialogs = {}          # keeps references to open dialogs (avoids reopening duplicates)
+        self._dialogs = {}          # keeps references to small aux popups (column pickers, etc.)
         self.runner = Runner(self)
         self.auto_query = AutoQuery(self)
 
@@ -67,7 +72,7 @@ class App:
             "ftp_pass":    tk.StringVar(value=d.get("ftp_pass", "")),
             "remote_dir":  tk.StringVar(value=d.get("remote_dir", "/Quantrac")),
             "output_dir":  tk.StringVar(value=d.get("output_dir") or config.DEFAULT_OUTPUT_DIR),
-            # "Tải số liệu theo khoảng" panel's date range, defaults to today so
+            # "Tải số liệu theo khoảng" tab's date range, defaults to today so
             # "Bắt đầu" with no changes behaves like a plain current-day fetch.
             "start_date":  tk.StringVar(value=today.strftime("%Y-%m-%d")),
             "end_date":    tk.StringVar(value=today.strftime("%Y-%m-%d")),
@@ -85,18 +90,20 @@ class App:
             "missing":       tk.StringVar(value="-"),
         }
 
-        # The 3 heavier UI pieces, constructed once and kept for the app's
-        # lifetime, so each one's own state (HistoryViewer.hidden_cols,
-        # AdvancedDialog's widget refs...) survives across open/close cycles.
+        # The 4 tab controllers, constructed once and kept for the app's
+        # lifetime alongside their tab's widgets (hidden_cols, loaded records...).
         self.history_viewer = HistoryViewer(self)
         self.settings_dialog = SettingsDialog(self)
         self.forecast_editor = ForecastEditor(self)
         self.score_viewer = ScoreViewer(self)
 
+        self._queue_rows = {}   # Hàng đợi: filename -> Treeview iid, rebuilt each "Bắt đầu"
+
         self._build_ui()
         self._fit_window_to_content()
-        # Floor = the natural size with every field + the log shown.
-        self.root.minsize(self.root.winfo_width(), self.root.winfo_height())
+        # Floor well below the default size, so the window stays freely
+        # resizable/shrinkable instead of getting stuck at its startup size.
+        self.root.minsize(800, 500)
         self.root.after(100, self.runner._poll)
         for level, msg in config_log_buffer:
             self._log(level, msg)
@@ -116,42 +123,69 @@ class App:
         frm = ttk.Frame(self.root, padding=10)
         frm.pack(fill="both", expand=True)
 
+        # Status bar packed FIRST (reserves its space at the bottom) so the
+        # Notebook below can still fill+expand into the remaining room.
+        statusbar = ttk.Frame(frm)
+        statusbar.pack(side="bottom", fill="x", pady=(6, 0))
+        self.status = ttk.Label(statusbar, text="Sẵn sàng", anchor="e")
+        self.status.pack(side="right")
+
+        notebook = ttk.Notebook(frm)
+        notebook.pack(fill="both", expand=True)
+        self.notebook = notebook
+
+        tab_main = ttk.Frame(notebook, padding=10)
+        tab_forecast = ttk.Frame(notebook, padding=10)
+        tab_score = ttk.Frame(notebook, padding=10)
+        tab_load = ttk.Frame(notebook, padding=10)
+        tab_log = ttk.Frame(notebook, padding=10)
+        tab_settings = ttk.Frame(notebook, padding=10)
+
+        notebook.add(tab_main, text="Số liệu")
+        notebook.add(tab_forecast, text="Dự báo")
+        notebook.add(tab_score, text="Xem chấm điểm")
+        notebook.add(tab_load, text="Tải số liệu theo khoảng")
+        notebook.add(tab_log, text="Log")
+        notebook.add(tab_settings, text="Thiết lập")
+
+        # Log tab built FIRST: the other tabs auto-load a file as part of
+        # build() (e.g. Số liệu/Dự báo load today's data right away) and that
+        # logs through self.log, which must exist before they run.
+        self._build_log_tab(tab_log)
+        self.history_viewer.build(tab_main)
+        self.forecast_editor.build(tab_forecast)
+        self.score_viewer.build(tab_score)
+        self._build_load_tab(tab_load)
+        self.settings_dialog.build(tab_settings)
+
+        self.refresh_range_panel_state()
+
+    def _build_load_tab(self, parent):
+        """Tab 'Tải số liệu theo khoảng': banner tạm dừng (chỉ hiện khi đang
+        chạy) + Thông tin truy vấn + khoảng ngày + Hàng đợi + tiến trình."""
         # Banner: shown only while a fetch is running (see refresh_range_panel_state).
-        # Packed/unpacked dynamically with before=content_row so it always sits
-        # above the info panel when visible, never appended after it.
         self.pause_banner = ttk.Label(
-            frm, text="Tự động: Tạm dừng — đang tải số liệu",
+            parent, text="Tác vụ này sẽ tạm dừng tự động truy vấn cho tới khi hoàn tất hoặc hủy",
             background="#fbeed9", foreground="#b45309", padding=(8, 4), anchor="w")
 
-        # --- Hàng nội dung chính: Thông tin truy vấn + panel khoảng ngày (trái) + cột nút (phải) ---
-        content_row = ttk.Frame(frm)
-        content_row.pack(fill="x")
-        self._content_row = content_row
-
-        left_col = ttk.Frame(content_row)
-        left_col.pack(side="left", fill="both", expand=True)
-
         # --- Thông tin truy vấn --- (read-only status; recomputed by _refresh_info_panel)
-        top = ttk.Frame(left_col)
-        top.pack(fill="x")
+        info_box = ttk.LabelFrame(parent, text="Thông tin truy vấn", padding=8)
+        info_box.pack(fill="x")
+        self._load_tab_info_box = info_box   # anchor so the pause banner can pack "before" it
 
-        def info_row(r, caption, var=None, widget=None):
-            """One grid row: caption label + either a read-only value (var, as a
-            Label) or an editable/composite widget passed in directly."""
-            cap = ttk.Label(top, text=caption)
-            val = widget if widget is not None else ttk.Label(top, textvariable=var)
-            cap.grid(row=r, column=0, sticky="w", padx=6, pady=2)
-            val.grid(row=r, column=1, sticky="ew" if widget is not None else "w", padx=6, pady=2)
+        def info_row(r, caption, var):
+            ttk.Label(info_box, text=caption).grid(row=r, column=0, sticky="w", padx=6, pady=2)
+            ttk.Label(info_box, textvariable=var).grid(row=r, column=1, sticky="w", padx=6, pady=2)
 
         info_row(0, "Máy chủ:", self.v["ftp_host"])
         info_row(1, "Xuất CSV:", self.info["csv_result"])
         info_row(2, "Dữ liệu:", self.info["data_status"])
         info_row(3, "Tự động:", self.info["auto_status"])
         info_row(4, "File thiếu:", self.info["missing"])
-        top.columnconfigure(1, weight=1)
+        info_box.columnconfigure(1, weight=1)
 
-        # --- Tải số liệu theo khoảng: nhúng thẳng, luôn hiện (không còn dialog riêng) ---
-        range_box = ttk.LabelFrame(left_col, text="Tải số liệu theo khoảng", padding=8)
+        # --- Khoảng thời gian ---
+        range_box = ttk.LabelFrame(parent, text="Khoảng thời gian", padding=8)
         range_box.pack(fill="x", pady=(10, 0))
         ttk.Label(range_box, text="Từ ngày:").grid(row=0, column=0, sticky="w", padx=6, pady=2)
         self.start_date_entry = ttk.Entry(range_box, textvariable=self.v["start_date"], width=12)
@@ -161,13 +195,34 @@ class App:
         self.end_date_entry.grid(row=1, column=1, sticky="w", padx=6, pady=2)
         range_btn_row = ttk.Frame(range_box)
         range_btn_row.grid(row=2, column=0, columnspan=2, sticky="e", pady=(6, 0))
+        ttk.Button(range_btn_row, text="7 ngày trước",
+                   command=lambda: self._on_range_days_ago(7)).pack(side="left", padx=(0, 6))
+        ttk.Button(range_btn_row, text="30 ngày trước",
+                   command=lambda: self._on_range_days_ago(30)).pack(side="left", padx=(0, 6))
         self.now_btn = ttk.Button(range_btn_row, text="Về hiện tại", command=self._on_range_now)
-        self.now_btn.pack(side="left", padx=(0, 6))
-        self.start_btn = ttk.Button(range_btn_row, text="Bắt đầu", command=self._on_range_start)
-        self.start_btn.pack(side="left")
+        self.now_btn.pack(side="left")
+
+        # --- Hàng đợi: 1 dòng/file dự kiến, cập nhật Trạng thái khi tiến trình báo về ---
+        self.queue_box = ttk.LabelFrame(parent, text="Hàng đợi (0 file dự kiến)", padding=8)
+        self.queue_box.pack(fill="both", expand=True, pady=(10, 0))
+        queue_frame = ttk.Frame(self.queue_box)
+        queue_frame.pack(fill="both", expand=True)
+        queue_tree = ttk.Treeview(queue_frame, columns=("date", "hour", "status"),
+                                  show="headings", height=6)
+        queue_tree.heading("date", text="Ngày")
+        queue_tree.column("date", width=100, anchor="w")
+        queue_tree.heading("hour", text="Giờ")
+        queue_tree.column("hour", width=50, anchor="center")
+        queue_tree.heading("status", text="Trạng thái")
+        queue_tree.column("status", width=140, anchor="w")
+        vsb = ttk.Scrollbar(queue_frame, orient="vertical", command=queue_tree.yview)
+        queue_tree.configure(yscrollcommand=vsb.set)
+        queue_tree.pack(side="left", fill="both", expand=True)
+        vsb.pack(side="left", fill="y")
+        self.queue_tree = queue_tree
 
         # --- Tiến trình: text "Tải n/m" + progress bar % ---
-        progress_box = ttk.LabelFrame(left_col, text="Tiến trình", padding=8)
+        progress_box = ttk.LabelFrame(parent, text="Tiến trình", padding=8)
         progress_box.pack(fill="x", pady=(10, 0))
         self.progress_label = ttk.Label(progress_box, text="Tải 0/0")
         self.progress_label.pack(side="left")
@@ -176,32 +231,16 @@ class App:
         self.progress_pct_label = ttk.Label(progress_box, text="0%", width=5, anchor="e")
         self.progress_pct_label.pack(side="left")
 
-        # --- Cột nút, bên phải, xếp dọc theo thứ tự: Xem số liệu, Dự báo, Xem
-        # chấm điểm, Thiết lập.
-        btn_col = ttk.Frame(content_row)
-        btn_col.pack(side="left", padx=(12, 0), anchor="n")
-        ttk.Button(btn_col, text="Xem số liệu",
-                  command=self.history_viewer.open_latest).pack(fill="x")
-        self.forecast_btn = ttk.Button(btn_col, text="Dự báo", command=self.forecast_editor.open)
-        self.forecast_btn.pack(fill="x", pady=(4, 0))
-        self.score_btn = ttk.Button(btn_col, text="Xem chấm điểm", command=self.score_viewer.open)
-        self.score_btn.pack(fill="x", pady=(4, 0))
-        ttk.Button(btn_col, text="Thiết lập...",
-                  command=self.settings_dialog.open).pack(fill="x", pady=(4, 0))
+        btn_row = ttk.Frame(parent)
+        btn_row.pack(fill="x", pady=(10, 0))
+        self.start_btn = ttk.Button(btn_row, text="Bắt đầu", command=self._on_range_start)
+        self.start_btn.pack(side="right")
 
-        # --- Status bar at the BOTTOM ---
-        statusbar = ttk.Frame(frm)
-        statusbar.pack(side="bottom", fill="x", pady=(6, 0))
-        self.status = ttk.Label(statusbar, text="Sẵn sàng", anchor="e")
-        self.status.pack(side="right")
-
-        # --- Log (fills the middle, sits above the status bar) ---
-        log_frame = ttk.Frame(frm)
-        log_frame.pack(side="top", fill="both", expand=True, pady=(8, 0))
-        self.log_count_label = ttk.Label(log_frame, text=f"0 / {MAX_LOG_LINES} dòng",
+    def _build_log_tab(self, parent):
+        self.log_count_label = ttk.Label(parent, text=f"0 / {MAX_LOG_LINES} dòng",
                                          foreground="#6b7280", anchor="e")
         self.log_count_label.pack(side="bottom", fill="x")
-        self.log = scrolledtext.ScrolledText(log_frame, height=12, state="disabled",
+        self.log = scrolledtext.ScrolledText(parent, state="disabled",
                                              wrap="word", font=("Consolas", 9))
         self.log.pack(side="top", fill="both", expand=True)
 
@@ -210,13 +249,18 @@ class App:
         for lvl, color in LOG_COLORS.items():                    # level
             self.log.tag_config("lvl_" + lvl, foreground=color)
 
-        self.refresh_range_panel_state()
-
     def _fit_window_to_content(self):
-        """Shrink/grow the main window to fit its currently packed widgets (e.g. after
-        showing/hiding the log frame) instead of leaving stale empty space."""
+        """Size the window to fit its content, capped so it always fits on an
+        HD (1280x720) screen: the Số liệu tab's table can run to 15+ columns,
+        whose natural width alone would otherwise overflow a small screen."""
         self.root.update_idletasks()
-        self.root.geometry("")
+        # Content caps (window chrome + a 1280x720 screen's taskbar add ~55px
+        # height / ~20px width on top of this before it's on screen).
+        max_w = min(1150, self.root.winfo_screenwidth() - 40)
+        max_h = min(600, self.root.winfo_screenheight() - 100)
+        w = min(self.root.winfo_reqwidth(), max_w)
+        h = min(self.root.winfo_reqheight(), max_h)
+        self.root.geometry(f"{w}x{h}")
 
     # ----- Logging -------------------------------------------------------
     def _log(self, level: str, msg: str):
@@ -293,14 +337,14 @@ class App:
             next_run_txt = f" (tiếp theo: {next_run:%H:%M:%S})" if next_run else ""
             self.info["auto_status"].set(f"Bật, mỗi {v} {unit}{next_run_txt}")
 
-    # ----- Panel "Tải số liệu theo khoảng" + banner tạm dừng ------------
+    # ----- Tab "Tải số liệu theo khoảng" + banner tạm dừng ------------
     def refresh_range_panel_state(self):
         """Khóa 'Bắt đầu' + hiện/ẩn banner tạm dừng theo runner._run_in_progress.
         Gọi từ Runner._set_actions_enabled() ở cả 2 đầu (bắt đầu chạy/chạy xong)."""
         running = self.runner._run_in_progress
         self.start_btn.config(state="disabled" if running else "normal")
         if running:
-            self.pause_banner.pack(fill="x", pady=(0, 8), before=self._content_row)
+            self.pause_banner.pack(fill="x", pady=(0, 8), before=self._load_tab_info_box)
         else:
             self.pause_banner.pack_forget()
         self._refresh_info_panel()
@@ -312,15 +356,44 @@ class App:
         self.v["end_date"].set(now.strftime("%Y-%m-%d"))
         self._log("ACT", f"Về hiện tại: ngày {now:%Y-%m-%d}")
 
+    def _on_range_days_ago(self, days: int):
+        """'N ngày trước': Từ ngày = hôm nay - N, Đến ngày = hôm nay."""
+        now = datetime.datetime.now()
+        start = now - datetime.timedelta(days=days)
+        self.v["start_date"].set(start.strftime("%Y-%m-%d"))
+        self.v["end_date"].set(now.strftime("%Y-%m-%d"))
+        self._log("ACT", f"{days} ngày trước: {start:%Y-%m-%d} → {now:%Y-%m-%d}")
+
     def _on_range_start(self):
-        """'Bắt đầu': chạy truy vấn theo khoảng ngày đang nhập trong panel."""
+        """'Bắt đầu': chạy truy vấn theo khoảng ngày đang nhập trong tab."""
         self.runner._on_run()
 
-    def _set_download_progress(self, done: int, total: int):
+    # ----- Hàng đợi ("Tải số liệu theo khoảng" tab) ----------------------
+    def _reset_download_queue(self, start_date, end_date):
+        """Seed the Hàng đợi table with one 'Chờ' row per file the upcoming run
+        will attempt, in the exact order pipeline.fetch.download_files() visits
+        them. Called by Runner._on_run() right before the worker thread starts."""
+        hours = expected_hours(start_date, end_date)
+        self.queue_tree.delete(*self.queue_tree.get_children())
+        self._queue_rows = {}
+        for ts in hours:
+            filename = quantrac_filename_at(ts)
+            iid = self.queue_tree.insert("", "end", values=(ts.strftime("%d/%m/%Y"), f"{ts:%H}", "Chờ"))
+            self._queue_rows[filename] = iid
+        self.queue_box.config(text=f"Hàng đợi ({len(hours)} file dự kiến)")
+
+    def _set_download_progress(self, done: int, total: int, status=None, filename=None):
         self.progress_label.config(text=f"Tải {done}/{total}")
         pct = (done / total * 100) if total else 0
         self.progress_bar["value"] = pct
         self.progress_pct_label.config(text=f"{pct:.0f}%")
+
+        if filename is not None:
+            iid = self._queue_rows.get(filename)
+            if iid is not None and self.queue_tree.exists(iid):
+                label = _QUEUE_STATUS_LABEL.get(status, "?")
+                date, hour, _ = self.queue_tree.item(iid, "values")
+                self.queue_tree.item(iid, values=(date, hour, label))
 
 
 def main():

@@ -5,7 +5,7 @@ Drives one pipeline run: builds cfg from the form, starts the worker thread
 (pipeline.fetch -> pipeline.decode_files), and polls its queue.Queue() back into the UI.
 
 Reaches into the App instance (see main.py) for the form variables in app.v,
-the log helper, and the "Bắt đầu" button in the "Tải số liệu theo khoảng" panel;
+the log helper, and the "Bắt đầu" button in the "Tải số liệu theo khoảng" tab;
 main.py starts its poll loop from App.__init__.
 
 Anti-freeze contract: _work() runs on a worker thread and never touches
@@ -78,10 +78,9 @@ class Runner:
         return cfg
 
     def _set_actions_enabled(self, enabled: bool):
-        """Toggle 'Bắt đầu' (panel 'Tải số liệu theo khoảng' trong main.py): khóa
+        """Toggle 'Bắt đầu' (tab 'Tải số liệu theo khoảng' trong main.py): khóa
         khi có tác vụ đang chạy. Cũng tạm dừng/tiếp tục tự động truy vấn ngay tại
-        đây - auto-query giờ gắn với "có đang chạy 1 lượt tải hay không", không
-        còn gắn với việc 1 dialog nào đó có đang mở hay không."""
+        đây - auto-query giờ gắn với "có đang chạy 1 lượt tải hay không"."""
         app = self.app
         self._run_in_progress = not enabled
         if enabled:
@@ -92,10 +91,7 @@ class Runner:
 
     def _on_run(self) -> bool:
         """Returns True iff a worker thread was actually started, False if
-        skipped (a run is already in progress) or rejected (bad input). Callers
-        that need to know whether the query truly started (e.g.
-        AdvancedDialog._on_advanced_start, to decide whether to close the 'Tải
-        số liệu' dialog) check this."""
+        skipped (a run is already in progress) or rejected (bad input)."""
         app = self.app
         if self.worker and self.worker.is_alive():
             app._log("WARN", "Bỏ qua: một tác vụ đang chạy")
@@ -119,6 +115,7 @@ class Runner:
         self.last_cfg = cfg
         self._set_actions_enabled(False)
         app.status.config(text="Đang chạy...")
+        app._reset_download_queue(cfg["start_date"], cfg["end_date"])
 
         self.worker = threading.Thread(target=self._work, args=(cfg,), daemon=True)
         self.worker.start()
@@ -136,7 +133,7 @@ class Runner:
         """
         q = self.q
         def log(level, msg): q.put(("log", level, msg))
-        def progress(done, total, status): q.put(("progress", done, total))
+        def progress(done, total, status, filename): q.put(("progress", done, total, status, filename))
 
         try:
             dl = pipeline_fetch.fetch_files(cfg, log=log, progress=progress)
@@ -166,8 +163,8 @@ class Runner:
                 if kind == "log":
                     app._log(item[1], item[2])
                 elif kind == "progress":
-                    _, done, total = item
-                    app._set_download_progress(done, total)
+                    _, done, total, status, filename = item
+                    app._set_download_progress(done, total, status, filename)
                 elif kind == "fetch_done":
                     self._on_fetch_done(item[1])
                 elif kind == "export_done":
@@ -218,6 +215,7 @@ class Runner:
         parts = [f"{os.path.basename(hinfo['csv'])} ({hinfo['records']} record)"
                  for _, hinfo in sorted(history_files.items())]
         app._log("OK", "Hoàn tất, đã xuất: " + (", ".join(parts) if parts else "(không có)"))
+        app.history_viewer.refresh_date_list()
 
     def _on_export_error(self, msg: str):
         """Khối 1 đã xong (self.last_result đã có files/missing từ _on_fetch_done),

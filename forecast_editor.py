@@ -1,14 +1,13 @@
 """
 forecast_editor.py
 ====================
-The "Dự báo" window: forecast-viên nhập bucket dự báo cho 6 trường theo trạm +
+The "Dự báo" tab: forecast-viên nhập bucket dự báo cho 6 trường theo trạm +
 khoảng giờ, 1 file/ngày (forecast_YYYYMMDD.csv, nhiều trạm trong cùng file).
 Chỉ đọc/ghi CSV qua pipeline/forecast.py, không tự chạy pipeline nào khác
 (scoring/xuất số liệu quan trắc nằm ở chỗ khác).
 
 Reaches into the App instance (see main.py) for the root window, the shared
-log/dialog-registry helpers, and the output-dir/config state, cùng kiểu với
-viewer.py.
+log helper, và output-dir/config state, cùng kiểu với viewer.py.
 """
 
 import datetime
@@ -18,7 +17,7 @@ import tkinter as tk
 from tkinter import ttk, filedialog, messagebox
 
 from utils import config_utils as config
-from common import STATIONS, STATION_NAMES, NAME_TO_CODE, HOURS, FORECAST_CSV_RE, center_over_root
+from common import STATIONS, STATION_NAMES, NAME_TO_CODE, HOURS, FORECAST_CSV_RE
 from pipeline.forecast import (
     load_records_csv, build_hourly_table, export_forecast_table,
     FIELD_ORDER, WINDOW_FIELDS, LINEAR_FIELDS, CIRCULAR_FIELDS,
@@ -126,52 +125,35 @@ def _build_bucket_widget(parent, field: str):
 class ForecastEditor:
     def __init__(self, app):
         self.app = app
+        self._records = []            # bảng trong bộ nhớ: TOÀN BỘ ngày đang chọn (mọi trạm)
+        self._selected_index = None   # index trong self._records đang nạp để sửa (None = "Thêm dòng")
+        self._current_date = None
 
-    # ----- Entry point ----------------------------------------------------
-    def open(self):
-        app = self.app
-        key = "forecast_editor"
-        existing = app._dialogs.get(key)
-        if existing is not None and existing.winfo_exists():
-            existing.deiconify(); existing.lift(); existing.focus_set()
-            return
-        app._log("ACT", "Mở cửa sổ Dự báo")
-
-        win = tk.Toplevel(app.root)
-        win.title("Dự báo")
-        win.transient(app.root)
-        win.geometry("980x560")
-        win.minsize(760, 480)
-        app._dialogs[key] = win
-
-        win._records = []            # bảng trong bộ nhớ: TOÀN BỘ ngày đang chọn (mọi trạm)
-        win._selected_index = None   # index trong win._records đang nạp để sửa (None = "Thêm dòng")
-        win._current_date = None
-
-        top = ttk.Frame(win, padding=(8, 8, 8, 0))
+    # ----- Tab construction -------------------------------------------------
+    def build(self, parent):
+        top = ttk.Frame(parent, padding=(0, 0, 0, 8))
         top.pack(fill="x")
         ttk.Label(top, text="Ngày:").pack(side="left")
-        win._date_filter = tk.StringVar()
+        self._date_filter = tk.StringVar()
         # KHÔNG readonly: khác Ngày dropdown của Viewer (chỉ liệt kê file có sẵn),
         # ở đây dự báo viên phải gõ được ngày CHƯA có file để bắt đầu dự báo mới.
-        win._date_combo = ttk.Combobox(top, textvariable=win._date_filter, width=12)
-        win._date_combo.pack(side="left", padx=(4, 0))
-        win._date_filter.trace_add("write", lambda *_: self._on_date_change(win))
+        self._date_combo = ttk.Combobox(top, textvariable=self._date_filter, width=12)
+        self._date_combo.pack(side="left", padx=(4, 0))
+        self._date_filter.trace_add("write", lambda *_: self._on_date_change())
 
-        body = ttk.Frame(win, padding=8)
+        body = ttk.Frame(parent)
         body.pack(fill="both", expand=True)
         left = ttk.Frame(body)
         left.pack(side="left", fill="both", expand=True)
         right = ttk.Frame(body)
         right.pack(side="left", fill="y", padx=(10, 0))
 
-        self._build_table_section(win, left)
-        self._build_output_section(win, left)
-        self._build_editor_panel(win, right)
+        self._build_table_section(left)
+        self._build_output_section(left)
+        self._build_editor_panel(right)
 
-        center_over_root(app.root, win)
-        self._refresh_date_options(win)
-        win._date_filter.set(datetime.date.today().strftime("%Y-%m-%d"))   # trigger _load_date
+        self._refresh_date_options()
+        self._date_filter.set(datetime.date.today().strftime("%Y-%m-%d"))   # trigger _load_date
 
     # ----- File discovery ---------------------------------------------------
     def _current_output_dir(self) -> str:
@@ -193,49 +175,48 @@ class ForecastEditor:
                 found[f"{ymd[0:4]}-{ymd[4:6]}-{ymd[6:8]}"] = os.path.join(out_dir, name)
         return found
 
-    def _refresh_date_options(self, win):
-        win._date_combo["values"] = sorted(self._available_forecast_files())
+    def _refresh_date_options(self):
+        self._date_combo["values"] = sorted(self._available_forecast_files())
 
     # ----- Loading a day (mọi trạm) -----------------------------------------
-    def _on_date_change(self, win):
-        date_str = win._date_filter.get().strip()
+    def _on_date_change(self):
+        date_str = self._date_filter.get().strip()
         try:
             datetime.datetime.strptime(date_str, "%Y-%m-%d")
         except ValueError:
             return   # đang gõ dở, chưa phải ngày hợp lệ - bỏ qua, không load
-        self._load_date(win, date_str)
+        self._load_date(date_str)
 
-    def _load_date(self, win, date_str: str):
+    def _load_date(self, date_str: str):
         """Nạp lại TOÀN BỘ forecast_YYYYMMDD.csv cho date_str (mọi trạm) vào
-        win._records. "Xuất CSV..." sau đó luôn ghi lại đúng danh sách này,
+        self._records. "Xuất CSV..." sau đó luôn ghi lại đúng danh sách này,
         không bao giờ chỉ ghi phần trạm đang sửa - tránh mất dự báo trạm khác
         đã lưu trước đó trong cùng file."""
-        win._current_date = date_str
-        win.title(f"Dự báo — {date_str}")
+        self._current_date = date_str
         path = os.path.join(self._current_output_dir(), f"forecast_{date_str.replace('-', '')}.csv")
         if os.path.isfile(path):
             try:
-                win._records = load_records_csv(path)
+                self._records = load_records_csv(path)
             except (OSError, ValueError, KeyError) as e:
                 self.app._log("ERR", f"Không đọc được {os.path.basename(path)}: {e}")
-                win._records = []
+                self._records = []
         else:
-            win._records = []
-        self.app._log("ACT", f"Dự báo: nạp ngày {date_str} ({len(win._records)} dòng)")
-        self._refresh_table(win)
-        self._reset_editor(win)
-        self._refresh_output_summary(win)
-        self._refresh_preview(win)
+            self._records = []
+        self.app._log("ACT", f"Dự báo: nạp ngày {date_str} ({len(self._records)} dòng)")
+        self._refresh_table()
+        self._reset_editor()
+        self._refresh_output_summary()
+        self._refresh_preview()
 
     # ----- Bảng bucket đã nhập ------------------------------------------
-    def _build_table_section(self, win, parent):
+    def _build_table_section(self, parent):
         box = ttk.LabelFrame(parent, text="Bảng bucket đã nhập", padding=8)
         box.pack(fill="both", expand=True)
 
         toolbar = ttk.Frame(box)
         toolbar.pack(fill="x")
         ttk.Button(toolbar, text="Thêm dòng",
-                   command=lambda: self._reset_editor(win)).pack(side="right")
+                   command=lambda: self._reset_editor()).pack(side="right")
 
         table_frame = ttk.Frame(box)
         table_frame.pack(fill="both", expand=True, pady=(6, 0))
@@ -254,151 +235,151 @@ class ForecastEditor:
         tree.configure(yscrollcommand=vsb.set)
         tree.pack(side="left", fill="both", expand=True)
         vsb.pack(side="left", fill="y")
-        tree.bind("<<TreeviewSelect>>", lambda e: self._on_row_selected(win))
-        win._tree = tree
+        tree.bind("<<TreeviewSelect>>", lambda e: self._on_row_selected())
+        self._tree = tree
 
         ttk.Label(box, foreground="#6b7280",
                   text="Chọn một dòng để nạp vào panel bên phải; \"Thêm dòng\" để bắt đầu dòng mới."
                   ).pack(anchor="w", pady=(6, 0))
 
-    def _refresh_table(self, win):
-        tree = win._tree
+    def _refresh_table(self):
+        tree = self._tree
         tree.delete(*tree.get_children())
-        for i, r in enumerate(win._records):
+        for i, r in enumerate(self._records):
             station_name = STATIONS.get(r["station_code"], r["station_code"])
             time_str = f"{r['start_hour']:02d}-{r['end_hour']:02d}"
             tree.insert("", "end", iid=str(i), values=(
                 station_name, time_str, FIELD_LABELS[r["field_name"]],
                 bucket_label(r["field_name"], r["bucket_selected"])))
 
-    def _on_row_selected(self, win):
-        sel = win._tree.selection()
+    def _on_row_selected(self):
+        sel = self._tree.selection()
         if not sel:
             return
         index = int(sel[0])
-        win._selected_index = index
-        self._load_editor(win, win._records[index])
+        self._selected_index = index
+        self._load_editor(self._records[index])
 
     # ----- RowEditorPanel --------------------------------------------------
-    def _build_editor_panel(self, win, parent):
+    def _build_editor_panel(self, parent):
         box = ttk.LabelFrame(parent, text="Sửa / thêm dòng", padding=8)
         box.pack(fill="y")
-        win._editor_mode_label = ttk.Label(box, text="", font=("", 9, "bold"))
-        win._editor_mode_label.pack(anchor="w", pady=(0, 8))
+        self._editor_mode_label = ttk.Label(box, text="", font=("", 9, "bold"))
+        self._editor_mode_label.pack(anchor="w", pady=(0, 8))
 
         ttk.Label(box, text="Trạm:").pack(anchor="w")
-        win._editor_station = tk.StringVar()
-        ttk.Combobox(box, textvariable=win._editor_station, state="readonly",
+        self._editor_station = tk.StringVar()
+        ttk.Combobox(box, textvariable=self._editor_station, state="readonly",
                     values=STATION_NAMES, width=24).pack(anchor="w", pady=(0, 6))
 
         ttk.Label(box, text="Từ giờ:").pack(anchor="w")
-        win._editor_start_hour = ttk.Combobox(box, state="readonly", values=HOURS, width=6)
-        win._editor_start_hour.pack(anchor="w", pady=(0, 6))
+        self._editor_start_hour = ttk.Combobox(box, state="readonly", values=HOURS, width=6)
+        self._editor_start_hour.pack(anchor="w", pady=(0, 6))
 
         ttk.Label(box, text="Đến giờ:").pack(anchor="w")
-        win._editor_end_hour = ttk.Combobox(box, state="readonly", values=HOURS, width=6)
-        win._editor_end_hour.pack(anchor="w", pady=(0, 6))
+        self._editor_end_hour = ttk.Combobox(box, state="readonly", values=HOURS, width=6)
+        self._editor_end_hour.pack(anchor="w", pady=(0, 6))
 
         ttk.Label(box, text="Trường dữ liệu:").pack(anchor="w")
-        win._editor_field = tk.StringVar()
-        field_combo = ttk.Combobox(box, textvariable=win._editor_field, state="readonly",
+        self._editor_field = tk.StringVar()
+        field_combo = ttk.Combobox(box, textvariable=self._editor_field, state="readonly",
                                    values=[FIELD_LABELS[f] for f in FIELD_ORDER], width=24)
         field_combo.pack(anchor="w", pady=(0, 6))
-        field_combo.bind("<<ComboboxSelected>>", lambda e: self._rebuild_bucket_widget(win))
+        field_combo.bind("<<ComboboxSelected>>", lambda e: self._rebuild_bucket_widget())
 
         ttk.Label(box, text="Bucket:").pack(anchor="w")
-        win._bucket_container = ttk.Frame(box)
-        win._bucket_container.pack(anchor="w", fill="x", pady=(0, 8))
-        win._bucket_get = None   # set by _rebuild_bucket_widget()
+        self._bucket_container = ttk.Frame(box)
+        self._bucket_container.pack(anchor="w", fill="x", pady=(0, 8))
+        self._bucket_get = None   # set by _rebuild_bucket_widget()
 
         btns = ttk.Frame(box)
         btns.pack(fill="x", pady=(4, 0))
-        ttk.Button(btns, text="Lưu dòng", command=lambda: self._on_save_row(win)).pack(fill="x")
-        win._delete_btn = ttk.Button(btns, text="Xóa dòng", command=lambda: self._on_delete_row(win))
-        win._delete_btn.pack(fill="x", pady=(4, 0))
+        ttk.Button(btns, text="Lưu dòng", command=lambda: self._on_save_row()).pack(fill="x")
+        self._delete_btn = ttk.Button(btns, text="Xóa dòng", command=lambda: self._on_delete_row())
+        self._delete_btn.pack(fill="x", pady=(4, 0))
 
-    def _reset_editor(self, win):
-        win._selected_index = None
-        win._editor_mode_label.config(text="+ Thêm dòng mới")
-        if win._tree.selection():
-            win._tree.selection_remove(win._tree.selection())
+    def _reset_editor(self):
+        self._selected_index = None
+        self._editor_mode_label.config(text="+ Thêm dòng mới")
+        if self._tree.selection():
+            self._tree.selection_remove(self._tree.selection())
         default_code = (config.CONFIG.get("station_code") or "").strip()
-        win._editor_station.set(STATIONS.get(default_code, STATION_NAMES[0]))
-        win._editor_start_hour.set(HOURS[0])
-        win._editor_end_hour.set(HOURS[-1])
-        win._editor_field.set(FIELD_LABELS[FIELD_ORDER[0]])
-        self._rebuild_bucket_widget(win)
-        win._delete_btn.config(state="disabled")
+        self._editor_station.set(STATIONS.get(default_code, STATION_NAMES[0]))
+        self._editor_start_hour.set(HOURS[0])
+        self._editor_end_hour.set(HOURS[-1])
+        self._editor_field.set(FIELD_LABELS[FIELD_ORDER[0]])
+        self._rebuild_bucket_widget()
+        self._delete_btn.config(state="disabled")
 
-    def _load_editor(self, win, record: dict):
-        win._editor_mode_label.config(
+    def _load_editor(self, record: dict):
+        self._editor_mode_label.config(
             text=f"Đang sửa: {record['start_hour']:02d}-{record['end_hour']:02d} · "
                  f"{FIELD_LABELS[record['field_name']]}")
-        win._editor_station.set(STATIONS.get(record["station_code"], record["station_code"]))
-        win._editor_start_hour.set(f"{record['start_hour']:02d}")
-        win._editor_end_hour.set(f"{record['end_hour']:02d}")
-        win._editor_field.set(FIELD_LABELS[record["field_name"]])
-        self._rebuild_bucket_widget(win, initial=record["bucket_selected"])
-        win._delete_btn.config(state="normal")
+        self._editor_station.set(STATIONS.get(record["station_code"], record["station_code"]))
+        self._editor_start_hour.set(f"{record['start_hour']:02d}")
+        self._editor_end_hour.set(f"{record['end_hour']:02d}")
+        self._editor_field.set(FIELD_LABELS[record["field_name"]])
+        self._rebuild_bucket_widget(initial=record["bucket_selected"])
+        self._delete_btn.config(state="normal")
 
-    def _rebuild_bucket_widget(self, win, initial=None):
-        for w in win._bucket_container.winfo_children():
+    def _rebuild_bucket_widget(self, initial=None):
+        for w in self._bucket_container.winfo_children():
             w.destroy()
-        field = _field_key_from_label(win._editor_field.get())
-        widget, get, set_ = _build_bucket_widget(win._bucket_container, field)
+        field = _field_key_from_label(self._editor_field.get())
+        widget, get, set_ = _build_bucket_widget(self._bucket_container, field)
         widget.pack(anchor="w")
-        win._bucket_get = get
+        self._bucket_get = get
         if initial is not None:
             set_(initial)   # widget đã tự ở lựa chọn đầu tiên nếu initial=None (dòng mới)
 
-    def _on_save_row(self, win):
+    def _on_save_row(self):
         try:
-            start_hour = int(win._editor_start_hour.get())
-            end_hour = int(win._editor_end_hour.get())
+            start_hour = int(self._editor_start_hour.get())
+            end_hour = int(self._editor_end_hour.get())
         except ValueError:
             messagebox.showerror("Không lưu được dòng", "Chưa chọn Từ giờ/Đến giờ.")
             return
         if end_hour < start_hour:
             messagebox.showerror("Không lưu được dòng", "Đến giờ phải sau hoặc bằng Từ giờ.")
             return
-        station_code = NAME_TO_CODE.get(win._editor_station.get())
+        station_code = NAME_TO_CODE.get(self._editor_station.get())
         if not station_code:
             messagebox.showerror("Không lưu được dòng", "Chưa chọn Trạm.")
             return
 
-        field = _field_key_from_label(win._editor_field.get())
+        field = _field_key_from_label(self._editor_field.get())
         record = {
             "station_code": station_code, "start_hour": start_hour, "end_hour": end_hour,
-            "field_name": field, "bucket_selected": win._bucket_get(),
+            "field_name": field, "bucket_selected": self._bucket_get(),
         }
-        if win._selected_index is None:
-            win._records.append(record)
+        if self._selected_index is None:
+            self._records.append(record)
         else:
-            win._records[win._selected_index] = record
+            self._records[self._selected_index] = record
 
-        self._refresh_table(win)
-        self._reset_editor(win)
-        self._refresh_output_summary(win)
-        self._refresh_preview(win)
-        self.app._log("OK", f"Dự báo: lưu dòng {win._editor_station.get()} "
+        self._refresh_table()
+        self._reset_editor()
+        self._refresh_output_summary()
+        self._refresh_preview()
+        self.app._log("OK", f"Dự báo: lưu dòng {self._editor_station.get()} "
                             f"{start_hour:02d}-{end_hour:02d} {FIELD_LABELS[field]}")
 
-    def _on_delete_row(self, win):
-        if win._selected_index is None:
+    def _on_delete_row(self):
+        if self._selected_index is None:
             return
-        del win._records[win._selected_index]
-        self._refresh_table(win)
-        self._reset_editor(win)
-        self._refresh_output_summary(win)
-        self._refresh_preview(win)
+        del self._records[self._selected_index]
+        self._refresh_table()
+        self._reset_editor()
+        self._refresh_output_summary()
+        self._refresh_preview()
 
     # ----- Khung Xuất CSV ----------------------------------------------
-    def _build_output_section(self, win, parent):
+    def _build_output_section(self, parent):
         box = ttk.LabelFrame(parent, text="Xuất CSV", padding=8)
         box.pack(fill="x", pady=(8, 0))
 
-        win._output_summary = ttk.Label(box, foreground="#374151")
-        win._output_summary.pack(anchor="w")
+        self._output_summary = ttk.Label(box, foreground="#374151")
+        self._output_summary.pack(anchor="w")
 
         preview_frame = ttk.Frame(box)
         preview_frame.pack(fill="both", expand=True, pady=(6, 0))
@@ -415,29 +396,29 @@ class ForecastEditor:
         tree.configure(yscrollcommand=vsb.set)
         tree.pack(side="left", fill="both", expand=True)
         vsb.pack(side="left", fill="y")
-        win._preview_tree = tree
+        self._preview_tree = tree
 
         btns = ttk.Frame(box)
         btns.pack(fill="x", pady=(8, 0))
-        ttk.Button(btns, text="Xuất CSV...", command=lambda: self._on_export(win)).pack(side="left")
-        ttk.Button(btns, text="Nhập CSV...", command=lambda: self._on_import(win)).pack(
+        ttk.Button(btns, text="Xuất CSV...", command=lambda: self._on_export()).pack(side="left")
+        ttk.Button(btns, text="Nhập CSV...", command=lambda: self._on_import()).pack(
                   side="left", padx=(6, 0))
 
-    def _refresh_output_summary(self, win):
-        n = len(win._records)
+    def _refresh_output_summary(self):
+        n = len(self._records)
         if n == 0:
-            win._output_summary.config(text="Chưa có dòng nào trong bảng.")
+            self._output_summary.config(text="Chưa có dòng nào trong bảng.")
             return
-        stations = sorted({STATIONS.get(r["station_code"], r["station_code"]) for r in win._records})
-        win._output_summary.config(text=f"{n} dòng · {len(stations)} trạm: {', '.join(stations)}")
+        stations = sorted({STATIONS.get(r["station_code"], r["station_code"]) for r in self._records})
+        self._output_summary.config(text=f"{n} dòng · {len(stations)} trạm: {', '.join(stations)}")
 
-    def _refresh_preview(self, win):
+    def _refresh_preview(self):
         """Xem trước theo bảng ĐANG CÓ trong bộ nhớ (chưa chắc đã ghi ra đĩa,
         xem log/"Xuất CSV..." để biết trạng thái ghi thật)."""
-        tree = win._preview_tree
+        tree = self._preview_tree
         tree.delete(*tree.get_children())
         try:
-            rows = build_hourly_table(win._records)
+            rows = build_hourly_table(self._records)
         except ValueError as e:
             self.app._log("ERR", f"Dự báo: dữ liệu không hợp lệ để xem trước: {e}")
             return
@@ -449,23 +430,23 @@ class ForecastEditor:
                 bucket_label(f, r[f]) for f in FIELD_ORDER]
             tree.insert("", "end", values=values)
 
-    def _on_export(self, win):
-        if not win._records:
+    def _on_export(self):
+        if not self._records:
             messagebox.showinfo("Chưa có dòng", "Hãy thêm ít nhất một dòng trong bảng.")
             return
-        date_str = win._current_date
+        date_str = self._current_date
         out_dir = self._current_output_dir()
         os.makedirs(out_dir, exist_ok=True)
         try:
-            result = export_forecast_table(win._records, date_str, out_dir)
+            result = export_forecast_table(self._records, date_str, out_dir)
         except OSError as e:
             self.app._log("ERR", f"Không xuất được forecast_{date_str.replace('-', '')}.csv: {e}")
             messagebox.showerror("Lỗi", f"Không xuất được file:\n{e}")
             return
         self.app._log("OK", f"Đã xuất {result['records']} dòng vào {os.path.basename(result['csv'])}")
-        self._refresh_date_options(win)
+        self._refresh_date_options()
 
-    def _on_import(self, win):
+    def _on_import(self):
         path = filedialog.askopenfilename(
             title="Nhập CSV dự báo", filetypes=[("CSV files", "*.csv"), ("All files", "*.*")])
         if not path:
@@ -475,13 +456,13 @@ class ForecastEditor:
         except (OSError, ValueError, KeyError) as e:
             messagebox.showerror("Không nhập được CSV", str(e))
             return
-        if win._records and not messagebox.askyesno(
+        if self._records and not messagebox.askyesno(
                 "Ghi đè dữ liệu hiện tại?",
-                f"Bảng hiện có {len(win._records)} dòng. Nhập CSV sẽ THAY THẾ toàn bộ. Tiếp tục?"):
+                f"Bảng hiện có {len(self._records)} dòng. Nhập CSV sẽ THAY THẾ toàn bộ. Tiếp tục?"):
             return
-        win._records = imported
-        self._refresh_table(win)
-        self._reset_editor(win)
-        self._refresh_output_summary(win)
-        self._refresh_preview(win)
+        self._records = imported
+        self._refresh_table()
+        self._reset_editor()
+        self._refresh_output_summary()
+        self._refresh_preview()
         self.app._log("OK", f"Đã nhập {len(imported)} dòng từ {os.path.basename(path)}")
