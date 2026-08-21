@@ -63,6 +63,12 @@ ALL_HOURS = "Tất cả các giờ"   # hour-filter dropdown option that disable
 # load, rather than filtering rows within a single file.
 HISTORY_CSV_RE = re.compile(r"^history_(\d{8})\.csv$")
 
+# Same idea as HISTORY_CSV_RE, for the forecast-input archive (ForecastEditor)
+# and the scored-output file (ScoreViewer). Kept as 2 separate patterns so a
+# "forecast_*" file can never match a "score_*" Ngày dropdown or vice versa.
+FORECAST_CSV_RE = re.compile(r"^forecast_(\d{8})\.csv$")
+SCORE_CSV_RE = re.compile(r"^score_(\d{8})\.csv$")
+
 
 # Numeric columns in the CSV viewer: right-aligned + compared as NUMBERS when
 # sorting (instead of as strings). *_hshs columns are numeric too but their names
@@ -75,11 +81,13 @@ NUMERIC_VIEWER_COLUMNS = {
 }
 
 # Columns that never appear in the CSV viewer: not shown in either mode, and
-# not offered in the "Hiển thị" picker either, so they can't be toggled back on
-# from the GUI. They stay in the exported CSV file untouched; the only way to
+# not offered in the "Thiết lập..." picker either, so they can't be toggled back
+# on from the GUI. They stay in the exported CSV file untouched; the only way to
 # see them is opening a history_*.csv file directly (e.g. in Excel).
+# station_code/lat/lon used to be in this set too; they're now default-hidden
+# but user-toggleable instead (HistoryViewer.hidden_cols), see viewer.py.
 ALWAYS_HIDDEN_VIEWER_COLUMNS = {
-    "date", "hour", "source_file", "station_code", "lat", "lon", "cloud_layers",
+    "date", "hour", "source_file", "cloud_layers",
 }
 
 

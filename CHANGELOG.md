@@ -4,7 +4,33 @@ Các thay đổi đáng chú ý của Solieu26, mới nhất lên đầu. Chi ti
 xem `git log`; việc đang mở/chưa quyết xem `TODO.md` (file local, không nằm
 trong repo).
 
-## [Chưa gắn tag] — 2026-08-16 → 2026-08-20 (sau v4.0)
+## v5.0 — 2026-08-16 → 2026-08-21
+
+### Thiết kế lại UI theo mockup (`reference/Redesign Solieu26 (ban Tkinter thuc te).dc.html`)
+- Thêm cửa sổ "Dự báo" (`forecast_editor.py`): dự báo viên nhập bucket cho 6
+  trường theo trạm + khoảng giờ, 1 file/ngày nhiều trạm
+  (`forecast_YYYYMMDD.csv`), luôn nạp lại toàn bộ file cũ trước khi ghi để
+  không mất dự báo của trạm khác. Mở từ nút riêng ở cửa sổ chính (không còn
+  ràng buộc "chỉ mở từ Viewer" như đặc tả ban đầu).
+- Thêm cửa sổ "Xem chấm điểm dự báo" (`score_viewer.py`), đọc
+  `score_YYYYMMDD.csv` (chỉ đọc, không tự chạy `export_forecast_score()`):
+  có dropdown Trạm (đặc tả gốc định ẩn, nhưng `join_forecast_obs()` đã ghép
+  đa trạm xong nên hiện luôn), tô màu dòng theo Đạt/Không đạt/Bỏ cặp, 2 chế
+  độ xem 1 trường / cả 6 trường.
+- "Tải số liệu theo khoảng" chuyển từ `AdvancedDialog` (Toplevel riêng) sang
+  1 panel nhúng thẳng trong cửa sổ chính, luôn hiện; bỏ nút "Làm mới" (panel
+  luôn có sẵn ngày mặc định = hôm nay nên nút "Bắt đầu" thay thế được). Auto-
+  query tạm dừng theo "có đang chạy 1 lượt tải hay không"
+  (`Runner._run_in_progress`) thay vì theo dialog có đang mở hay không.
+- Cửa sổ chính thêm banner tạm dừng, progress bar %, log giới hạn 2000 dòng
+  (tự xoá dòng cũ, hiện số dòng hiện tại/giới hạn).
+- Dialog "Thiết lập": bỏ auto-apply riêng cho khối "Tự động truy vấn" khi mất
+  focus/Enter, dùng chung 1 chỉ báo "có thay đổi chưa lưu" + nút "Lưu thiết
+  lập" cho mọi field, thêm toast "Đã lưu lúc HH:MM".
+- Viewer ("Xem số liệu"): bỏ nút "Làm mới"/"Mở bằng Excel", đổi tên "Hiển
+  thị" thành "Thiết lập...", thêm chú thích khi lọc Trạm = "Tất cả các
+  trạm", cột `station_code`/`lat`/`lon` chuyển từ ẩn cứng sang mặc định ẩn
+  nhưng bật lại được qua "Thiết lập...".
 
 ### Chương trình chấm điểm dự báo (mới)
 - Thêm chương trình con chấm điểm dự báo cho 6 trường (tổng lượng mây, độ

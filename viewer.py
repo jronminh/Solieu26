@@ -20,9 +20,8 @@ from utils import config_utils as config
 from common import (
     STATIONS, STATION_NAMES, NAME_TO_CODE, ALL_STATIONS,
     HOURS, ALL_HOURS, HISTORY_CSV_RE, ALWAYS_HIDDEN_VIEWER_COLUMNS,
-    _is_numeric_viewer_column, report_open, make_dialog, center_over_root,
+    _is_numeric_viewer_column, make_dialog, center_over_root,
 )
-from utils.file_utils import open_in_editor
 from utils.ini_utils import update_ini_key
 
 
@@ -31,7 +30,15 @@ class HistoryViewer:
         self.app = app
         # Columns hidden in the CSV viewer: shared across all viewer windows
         # (every history_*.csv has the same schema); loaded from config, saved back on change.
-        self.hidden_cols = set(config.CONFIG.get("viewer_hidden_columns", []))
+        # station_code/lat/lon default to hidden (same as the old hard-hidden
+        # behavior) until the user explicitly saves a selection via "Thiết
+        # lập...", distinguished by whether config.ini actually HAD the key
+        # (app.cfg_overrides) rather than by config.CONFIG's own default ([]),
+        # which can't tell "never saved" apart from "saved as empty".
+        if "viewer_hidden_columns" in app.cfg_overrides:
+            self.hidden_cols = set(config.CONFIG.get("viewer_hidden_columns", []))
+        else:
+            self.hidden_cols = {"station_code", "lat", "lon"}
 
     # ----- Entry points ---------------------------------------------------
     def open_latest(self):
@@ -41,9 +48,9 @@ class HistoryViewer:
         files behind. The 'Ngày' dropdown inside the viewer switches between them."""
         history_files = self._available_history_files()
         if not history_files:
-            self.app._log("WARN", "Xem số liệu: chưa có file lịch sử nào, hãy 'Làm mới' trước")
+            self.app._log("WARN", "Xem số liệu: chưa có file lịch sử nào, hãy 'Bắt đầu' trước")
             messagebox.showwarning("Chưa có dữ liệu",
-                                   "Chưa có file lịch sử nào.\n\nHãy bấm 'Làm mới' để tạo file trước.")
+                                   "Chưa có file lịch sử nào.\n\nHãy bấm 'Bắt đầu' để tạo file trước.")
             return
         self.show_date(max(history_files))
 
@@ -55,10 +62,10 @@ class HistoryViewer:
         filename = f"history_{date_key.replace('-', '')}.csv"
         self.app._log("ACT", f"Xem {filename}")
         if not path or not os.path.isfile(path):
-            self.app._log("ERR", f"Chưa có {filename} trong {self._current_output_dir()}, hãy Làm mới trước")
+            self.app._log("ERR", f"Chưa có {filename} trong {self._current_output_dir()}, hãy Bắt đầu trước")
             messagebox.showwarning(
                 "Chưa có file",
-                f"Không có dữ liệu ngày {date_key}.\n\nHãy bấm 'Làm mới' để tạo file trước.")
+                f"Không có dữ liệu ngày {date_key}.\n\nHãy bấm 'Bắt đầu' để tạo file trước.")
             return
 
         key = "view_history"
@@ -86,11 +93,7 @@ class HistoryViewer:
         win._toggle_btn = ttk.Button(bar, text="Xem raw",
                                      command=lambda: self._toggle_viewer_mode(win))
         win._toggle_btn.pack(side="left")
-        ttk.Button(bar, text="Làm mới",
-                   command=lambda: self._load_csv_into_viewer(win, win._path)).pack(side="left", padx=6)
-        ttk.Button(bar, text="Mở bằng Excel",
-                   command=lambda: self._open_csv_external(win._path)).pack(side="left")
-        ttk.Button(bar, text="Hiển thị",
+        ttk.Button(bar, text="Thiết lập...",
                    command=lambda: self._open_column_picker(win)).pack(side="left", padx=6)
 
         # Station filter: post-process filter over the loaded day's file (which
@@ -119,8 +122,6 @@ class HistoryViewer:
         win._hour_combo.pack(side="left")
         win._hour_filter.trace_add("write", lambda *_: self._on_hour_filter_change(win))
 
-        self._sync_hour_filter_for_station(win)
-
         # Date filter is NOT a row filter: each history_YYYYMMDD.csv is already one
         # day, so picking a date here switches WHICH FILE is loaded, same idea as
         # a file picker rather than a post-process filter like Trạm/Giờ above.
@@ -133,6 +134,12 @@ class HistoryViewer:
 
         win._status = ttk.Label(bar, text="")
         win._status.pack(side="right")
+
+        # Shown only when Trạm = "Tất cả các trạm" (see _sync_hour_filter_for_station),
+        # explaining why Giờ is then locked to a specific hour.
+        win._all_stations_hint = ttk.Label(
+            win, text="Vì đang xem tất cả trạm, phải chọn một giờ cụ thể để tránh bảng quá lớn",
+            foreground="#6b7280", padding=(8, 0, 8, 4))
 
         tf = ttk.Frame(win, padding=(8, 0, 8, 8))
         tf.pack(fill="both", expand=True)
@@ -151,6 +158,9 @@ class HistoryViewer:
         # Zebra striping: tags live on the widget, so this only needs setting once.
         tree.tag_configure("odd", background="#f3f4f6")
         tree.tag_configure("even", background="#ffffff")
+
+        win._table_frame = tf
+        self._sync_hour_filter_for_station(win)
 
         center_over_root(self.app.root, win)
         self._load_csv_into_viewer(win, path)
@@ -223,11 +233,6 @@ class HistoryViewer:
         self.app._log("ACT", f"Xem CSV: chế độ {'Raw' if win._mode == 'raw' else 'Số liệu'}")
         self._render_viewer(win)
 
-    def _open_csv_external(self, path: str):
-        """Open the CSV file with its default application (usually Excel on Windows)."""
-        self.app._log("ACT", f"Mở bằng Excel: {os.path.basename(path)}")
-        report_open(self.app._log, *open_in_editor(path), warn=True)
-
     def _on_station_filter_change(self, win):
         self.app._log("ACT", f"Lọc trạm: {win._station_filter.get()}")
         self._sync_hour_filter_for_station(win)
@@ -259,7 +264,8 @@ class HistoryViewer:
         thể (tránh bảng hiện toàn bộ trạm × toàn bộ giờ cùng lúc)."""
         if win._station_filter is None or win._hour_filter is None:
             return
-        if win._station_filter.get() == ALL_STATIONS:
+        all_stations = win._station_filter.get() == ALL_STATIONS
+        if all_stations:
             win._hour_combo["values"] = HOURS
             win._hour_combo["state"] = "readonly"
             if win._hour_filter.get() == ALL_HOURS:
@@ -269,6 +275,11 @@ class HistoryViewer:
             win._hour_combo["state"] = "disabled"
             if win._hour_filter.get() != ALL_HOURS:
                 win._hour_filter.set(ALL_HOURS)
+
+        if all_stations:
+            win._all_stations_hint.pack(fill="x", before=win._table_frame)
+        else:
+            win._all_stations_hint.pack_forget()
 
     # ----- Column sorting --------------------------------------------
     def _apply_sort(self, win):

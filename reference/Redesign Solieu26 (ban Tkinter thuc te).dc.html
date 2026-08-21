@@ -1,0 +1,340 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <style>
+    body { margin: 0; }
+    .tkbtn { display:inline-flex; align-items:center; justify-content:center; gap:6px; padding: 4px 14px; min-height: 24px; font-size: 12px; background:#e1e1e1; border:1px solid #8f8f8f; border-radius: 2px; cursor: pointer; color:#000; font-family: inherit; white-space: nowrap; }
+    .tkbtn:hover { background:#ebebeb; }
+    .tkbtn.active { background:#5980a6; color:#fff; border-color:#3f5f7d; }
+    .tkbtn.primary { background:#5980a6; color:#fff; border-color:#3f5f7d; }
+    .tkframe { position:relative; border:1px solid #8f8f8f; padding: 16px 10px 10px; }
+    .tkframe .lbl { position:absolute; top:-9px; left:8px; background:#f0f0f0; padding:0 4px; font-size:11px; color:#333; }
+    .tkfield label { display:block; font-size:11px; margin-bottom:2px; color:#222; }
+    .tkinput { width:100%; min-height:22px; padding:2px 4px; font-size:12px; font-family:inherit; border:1px solid #7a7a7a; background:#fff; }
+    .tktable { width:100%; border-collapse:collapse; font-size:12px; }
+    .tktable th { background:#ececec; border:1px solid #d0d0d0; text-align:left; padding:3px 6px; font-weight:normal; }
+    .tktable td { border:1px solid #e5e5e5; padding:3px 6px; }
+  </style>
+</helmet>
+
+<div style="min-height:100vh; background:#d9d9d9; font-family: 'Segoe UI', Tahoma, Arial, sans-serif; color:#000; padding: 24px 24px 80px;">
+  <div style="max-width:1180px; margin:0 auto;">
+    <h1 style="font-size:20px; font-weight:600; margin:0 0 4px;">Redesign Solieu26 — bản gần khả năng Tkinter thực tế</h1>
+    <p style="font-size:12px; color:#444; max-width:700px; margin:0 0 16px;">So với mockup CSS trước: bỏ dấu góc, bỏ đổ bóng, font hệ thống (Segoe UI thay Barlow), khung nhóm dạng LabelFrame viền groove, bảng dạng Treeview phẳng. Vẫn giữ tông xanh thép làm accent (áp được qua ttk.Style).</p>
+
+    <div style="display:flex; gap:4px; flex-wrap:wrap; margin-bottom:14px;">
+      <button class="tkbtn {{ tabBtnClass.main }}" onClick="{{ goMain }}">1 · Cửa sổ chính</button>
+      <button class="tkbtn {{ tabBtnClass.settings }}" onClick="{{ goSettings }}">2 · Thiết lập</button>
+      <button class="tkbtn {{ tabBtnClass.viewer }}" onClick="{{ goViewer }}">3 · Xem số liệu</button>
+      <button class="tkbtn {{ tabBtnClass.forecast }}" onClick="{{ goForecast }}">4 · Dự báo</button>
+      <button class="tkbtn {{ tabBtnClass.score }}" onClick="{{ goScore }}">5 · Xem điểm chấm</button>
+    </div>
+
+    <!-- 1. MAIN -->
+    <sc-if value="{{ isMain }}" hint-placeholder-val="{{ true }}">
+      <div style="background:#f0f0f0; border:1px solid #8f8f8f;">
+        <div style="background:#3f5f7d; color:#fff; padding:5px 10px; font-size:12px; font-weight:600;">Solieu26 — Cửa sổ chính</div>
+        <div style="padding:12px; display:grid; grid-template-columns: 1fr 170px; gap:12px;">
+          <div style="display:flex; flex-direction:column; gap:12px;">
+            <div style="display:flex; align-items:center; gap:6px; padding:5px 8px; border:1px solid #b5875a; background:#fbeed9; font-size:12px;">
+              <span style="width:7px;height:7px;border-radius:50%;background:#c07a2b;flex:none;"></span>
+              Tự động: Tạm dừng — đang mở "Tải số liệu theo khoảng"
+            </div>
+
+            <div class="tkframe">
+              <span class="lbl">Thông tin truy vấn</span>
+              <table style="width:100%; font-size:12px; border-collapse:collapse; margin-bottom:10px;">
+                <tr style="border-bottom:1px solid #ddd;"><td style="padding:3px 0; width:80px; color:#555;">Trạm</td><td>48-097 — Láng</td></tr>
+                <tr style="border-bottom:1px solid #ddd;"><td style="padding:3px 0; color:#555;">Ngày</td><td>18/08/2026</td></tr>
+                <tr style="border-bottom:1px solid #ddd;"><td style="padding:3px 0; color:#555;">Giờ</td><td>07:00</td></tr>
+                <tr><td style="padding:3px 0; color:#555;">Máy chủ</td><td>ftp.solieu.local <span style="color:#777; font-size:11px;">— sửa trong Thiết lập</span></td></tr>
+              </table>
+            </div>
+
+            <div class="tkframe">
+              <span class="lbl">Tải số liệu theo khoảng</span>
+              <div style="display:flex; flex-direction:column; gap:8px;">
+                <div style="font-size:10px; color:#c07a2b;">● sẽ tạm dừng tự động truy vấn</div>
+                <div style="display:grid; grid-template-columns:1fr 1fr; gap:6px;">
+                  <div class="tkfield"><label>Từ ngày</label><input class="tkinput" value="15/08/2026"/></div>
+                  <div class="tkfield"><label>Đến ngày</label><input class="tkinput" value="18/08/2026"/></div>
+                </div>
+                <div style="display:flex; justify-content:flex-end; gap:6px;">
+                  <button class="tkbtn">Về hiện tại</button>
+                  <button class="tkbtn primary">Bắt đầu</button>
+                </div>
+              </div>
+            </div>
+
+            <div class="tkframe">
+              <span class="lbl">Tiến trình</span>
+              <div style="display:flex; align-items:center; gap:8px; font-size:12px;">
+                <span>Tải 12/40</span>
+                <div style="flex:1; height:14px; border:1px solid #8f8f8f; background:#fff; position:relative;">
+                  <div style="position:absolute; inset:1px; width:30%; background:#5980a6;"></div>
+                </div>
+                <span>30%</span>
+              </div>
+            </div>
+
+            <div class="tkframe" style="flex:1;">
+              <span class="lbl">Log</span>
+              <div style="display:flex; justify-content:flex-end; font-size:11px; color:#666; margin-bottom:4px;">1834 / 2000 dòng</div>
+              <div style="background:#fff; border:1px solid #7a7a7a; height:120px; padding:6px; font-family:'Consolas', monospace; font-size:11px; overflow:hidden; color:#222;">
+                14:02:11 GET obs_20260818_07.csv OK<br>
+                14:02:12 GET obs_20260818_08.csv OK<br>
+                14:02:14 GET obs_20260818_09.csv timeout, retry 1/3<br>
+                14:02:19 GET obs_20260818_09.csv OK<br>…
+              </div>
+            </div>
+          </div>
+
+          <div style="display:flex; flex-direction:column; gap:6px;">
+            <button class="tkbtn" style="width:100%;">Xem số liệu</button>
+            <button class="tkbtn" style="width:100%; justify-content:space-between;" onClick="{{ goForecast }}">Dự báo <span style="font-size:10px; background:#5980a6; color:#fff; padding:1px 5px;">Mới</span></button>
+            <button class="tkbtn" style="width:100%; justify-content:space-between;">Xem chấm điểm <span style="font-size:10px; background:#5980a6; color:#fff; padding:1px 5px;">Mới</span></button>
+            <button class="tkbtn" style="width:100%;">Thiết lập...</button>
+          </div>
+        </div>
+      </div>
+    </sc-if>
+
+    <!-- 2. SETTINGS -->
+    <sc-if value="{{ isSettings }}" hint-placeholder-val="{{ false }}">
+      <div style="background:#f0f0f0; border:1px solid #8f8f8f; max-width:520px; margin:0 auto;">
+        <div style="background:#3f5f7d; color:#fff; padding:5px 10px; font-size:12px; font-weight:600;">Thiết lập</div>
+        <div style="padding:14px; display:flex; flex-direction:column; gap:14px;">
+          <div class="tkframe">
+            <span class="lbl">Kết nối</span>
+            <div style="display:flex; flex-direction:column; gap:10px;">
+              <div class="tkfield"><label>Máy chủ</label><input class="tkinput" value="ftp.solieu.local" onChange="{{ markDirty }}"/></div>
+              <div class="tkfield"><label>Người dùng</label><input class="tkinput" value="obs_reader" onChange="{{ markDirty }}"/></div>
+              <div class="tkfield"><label>Mật khẩu</label><input class="tkinput" type="password" value="********" onChange="{{ markDirty }}"/></div>
+            </div>
+          </div>
+
+          <div class="tkframe">
+            <span class="lbl">Đường dẫn</span>
+            <div style="display:flex; gap:8px; align-items:end;">
+              <div class="tkfield" style="flex:1;"><label>Thư mục lưu số liệu</label><input class="tkinput" value="D:\\solieu26\\data" onChange="{{ markDirty }}"/></div>
+              <button class="tkbtn">Mở thư mục</button>
+            </div>
+          </div>
+
+          <div class="tkframe">
+            <span class="lbl">Tự động truy vấn <sc-if value="{{ dirty }}" hint-placeholder-val="{{ false }}"><span style="color:#c07a2b;">&nbsp;● Có thay đổi chưa lưu</span></sc-if></span>
+            <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px; align-items:center;">
+              <div class="tkfield"><label>Chu kỳ (phút)</label><input class="tkinput" value="15" onChange="{{ markDirty }}"/></div>
+              <label style="display:flex; align-items:center; gap:6px; font-size:12px;"><input type="checkbox" defaultChecked="{{ true }}" onChange="{{ markDirty }}"/>Bật tự động truy vấn</label>
+            </div>
+          </div>
+
+          <sc-if value="{{ showToast }}" hint-placeholder-val="{{ false }}">
+            <div style="font-size:12px; background:#dce9f4; border:1px solid #5980a6; padding:5px 8px;">Đã lưu thiết lập lúc {{ savedAt }}</div>
+          </sc-if>
+
+          <div style="display:flex; justify-content:flex-end; gap:6px;">
+            <button class="tkbtn">Khôi phục mặc định</button>
+            <button class="tkbtn primary" onClick="{{ saveSettings }}">Lưu thiết lập</button>
+          </div>
+        </div>
+      </div>
+    </sc-if>
+
+    <!-- 3. VIEWER -->
+    <sc-if value="{{ isViewer }}" hint-placeholder-val="{{ false }}">
+      <div style="background:#f0f0f0; border:1px solid #8f8f8f;">
+        <div style="background:#3f5f7d; color:#fff; padding:5px 10px; font-size:12px; font-weight:600;">Xem số liệu</div>
+        <div style="padding:12px; display:flex; flex-direction:column; gap:10px;">
+          <div style="display:flex; gap:8px; align-items:end; flex-wrap:wrap; padding-bottom:8px; border-bottom:1px solid #c5c5c5;">
+            <div class="tkfield" style="width:200px;"><label>Trạm</label>
+              <select class="tkinput" value="{{ viewerStation }}" onChange="{{ onStationChange }}">
+                <option value="all">Tất cả các trạm</option>
+                <option value="one">48-097 — Láng</option>
+              </select>
+            </div>
+            <div class="tkfield" style="width:140px;"><label>Ngày</label><select class="tkinput"><option>18/08/2026.csv</option></select></div>
+            <div class="tkfield" style="width:100px;"><label>Giờ</label><select class="tkinput"><option>07:00</option></select></div>
+            <label style="display:flex; align-items:center; gap:6px; font-size:12px; margin-bottom:4px;"><input type="checkbox" defaultChecked="{{ true }}"/>Xem số liệu</label>
+            <button class="tkbtn">Thiết lập...</button>
+          </div>
+
+          <sc-if value="{{ viewerStationAll }}" hint-placeholder-val="{{ false }}">
+            <div style="font-size:11px; color:#666;">Vì đang xem tất cả trạm, phải chọn một giờ cụ thể để tránh bảng quá lớn</div>
+          </sc-if>
+
+          <table class="tktable">
+            <thead><tr><th>Giờ</th><th>Trạm</th><th>tong_luong_may</th><th>huong_gio</th><th>toc_do_gio</th><th>nhiet_do</th></tr></thead>
+            <tbody>
+              <tr><td>07:00</td><td>48-097</td><td>4</td><td>NE</td><td>3.2</td><td>28.4</td></tr>
+              <tr style="background:#f5f5f5;"><td>07:00</td><td>48-098</td><td>6</td><td>N</td><td>2.1</td><td>27.9</td></tr>
+              <tr><td>08:00</td><td>48-097</td><td>5</td><td>E</td><td>3.8</td><td>29.1</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </sc-if>
+
+    <!-- 5. FORECAST -->
+    <sc-if value="{{ isForecast }}" hint-placeholder-val="{{ false }}">
+      <div style="background:#f0f0f0; border:1px solid #8f8f8f;">
+        <div style="background:#3f5f7d; color:#fff; padding:5px 10px; font-size:12px; font-weight:600;">Dự báo</div>
+        <div style="padding:12px; display:flex; flex-direction:column; gap:12px;">
+          <div style="display:flex; gap:10px; align-items:end; padding-bottom:10px; border-bottom:1px solid #c5c5c5;">
+            <div class="tkfield" style="width:150px;"><label>Ngày</label><select class="tkinput"><option>18/08/2026</option><option>17/08/2026</option></select></div>
+          </div>
+          <div style="display:grid; grid-template-columns:1.4fr 1fr; gap:12px;">
+          <div style="display:flex; flex-direction:column; gap:10px;">
+            <div class="tkframe">
+              <span class="lbl">Bảng bucket đã nhập</span>
+              <div style="display:flex; justify-content:flex-end; gap:6px; margin-bottom:6px;">
+                <button class="tkbtn">Thêm dòng</button>
+              </div>
+              <table class="tktable">
+                <thead><tr><th>Thời gian</th><th>Trường dữ liệu</th><th>Bucket đã chọn</th></tr></thead>
+                <tbody>
+                  <tr onClick="{{ selectRow0 }}" style="cursor:pointer; background:{{ rowBg0 }};"><td>06–09h</td><td>tong_luong_may</td><td>0–2 phần</td></tr>
+                  <tr onClick="{{ selectRow1 }}" style="cursor:pointer; background:{{ rowBg1 }};"><td>09–12h</td><td>huong_gio</td><td>NE (16 hướng)</td></tr>
+                  <tr onClick="{{ selectRow2 }}" style="cursor:pointer; background:{{ rowBg2 }};"><td>12–15h</td><td>toc_do_gio</td><td>2–4 m/s</td></tr>
+                </tbody>
+              </table>
+              <p style="font-size:11px; color:#666; margin:6px 0 0;">Chọn một dòng để nạp vào RowEditorPanel bên phải.</p>
+            </div>
+
+            <div class="tkframe">
+              <span class="lbl">Xuất CSV</span>
+              <p style="font-size:11px; color:#555; margin:0 0 6px;">3 dòng · 06:00–15:00 đã xuất ra forecast_20260818.csv</p>
+              <div style="border:1px solid #7a7a7a; background:#fff; height:140px; overflow:auto;">
+                <table class="tktable"><thead><tr><th>Giờ</th><th>tong_luong_may</th><th>huong_gio</th><th>toc_do_gio</th></tr></thead>
+                <tbody>
+                  <tr><td>06</td><td>0–2 phần</td><td>NE</td><td>2–4 m/s</td></tr>
+                  <tr><td>07</td><td>0–2 phần</td><td>NE</td><td>2–4 m/s</td></tr>
+                  <tr><td>08</td><td>3–5 phần</td><td>NE</td><td>2–4 m/s</td></tr>
+                </tbody></table>
+              </div>
+              <div style="display:flex; gap:6px; margin-top:8px;">
+                <button class="tkbtn primary">Xuất CSV...</button>
+                <button class="tkbtn">Nhập CSV...</button>
+              </div>
+            </div>
+          </div>
+
+          <div class="tkframe" style="align-self:start;">
+            <span class="lbl">RowEditorPanel — {{ editorRow.mode }}</span>
+            <div class="tkfield"><label>Trạm</label><select class="tkinput"><option>48-097 — Láng</option><option>48-098 — Hà Đông</option></select></div>
+            <div class="tkfield" style="margin-top:6px;"><label>Từ giờ</label><select class="tkinput" value="{{ editorRow.from }}"><option>06</option><option>09</option><option>12</option></select></div>
+            <div class="tkfield" style="margin-top:6px;"><label>Đến giờ</label><select class="tkinput" value="{{ editorRow.to }}"><option>09</option><option>12</option><option>15</option></select></div>
+            <div class="tkfield" style="margin-top:6px;"><label>Trường dữ liệu</label><select class="tkinput" value="{{ editorRow.field }}"><option>tong_luong_may</option><option>huong_gio</option><option>toc_do_gio</option></select></div>
+            <div class="tkfield" style="margin-top:6px;"><label>Bucket</label><select class="tkinput" value="{{ editorRow.bucket }}"><option>0–2 phần</option><option>NE (16 hướng)</option><option>2–4 m/s</option></select></div>
+            <div style="display:flex; flex-direction:column; gap:6px; margin-top:10px;">
+              <button class="tkbtn primary" style="width:100%;">Lưu dòng</button>
+              <button class="tkbtn" style="width:100%;">Xóa dòng</button>
+            </div>
+          </div>
+          </div>
+        </div>
+      </div>
+    </sc-if>
+
+    <!-- 6. SCORE -->
+    <sc-if value="{{ isScore }}" hint-placeholder-val="{{ false }}">
+      <div style="background:#f0f0f0; border:1px solid #8f8f8f;">
+        <div style="background:#3f5f7d; color:#fff; padding:5px 10px; font-size:12px; font-weight:600;">Xem điểm chấm dự báo</div>
+        <div style="padding:12px; display:flex; flex-direction:column; gap:10px;">
+          <div style="display:flex; gap:8px; align-items:end; flex-wrap:wrap; padding-bottom:8px; border-bottom:1px solid #c5c5c5;">
+            <div class="tkfield" style="width:170px;"><label>Trạm <span style="font-size:9px; background:#5980a6; color:#fff; padding:1px 4px;">Mới</span></label>
+              <select class="tkinput" value="{{ scoreStation }}" onChange="{{ onScoreStationChange }}">
+                <option value="all">Tất cả các trạm</option>
+                <option value="one">48-097 — Láng</option>
+              </select>
+            </div>
+            <div class="tkfield" style="width:140px;"><label>Ngày</label><select class="tkinput"><option>score_20260818.csv</option></select></div>
+            <div class="tkfield" style="width:170px;"><label>Trường</label><select class="tkinput"><option>tong_luong_may</option><option>Tất cả 6 trường</option></select></div>
+            <button class="tkbtn">Thiết lập...</button>
+          </div>
+
+          <div style="font-size:12px; background:#dce9f4; border:1px solid #5980a6; padding:6px 8px;">Đạt {{ scoreSummary }} — bỏ cặp 2, trường tong_luong_may, buổi sáng{{ scoreStationNote }}</div>
+
+          <table class="tktable">
+            <thead><tr><th>Giờ</th><th>Buổi</th><th>DB</th><th>QT</th><th>Điểm</th></tr></thead>
+            <tbody>
+              <tr style="background:#dff0d8;"><td>06:00</td><td>Sáng</td><td>0–2 phần</td><td>0–2 phần</td><td>Đạt</td></tr>
+              <tr style="background:#f2dede;"><td>07:00</td><td>Sáng</td><td>0–2 phần</td><td>3–5 phần</td><td>Không đạt</td></tr>
+              <tr style="background:#eee;"><td>08:00</td><td>Sáng</td><td>—</td><td>—</td><td>Bỏ cặp</td></tr>
+            </tbody>
+          </table>
+          <p style="font-size:11px; color:#666;">Màu dòng: xanh nhạt = Đạt, đỏ nhạt = Không đạt, xám = bỏ cặp (score rỗng) — làm bằng Treeview tag_configure.</p>
+        </div>
+      </div>
+    </sc-if>
+  </div>
+</div>
+
+</x-dc>
+<script type="text/x-dc" data-dc-script>
+class Component extends DCLogic {
+  state = { tab: 'main', dirty: false, showToast: false, savedAt: '', viewerStation: 'all', scoreStation: 'all', selectedRow: 0 };
+  forecastRows = [
+    { from: '06', to: '09', field: 'tong_luong_may', bucket: '0–2 phần' },
+    { from: '09', to: '12', field: 'huong_gio', bucket: 'NE (16 hướng)' },
+    { from: '12', to: '15', field: 'toc_do_gio', bucket: '2–4 m/s' },
+  ];
+  selectRow0 = () => this.setState({ selectedRow: 0 });
+  selectRow1 = () => this.setState({ selectedRow: 1 });
+  selectRow2 = () => this.setState({ selectedRow: 2 });
+  setTab = (tab) => this.setState({ tab });
+  goMain = () => this.setTab('main');
+  goSettings = () => this.setTab('settings');
+  goViewer = () => this.setTab('viewer');
+  goForecast = () => this.setTab('forecast');
+  goScore = () => this.setTab('score');
+  markDirty = () => this.setState({ dirty: true, showToast: false });
+  saveSettings = () => {
+    const now = new Date();
+    const hh = String(now.getHours()).padStart(2, '0');
+    const mm = String(now.getMinutes()).padStart(2, '0');
+    this.setState({ dirty: false, showToast: true, savedAt: hh + ':' + mm });
+  };
+  onStationChange = (e) => this.setState({ viewerStation: e.target.value });
+  onScoreStationChange = (e) => this.setState({ scoreStation: e.target.value });
+  tabClass(name) { return this.state.tab === name ? 'active' : ''; }
+
+  renderVals() {
+    const t = this.state.tab;
+    const viewerStationAll = this.state.viewerStation === 'all';
+    return {
+      isMain: t === 'main', isSettings: t === 'settings',
+      isViewer: t === 'viewer', isForecast: t === 'forecast', isScore: t === 'score',
+      tabBtnClass: {
+        main: this.tabClass('main'), settings: this.tabClass('settings'),
+        viewer: this.tabClass('viewer'), forecast: this.tabClass('forecast'), score: this.tabClass('score'),
+      },
+      goMain: this.goMain, goSettings: this.goSettings,
+      goViewer: this.goViewer, goForecast: this.goForecast, goScore: this.goScore,
+      dirty: this.state.dirty, showToast: this.state.showToast, savedAt: this.state.savedAt,
+      markDirty: this.markDirty, saveSettings: this.saveSettings,
+      viewerStation: this.state.viewerStation, viewerStationAll, onStationChange: this.onStationChange,
+      forecastBtnClass: viewerStationAll ? '' : 'primary',
+      forecastBtnTitle: viewerStationAll ? 'Chọn một trạm cụ thể để mở cửa sổ dự báo' : '',
+      scoreStation: this.state.scoreStation, onScoreStationChange: this.onScoreStationChange,
+      scoreSummary: this.state.scoreStation === 'all' ? '18/22 (81,8%)' : '9/11 (81,8%)',
+      scoreStationNote: this.state.scoreStation === 'all' ? '' : ', trạm 48-097',
+      selectRow0: this.selectRow0, selectRow1: this.selectRow1, selectRow2: this.selectRow2,
+      rowBg0: this.state.selectedRow === 0 ? '#cfe2f3' : 'transparent',
+      rowBg1: this.state.selectedRow === 1 ? '#cfe2f3' : '#f5f5f5',
+      rowBg2: this.state.selectedRow === 2 ? '#cfe2f3' : 'transparent',
+      editorRow: { mode: 'Sửa dòng', ...this.forecastRows[this.state.selectedRow] },
+    };
+  }
+}
+
+</script>
+</body>
+</html>

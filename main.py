@@ -1,7 +1,9 @@
 """
 main.py: Tkinter GUI entry point, holding the App class (main window, logging,
-info panel) and wiring up runner.Runner, auto_query.AutoQuery, viewer.HistoryViewer,
-dialogs.SettingsDialog, and dialogs.AdvancedDialog. Run: python main.py [config.ini path].
+info panel, embedded "Tải số liệu theo khoảng" panel) and wiring up runner.Runner,
+auto_query.AutoQuery, viewer.HistoryViewer, dialogs.SettingsDialog,
+forecast_editor.ForecastEditor, and score_viewer.ScoreViewer. Run:
+python main.py [config.ini path].
 
 Tác giả: congminh9981 (congminh9981@gmail.com); Claude (Anthropic), đồng tác giả.
 """
@@ -18,7 +20,11 @@ from common import LOG_COLORS
 from runner import Runner
 from auto_query import AutoQuery
 from viewer import HistoryViewer
-from dialogs import SettingsDialog, AdvancedDialog
+from dialogs import SettingsDialog
+from forecast_editor import ForecastEditor
+from score_viewer import ScoreViewer
+
+MAX_LOG_LINES = 2000   # oldest lines get trimmed past this (see _log())
 
 
 class App:
@@ -61,9 +67,8 @@ class App:
             "ftp_pass":    tk.StringVar(value=d.get("ftp_pass", "")),
             "remote_dir":  tk.StringVar(value=d.get("remote_dir", "/Quantrac")),
             "output_dir":  tk.StringVar(value=d.get("output_dir") or config.DEFAULT_OUTPUT_DIR),
-            # Advanced mode (date-range query), off by default; normal mode always
-            # queries "today", no date field shown.
-            "advanced_mode": tk.BooleanVar(value=False),
+            # "Tải số liệu theo khoảng" panel's date range, defaults to today so
+            # "Bắt đầu" with no changes behaves like a plain current-day fetch.
             "start_date":  tk.StringVar(value=today.strftime("%Y-%m-%d")),
             "end_date":    tk.StringVar(value=today.strftime("%Y-%m-%d")),
             "auto_value":  tk.StringVar(value=str(d.get("auto_query_value", 15))),
@@ -85,7 +90,8 @@ class App:
         # AdvancedDialog's widget refs...) survives across open/close cycles.
         self.history_viewer = HistoryViewer(self)
         self.settings_dialog = SettingsDialog(self)
-        self.advanced_dialog = AdvancedDialog(self)
+        self.forecast_editor = ForecastEditor(self)
+        self.score_viewer = ScoreViewer(self)
 
         self._build_ui()
         self._fit_window_to_content()
@@ -94,7 +100,7 @@ class App:
         self.root.after(100, self.runner._poll)
         for level, msg in config_log_buffer:
             self._log(level, msg)
-        self._log("INFO", "Khởi động xong, sẵn sàng. Điền thông tin rồi bấm 'Làm mới'.")
+        self._log("INFO", "Khởi động xong, sẵn sàng. Điền thông tin rồi bấm 'Bắt đầu'.")
         if self.cfg_overrides:
             self._log("OK", f"Đã nạp {len(self.cfg_overrides)} thiết lập từ config: {self.cfg_path}")
         else:
@@ -110,14 +116,24 @@ class App:
         frm = ttk.Frame(self.root, padding=10)
         frm.pack(fill="both", expand=True)
 
-        # --- Hàng nội dung chính: Thông tin truy vấn (trái) + cột nút (phải) ---
+        # Banner: shown only while a fetch is running (see refresh_range_panel_state).
+        # Packed/unpacked dynamically with before=content_row so it always sits
+        # above the info panel when visible, never appended after it.
+        self.pause_banner = ttk.Label(
+            frm, text="Tự động: Tạm dừng — đang tải số liệu",
+            background="#fbeed9", foreground="#b45309", padding=(8, 4), anchor="w")
+
+        # --- Hàng nội dung chính: Thông tin truy vấn + panel khoảng ngày (trái) + cột nút (phải) ---
         content_row = ttk.Frame(frm)
         content_row.pack(fill="x")
+        self._content_row = content_row
+
+        left_col = ttk.Frame(content_row)
+        left_col.pack(side="left", fill="both", expand=True)
 
         # --- Thông tin truy vấn --- (read-only status; recomputed by _refresh_info_panel)
-        # No LabelFrame border, laid directly on content_row.
-        top = ttk.Frame(content_row)
-        top.pack(side="left", fill="both", expand=True)
+        top = ttk.Frame(left_col)
+        top.pack(fill="x")
 
         def info_row(r, caption, var=None, widget=None):
             """One grid row: caption label + either a read-only value (var, as a
@@ -134,16 +150,42 @@ class App:
         info_row(4, "File thiếu:", self.info["missing"])
         top.columnconfigure(1, weight=1)
 
-        # --- Cột nút, bên phải khung Thông tin truy vấn, xếp dọc theo thứ tự:
-        # Làm mới, Tải số liệu, Xem số liệu, Thiết lập.
+        # --- Tải số liệu theo khoảng: nhúng thẳng, luôn hiện (không còn dialog riêng) ---
+        range_box = ttk.LabelFrame(left_col, text="Tải số liệu theo khoảng", padding=8)
+        range_box.pack(fill="x", pady=(10, 0))
+        ttk.Label(range_box, text="Từ ngày:").grid(row=0, column=0, sticky="w", padx=6, pady=2)
+        self.start_date_entry = ttk.Entry(range_box, textvariable=self.v["start_date"], width=12)
+        self.start_date_entry.grid(row=0, column=1, sticky="w", padx=6, pady=2)
+        ttk.Label(range_box, text="Đến ngày:").grid(row=1, column=0, sticky="w", padx=6, pady=2)
+        self.end_date_entry = ttk.Entry(range_box, textvariable=self.v["end_date"], width=12)
+        self.end_date_entry.grid(row=1, column=1, sticky="w", padx=6, pady=2)
+        range_btn_row = ttk.Frame(range_box)
+        range_btn_row.grid(row=2, column=0, columnspan=2, sticky="e", pady=(6, 0))
+        self.now_btn = ttk.Button(range_btn_row, text="Về hiện tại", command=self._on_range_now)
+        self.now_btn.pack(side="left", padx=(0, 6))
+        self.start_btn = ttk.Button(range_btn_row, text="Bắt đầu", command=self._on_range_start)
+        self.start_btn.pack(side="left")
+
+        # --- Tiến trình: text "Tải n/m" + progress bar % ---
+        progress_box = ttk.LabelFrame(left_col, text="Tiến trình", padding=8)
+        progress_box.pack(fill="x", pady=(10, 0))
+        self.progress_label = ttk.Label(progress_box, text="Tải 0/0")
+        self.progress_label.pack(side="left")
+        self.progress_bar = ttk.Progressbar(progress_box, mode="determinate", maximum=100)
+        self.progress_bar.pack(side="left", fill="x", expand=True, padx=8)
+        self.progress_pct_label = ttk.Label(progress_box, text="0%", width=5, anchor="e")
+        self.progress_pct_label.pack(side="left")
+
+        # --- Cột nút, bên phải, xếp dọc theo thứ tự: Xem số liệu, Dự báo, Xem
+        # chấm điểm, Thiết lập.
         btn_col = ttk.Frame(content_row)
-        btn_col.pack(side="left", padx=(12, 0))
-        self.refresh_btn = ttk.Button(btn_col, text="Làm mới", command=self.runner._on_run)
-        self.refresh_btn.pack(fill="x")
-        ttk.Button(btn_col, text="Tải số liệu",
-                  command=self.advanced_dialog.open).pack(fill="x", pady=(4, 0))
+        btn_col.pack(side="left", padx=(12, 0), anchor="n")
         ttk.Button(btn_col, text="Xem số liệu",
-                  command=self.history_viewer.open_latest).pack(fill="x", pady=(4, 0))
+                  command=self.history_viewer.open_latest).pack(fill="x")
+        self.forecast_btn = ttk.Button(btn_col, text="Dự báo", command=self.forecast_editor.open)
+        self.forecast_btn.pack(fill="x", pady=(4, 0))
+        self.score_btn = ttk.Button(btn_col, text="Xem chấm điểm", command=self.score_viewer.open)
+        self.score_btn.pack(fill="x", pady=(4, 0))
         ttk.Button(btn_col, text="Thiết lập...",
                   command=self.settings_dialog.open).pack(fill="x", pady=(4, 0))
 
@@ -154,17 +196,21 @@ class App:
         self.status.pack(side="right")
 
         # --- Log (fills the middle, sits above the status bar) ---
-        # No LabelFrame border, built regardless.
-        self.log = scrolledtext.ScrolledText(frm, height=12, state="disabled",
+        log_frame = ttk.Frame(frm)
+        log_frame.pack(side="top", fill="both", expand=True, pady=(8, 0))
+        self.log_count_label = ttk.Label(log_frame, text=f"0 / {MAX_LOG_LINES} dòng",
+                                         foreground="#6b7280", anchor="e")
+        self.log_count_label.pack(side="bottom", fill="x")
+        self.log = scrolledtext.ScrolledText(log_frame, height=12, state="disabled",
                                              wrap="word", font=("Consolas", 9))
-        self.log.pack(side="top", fill="both", expand=True, pady=(8, 0))
+        self.log.pack(side="top", fill="both", expand=True)
 
         # Color tags for each part of a log line
         self.log.tag_config("ts", foreground="#9ca3af")          # timestamp (light gray)
         for lvl, color in LOG_COLORS.items():                    # level
             self.log.tag_config("lvl_" + lvl, foreground=color)
 
-        self.advanced_dialog.refresh_controls_state()
+        self.refresh_range_panel_state()
 
     def _fit_window_to_content(self):
         """Shrink/grow the main window to fit its currently packed widgets (e.g. after
@@ -188,6 +234,7 @@ class App:
         self.log.insert("end", ts + "  ", "ts")
         self.log.insert("end", f"{level:<4}", "lvl_" + level)
         self.log.insert("end", "  " + msg + "\n")
+        self._trim_log()
         self.log.see("end")
         self.log.config(state="disabled")
 
@@ -195,8 +242,18 @@ class App:
         """Draw a faint separator line between runs for readability."""
         self.log.config(state="normal")
         self.log.insert("end", "─" * 60 + "\n", "ts")
+        self._trim_log()
         self.log.see("end")
         self.log.config(state="disabled")
+
+    def _trim_log(self):
+        """Xoá dòng cũ nhất nếu log vượt MAX_LOG_LINES, cập nhật label đếm dòng.
+        Gọi trong lúc self.log đang state="normal" (giữa 2 lần config ở _log/_divider)."""
+        line_count = int(self.log.index("end-1c").split(".")[0])
+        if line_count > MAX_LOG_LINES:
+            self.log.delete("1.0", f"{line_count - MAX_LOG_LINES + 1}.0")
+            line_count = MAX_LOG_LINES
+        self.log_count_label.config(text=f"{line_count} / {MAX_LOG_LINES} dòng")
 
     # ----- Info panel ("Thông tin truy vấn") --------------------------
     def _refresh_info_panel(self):
@@ -224,7 +281,7 @@ class App:
         else:
             self.info["data_status"].set("Chưa có dữ liệu")
 
-        if self.v["advanced_mode"].get():
+        if self.runner._run_in_progress:
             self.info["auto_status"].set("Tạm dừng, đang tải số liệu")
             return
 
@@ -235,6 +292,35 @@ class App:
             next_run = self.auto_query.auto_next_run
             next_run_txt = f" (tiếp theo: {next_run:%H:%M:%S})" if next_run else ""
             self.info["auto_status"].set(f"Bật, mỗi {v} {unit}{next_run_txt}")
+
+    # ----- Panel "Tải số liệu theo khoảng" + banner tạm dừng ------------
+    def refresh_range_panel_state(self):
+        """Khóa 'Bắt đầu' + hiện/ẩn banner tạm dừng theo runner._run_in_progress.
+        Gọi từ Runner._set_actions_enabled() ở cả 2 đầu (bắt đầu chạy/chạy xong)."""
+        running = self.runner._run_in_progress
+        self.start_btn.config(state="disabled" if running else "normal")
+        if running:
+            self.pause_banner.pack(fill="x", pady=(0, 8), before=self._content_row)
+        else:
+            self.pause_banner.pack_forget()
+        self._refresh_info_panel()
+
+    def _on_range_now(self):
+        """'Về hiện tại': ép Từ ngày/Đến ngày về hôm nay."""
+        now = datetime.datetime.now()
+        self.v["start_date"].set(now.strftime("%Y-%m-%d"))
+        self.v["end_date"].set(now.strftime("%Y-%m-%d"))
+        self._log("ACT", f"Về hiện tại: ngày {now:%Y-%m-%d}")
+
+    def _on_range_start(self):
+        """'Bắt đầu': chạy truy vấn theo khoảng ngày đang nhập trong panel."""
+        self.runner._on_run()
+
+    def _set_download_progress(self, done: int, total: int):
+        self.progress_label.config(text=f"Tải {done}/{total}")
+        pct = (done / total * 100) if total else 0
+        self.progress_bar["value"] = pct
+        self.progress_pct_label.config(text=f"{pct:.0f}%")
 
 
 def main():

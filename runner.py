@@ -5,8 +5,8 @@ Drives one pipeline run: builds cfg from the form, starts the worker thread
 (pipeline.fetch -> pipeline.decode_files), and polls its queue.Queue() back into the UI.
 
 Reaches into the App instance (see main.py) for the form variables in app.v,
-the log helper, and the "Làm mới" button; main.py starts its poll loop from
-App.__init__.
+the log helper, and the "Bắt đầu" button in the "Tải số liệu theo khoảng" panel;
+main.py starts its poll loop from App.__init__.
 
 Anti-freeze contract: _work() runs on a worker thread and never touches
 widgets, it only pushes events onto self.q; the main thread's _poll() reads
@@ -37,7 +37,7 @@ class Runner:
         self.app = app
         self.q = queue.Queue()
         self.worker = None
-        self._run_in_progress = False  # mirrors _set_actions_enabled, feeds advanced_dialog.refresh_controls_state
+        self._run_in_progress = False  # mirrors _set_actions_enabled, feeds refresh_range_panel_state + auto_query pause/resume
         self.last_output_dir = None
         self.last_result = None     # result dict from the last completed run (for the info panel)
         self.last_cfg = None        # cfg dict from the last _on_run (carries the queried date)
@@ -47,10 +47,10 @@ class Runner:
     def _build_cfg(self) -> dict:
         """Read the form → cfg dict; local_dir/timeout/retry come from config's fixed constants.
 
-        Always sets start_date/end_date: pipeline_fetch.download_files() takes the fast
-        single-day path when they're equal. Normal mode: always "today", no date
-        field to read. Advanced mode (self.app.v["advanced_mode"], on while the "Tải
-        số liệu" dialog is open): reads them from that dialog's fields instead.
+        start_date/end_date always come from the "Tải số liệu theo khoảng" panel
+        (app.v["start_date"]/["end_date"], defaults to today) — pipeline_fetch.download_files()
+        takes the fast single-day path when they're equal, so a plain "hôm nay" query
+        and a date-range query both go through this same one path.
         """
         app = self.app
         cfg = {
@@ -65,30 +65,30 @@ class Runner:
             "output_dir": app.v["output_dir"].get().strip() or config.DEFAULT_OUTPUT_DIR,
         }
 
-        if app.v["advanced_mode"].get():
-            try:
-                start = datetime.datetime.strptime(app.v["start_date"].get().strip(), "%Y-%m-%d")
-                end = datetime.datetime.strptime(app.v["end_date"].get().strip(), "%Y-%m-%d")
-            except ValueError:
-                raise ValueError("Ngày bắt đầu/kết thúc phải theo định dạng YYYY-MM-DD, vd 2026-08-10")
-            if end < start:
-                raise ValueError("Ngày kết thúc phải sau hoặc bằng ngày bắt đầu")
-            cfg["start_date"] = start
-            cfg["end_date"] = end
-        else:
-            today = datetime.datetime.combine(datetime.date.today(), datetime.time())
-            cfg["start_date"] = cfg["end_date"] = today
+        try:
+            start = datetime.datetime.strptime(app.v["start_date"].get().strip(), "%Y-%m-%d")
+            end = datetime.datetime.strptime(app.v["end_date"].get().strip(), "%Y-%m-%d")
+        except ValueError:
+            raise ValueError("Ngày bắt đầu/kết thúc phải theo định dạng YYYY-MM-DD, vd 2026-08-10")
+        if end < start:
+            raise ValueError("Ngày kết thúc phải sau hoặc bằng ngày bắt đầu")
+        cfg["start_date"] = start
+        cfg["end_date"] = end
 
         return cfg
 
     def _set_actions_enabled(self, enabled: bool):
-        """Toggle 'Làm mới': locked while a run is in progress. 'Bắt đầu' (trong
-        dialog 'Tải số liệu', nếu đang mở) khóa/mở theo cùng trạng thái qua
-        advanced_dialog.refresh_controls_state()."""
+        """Toggle 'Bắt đầu' (panel 'Tải số liệu theo khoảng' trong main.py): khóa
+        khi có tác vụ đang chạy. Cũng tạm dừng/tiếp tục tự động truy vấn ngay tại
+        đây - auto-query giờ gắn với "có đang chạy 1 lượt tải hay không", không
+        còn gắn với việc 1 dialog nào đó có đang mở hay không."""
         app = self.app
         self._run_in_progress = not enabled
-        app.refresh_btn.config(state="normal" if enabled else "disabled")
-        app.advanced_dialog.refresh_controls_state()
+        if enabled:
+            app.auto_query.resume()
+        else:
+            app.auto_query.pause()
+        app.refresh_range_panel_state()
 
     def _on_run(self) -> bool:
         """Returns True iff a worker thread was actually started, False if
@@ -167,7 +167,7 @@ class Runner:
                     app._log(item[1], item[2])
                 elif kind == "progress":
                     _, done, total = item
-                    app.status.config(text=f"Tải {done}/{total}")
+                    app._set_download_progress(done, total)
                 elif kind == "fetch_done":
                     self._on_fetch_done(item[1])
                 elif kind == "export_done":

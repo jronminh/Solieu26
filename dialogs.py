@@ -1,13 +1,12 @@
 """
 dialogs.py
 ====================
-The two small Toplevel dialogs hung off the main window: "Thiết lập" (settings)
-and "Tải số liệu" (advanced date-range query).
+The "Thiết lập" (settings) Toplevel dialog hung off the main window. The
+date-range query ("Tải số liệu theo khoảng") used to be a separate dialog here
+too; it's now a panel embedded directly in main.py's main window instead.
 
-Each reaches into the App instance (see main.py) for app.v, the
-log/dialog-registry helpers, and the auto-query timer; AdvancedDialog's
-widget refs survive across "Tải số liệu" opens/closes since main.py keeps
-one instance for the app's lifetime.
+Reaches into the App instance (see main.py) for app.v, the
+log/dialog-registry helpers, and the auto-query timer.
 """
 
 import datetime
@@ -25,6 +24,11 @@ from utils.ini_utils import update_ini_key
 class SettingsDialog:
     def __init__(self, app):
         self.app = app
+        # Rebuilt fresh each open() call (make_dialog only calls open() when no
+        # Toplevel is currently up), so no stale-widget risk keeping refs here.
+        self._dirty_var = None
+        self._dirty_label = None
+        self._toast_label = None
 
     def _row(self, parent, r, label, var, width=None, show=None):
         ttk.Label(parent, text=label).grid(row=r, column=0, sticky="w", padx=6, pady=3)
@@ -47,41 +51,51 @@ class SettingsDialog:
         frm = ttk.Frame(win, padding=12)
         frm.pack(fill="both", expand=True)
 
+        # Every field below shares 1 "Lưu thiết lập" button (no more auto-apply
+        # on FocusOut/Enter for the auto-query fields specifically) - typing
+        # anywhere just marks the dirty indicator, config.ini and the running
+        # auto-query schedule only change once "Lưu thiết lập" is clicked.
         conn_box = ttk.LabelFrame(frm, text="Kết nối", padding=8)
         conn_box.pack(fill="x")
-        self._row(conn_box, 0, "Host",     app.v["ftp_host"])
-        self._row(conn_box, 1, "User",     app.v["ftp_user"])
-        self._row(conn_box, 2, "Password", app.v["ftp_pass"], show="*")
+        host_entry = self._row(conn_box, 0, "Host",     app.v["ftp_host"])
+        user_entry = self._row(conn_box, 1, "User",     app.v["ftp_user"])
+        pass_entry = self._row(conn_box, 2, "Password", app.v["ftp_pass"], show="*")
         conn_box.columnconfigure(1, weight=1)
 
         path_box = ttk.LabelFrame(frm, text="Đường dẫn", padding=8)
         path_box.pack(fill="x", pady=(8, 0))
-        self._row(path_box, 0, "Thư mục server",  app.v["remote_dir"])
-        self._row(path_box, 1, "Thư mục xuất CSV", app.v["output_dir"])
+        remote_dir_entry = self._row(path_box, 0, "Thư mục server",  app.v["remote_dir"])
+        output_dir_entry = self._row(path_box, 1, "Thư mục xuất CSV", app.v["output_dir"])
         ttk.Button(path_box, text="Chọn...",
                    command=lambda: self._browse_output(parent=win)).grid(row=1, column=2, padx=4)
         ttk.Button(path_box, text="Mở thư mục data",
                    command=self._on_open_data).grid(
                    row=2, column=0, sticky="w", pady=(6, 0))
-
         path_box.columnconfigure(1, weight=1)
 
-        # Edits AutoQuery's interval/unit directly (auto_query.py owns the
-        # scheduling logic and the "0 = off" convention).
         auto_box = ttk.LabelFrame(frm, text="Tự động truy vấn", padding=8)
         auto_box.pack(fill="x", pady=(8, 0))
         auto_entry = ttk.Entry(auto_box, textvariable=app.v["auto_value"], width=6)
         auto_entry.grid(row=0, column=0, padx=(0, 4))
-        auto_entry.bind("<FocusOut>", app.auto_query._on_auto_change)
-        auto_entry.bind("<Return>", app.auto_query._on_auto_change)
         auto_unit = ttk.Combobox(auto_box, textvariable=app.v["auto_unit"],
                                  values=["Phút", "Giờ"], state="readonly", width=8)
         auto_unit.grid(row=0, column=1)
-        auto_unit.bind("<<ComboboxSelected>>", app.auto_query._on_auto_change)
         ttk.Label(auto_box, text="(0 = tắt)").grid(row=0, column=2, padx=(8, 0))
-        ttk.Checkbutton(auto_box, text="Tự động truy vấn khi khởi động",
-                        variable=app.v["auto_on_startup"]).grid(
-                        row=1, column=0, columnspan=3, sticky="w", pady=(6, 0))
+        on_startup_chk = ttk.Checkbutton(auto_box, text="Tự động truy vấn khi khởi động",
+                        variable=app.v["auto_on_startup"])
+        on_startup_chk.grid(row=1, column=0, columnspan=3, sticky="w", pady=(6, 0))
+        self._dirty_label = ttk.Label(auto_box, text="", foreground="#b45309")
+        self._dirty_label.grid(row=2, column=0, columnspan=3, sticky="w", pady=(6, 0))
+
+        self._dirty_var = tk.BooleanVar(value=False)
+        for entry in (host_entry, user_entry, pass_entry, remote_dir_entry,
+                      output_dir_entry, auto_entry):
+            entry.bind("<KeyRelease>", self._mark_dirty)
+        auto_unit.bind("<<ComboboxSelected>>", self._mark_dirty)
+        on_startup_chk.config(command=self._mark_dirty)
+
+        self._toast_label = ttk.Label(frm, text="", foreground="#1d4ed8")
+        self._toast_label.pack(fill="x", pady=(8, 0))
 
         btn_bar = ttk.Frame(frm)
         btn_bar.pack(fill="x", pady=(12, 0))
@@ -121,10 +135,37 @@ class SettingsDialog:
                 "auto_query_on_startup": app.v["auto_on_startup"].get(),
             })
             app._log("OK", f"Đã lưu thiết lập vào config: {app.cfg_path}")
+            self._clear_dirty()
+            self._show_saved_toast()
         except OSError as e:
             app._log("ERR", f"Không lưu được thiết lập: {e}")
             messagebox.showerror("Lỗi", f"Không lưu được thiết lập:\n{e}")
         app.auto_query._schedule_auto_tick()
+
+    def _mark_dirty(self, event=None):
+        """Any field changed since the dialog opened (or since the last save)."""
+        if self._dirty_var is not None:
+            self._dirty_var.set(True)
+        if self._dirty_label is not None and self._dirty_label.winfo_exists():
+            self._dirty_label.config(text="● Có thay đổi chưa lưu")
+        if self._toast_label is not None and self._toast_label.winfo_exists():
+            self._toast_label.config(text="")
+
+    def _clear_dirty(self):
+        if self._dirty_var is not None:
+            self._dirty_var.set(False)
+        if self._dirty_label is not None and self._dirty_label.winfo_exists():
+            self._dirty_label.config(text="")
+
+    def _show_saved_toast(self):
+        """"Đã lưu thiết lập lúc HH:MM", auto-hides after a few seconds."""
+        if self._toast_label is None or not self._toast_label.winfo_exists():
+            return
+        win = self._toast_label.winfo_toplevel()
+        now = datetime.datetime.now().strftime("%H:%M")
+        self._toast_label.config(text=f"Đã lưu thiết lập lúc {now}")
+        win.after(3000, lambda: self._toast_label.config(text="")
+                  if self._toast_label.winfo_exists() else None)
 
     def _on_restore_defaults(self):
         """Overwrite config.ini with the hardcoded defaults (config.DEFAULT_CONFIG)
@@ -155,6 +196,7 @@ class SettingsDialog:
         app.v["auto_unit"].set("Giờ" if d["auto_query_unit"] == "hours" else "Phút")
         app.v["auto_on_startup"].set(bool(d["auto_query_on_startup"]))
         app.auto_query._schedule_auto_tick()
+        self._clear_dirty()
         app._log("OK", f"Đã khôi phục thiết lập mặc định vào config: {path}")
 
     def _browse_output(self, parent=None):
@@ -164,6 +206,7 @@ class SettingsDialog:
                                     parent=parent or app.root)
         if p:
             app.v["output_dir"].set(p)
+            self._mark_dirty()
             app._log("OK", f"Thư mục xuất CSV: {p}")
         else:
             app._log("INFO", "Đã hủy chọn thư mục xuất")
@@ -173,108 +216,3 @@ class SettingsDialog:
         app._log("ACT", "Mở thư mục data")
         os.makedirs(config.TEMP_DL_DIR, exist_ok=True)   # create it upfront if never run before
         report_open(app._log, *open_folder(config.TEMP_DL_DIR), "thư mục data")
-
-
-class AdvancedDialog:
-    """'Tải số liệu' button (next to 'Xem số liệu'): a date-range query UI
-    (Ngày bắt đầu/kết thúc + Bắt đầu/Về hiện tại). Opening it turns advanced
-    (date-range) mode on and pauses auto-query; closing it (nút X) turns
-    advanced mode back off and resumes auto-query."""
-
-    def __init__(self, app):
-        self.app = app
-        # None until first opened (see open()); every accessor guards for that
-        # with winfo_exists().
-        self.start_date_entry = None
-        self.end_date_entry = None
-        self.now_btn = None
-        self.start_btn = None
-
-    def open(self):
-        app = self.app
-        win = make_dialog(app.root, app._dialogs, "advanced", "Tải số liệu")
-        if win is None:
-            return
-        app._log("ACT", "Mở hộp thoại Tải số liệu, tạm dừng tự động truy vấn")
-
-        frm = ttk.Frame(win, padding=12)
-        frm.pack(fill="both", expand=True)
-
-        date_box = ttk.Frame(frm)
-        date_box.pack(fill="x")
-
-        ttk.Label(date_box, text="Ngày bắt đầu:").grid(row=0, column=0, sticky="w", padx=6, pady=2)
-        self.start_date_entry = ttk.Entry(date_box, textvariable=app.v["start_date"], width=12)
-        self.start_date_entry.grid(row=0, column=1, sticky="w", padx=6, pady=2)
-
-        ttk.Label(date_box, text="Ngày kết thúc:").grid(row=1, column=0, sticky="w", padx=6, pady=2)
-        self.end_date_entry = ttk.Entry(date_box, textvariable=app.v["end_date"], width=12)
-        self.end_date_entry.grid(row=1, column=1, sticky="w", padx=6, pady=2)
-
-        # "Bắt đầu" chạy truy vấn tải số liệu rồi đóng luôn dialog này; "Về hiện
-        # tại" nằm cạnh.
-        btn_row = ttk.Frame(frm)
-        self.start_btn = ttk.Button(btn_row, text="Bắt đầu", command=self._on_advanced_start)
-        self.start_btn.pack(side="left", padx=(0, 6))
-        self.now_btn = ttk.Button(btn_row, text="Về hiện tại", command=self._on_now)
-        self.now_btn.pack(side="left")
-        btn_row.pack(pady=(8, 0))
-
-        win.protocol("WM_DELETE_WINDOW", self._on_close)
-
-        app.v["advanced_mode"].set(True)
-        self._on_mode_changed()
-        win.minsize(260, 0)
-        center_over_root(app.root, win)
-
-    def _on_now(self):
-        """'Về hiện tại': force start_date/end_date to today."""
-        app = self.app
-        now = datetime.datetime.now()
-        app.v["start_date"].set(now.strftime("%Y-%m-%d"))
-        app.v["end_date"].set(now.strftime("%Y-%m-%d"))
-        app._log("ACT", f"Về hiện tại: ngày {now:%Y-%m-%d}")
-
-    def _on_mode_changed(self):
-        """Pauses/resumes auto-query to match app.v["advanced_mode"] (mutually
-        exclusive: a background auto tick shouldn't re-fire a date-range fetch
-        the user is busy configuring), then refreshes the date-range controls
-        and info panel. advanced_mode simply tracks whether this dialog is open."""
-        app = self.app
-        if app.v["advanced_mode"].get():
-            app.auto_query.pause()
-        else:
-            app.auto_query.resume()
-        self.refresh_controls_state()
-        app._refresh_info_panel()
-
-    def refresh_controls_state(self):
-        """'Bắt đầu' bị khóa khi đang có tác vụ chạy; ngày bắt đầu/kết thúc +
-        'Về hiện tại' luôn bật vì dialog 'Tải số liệu' chỉ tồn tại khi đang ở chế
-        độ tải số liệu. No-op nếu dialog chưa từng mở (hoặc đã bị đóng), các
-        widget bên dưới chỉ tồn tại từ lúc open() dựng chúng."""
-        if self.start_date_entry is None or not self.start_date_entry.winfo_exists():
-            return
-        self.start_date_entry.config(state="normal")
-        self.end_date_entry.config(state="normal")
-        self.now_btn.config(state="normal")
-        self.start_btn.config(state="disabled" if self.app.runner._run_in_progress else "normal")
-
-    def _on_close(self):
-        """WM_DELETE_WINDOW cho dialog 'Tải số liệu': đóng cửa sổ rồi tắt chế độ
-        tải số liệu (date-range) và tiếp tục tự động truy vấn."""
-        app = self.app
-        app._dialogs["advanced"].destroy()
-        app.v["advanced_mode"].set(False)
-        self._on_mode_changed()
-        app._log("ACT", "Đóng hộp thoại Tải số liệu, tiếp tục tự động truy vấn")
-
-    def _on_advanced_start(self):
-        """'Bắt đầu': chạy truy vấn theo khoảng ngày đã nhập, rồi đóng dialog.
-        NHƯNG chỉ khi truy vấn thực sự bắt đầu được. app.runner._on_run() build cfg
-        từ start_date/end_date trước khi dialog đóng, nên khoảng ngày vẫn đúng
-        (đóng trước sẽ tắt advanced_mode → cfg rơi về "hôm nay"). Nếu ngày nhập
-        sai hoặc đang có tác vụ chạy, app.runner._on_run() trả về False và dialog
-        vẫn mở để người dùng sửa."""
-        if self.app.runner._on_run():
-            self._on_close()
