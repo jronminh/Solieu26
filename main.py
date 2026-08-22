@@ -9,6 +9,7 @@ Tác giả: congminh9981 (congminh9981@gmail.com); Claude (Anthropic), đồng t
 """
 
 import datetime
+import logging
 import os
 import sys
 
@@ -16,6 +17,7 @@ import tkinter as tk
 from tkinter import ttk, scrolledtext
 
 from utils import config_utils as config
+from utils import log_utils
 from common import LOG_COLORS, make_scrollable_tab
 from pipeline.fetch import expected_hours
 from utils.filename_utils import quantrac_filename_at
@@ -34,6 +36,10 @@ _QUEUE_STATUS_LABEL = {0: "Đã tải", 1: "Đã có sẵn", 2: "Không tải đ
 
 class App:
     def __init__(self, root: tk.Tk, config_path: str = None):
+        log_utils.setup_file_logging()
+        self._file_logger = log_utils.get_logger("ui")
+        root.report_callback_exception = self._on_tk_exception
+
         self.root = root
         self._dialogs = {}          # keeps references to small aux popups (column pickers, etc.)
         self.runner = Runner(self)
@@ -289,6 +295,9 @@ class App:
         Inserts 3 separately-tagged chunks (time / level / content) so each part
         gets its own color. ONLY call from the main thread; the worker must push
         onto the queue and let _poll call this on its behalf.
+
+        Also mirrors the line into the rotating file log (see utils/log_utils.py)
+        so it survives past the tab's MAX_LOG_LINES trim and the app closing.
         """
         level = level.upper()
         if level not in LOG_COLORS:
@@ -301,6 +310,15 @@ class App:
         self._trim_log()
         self.log.see("end")
         self.log.config(state="disabled")
+        self._file_logger.log(log_utils.UI_LEVEL_MAP.get(level, logging.INFO), msg)
+
+    def _on_tk_exception(self, exc_type, exc_value, exc_tb):
+        """Tkinter's default report_callback_exception just prints to stderr,
+        invisible in the windowed (console=False, see Solieu26.spec) build -
+        route it into the file log and the log tab instead."""
+        self._file_logger.error("Lỗi không bắt được trong callback UI",
+                                 exc_info=(exc_type, exc_value, exc_tb))
+        self._log("ERR", f"Lỗi không mong đợi: {exc_type.__name__}: {exc_value}")
 
     def _divider(self):
         """Draw a faint separator line between runs for readability."""

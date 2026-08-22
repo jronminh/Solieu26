@@ -24,9 +24,11 @@ from utils.config_utils import FTP_TIMEOUT
 from utils.filename_utils import quantrac_filename_at
 from utils.ftp_utils import fetch_and_bucket
 from utils.mtime_index import load_index, save_index
+from utils import log_utils
 
 MTIME_INDEX_FILENAME = "mtime_index.json"
 _CONNECT_MAX_ATTEMPTS = 3   # 1 lần thử đầu + tối đa 2 lần thử lại khi gặp lỗi tạm (vd 421)
+_logger = log_utils.get_logger("fetch")
 
 
 # =============================================================================
@@ -198,6 +200,8 @@ def download_files(cfg: dict, log, progress=None, stop_event: threading.Event = 
     stability_wait = cfg.get("stability_wait", 1)
     n_workers = max(1, cfg.get("parallel_workers", 1))
     os.makedirs(local_dir, exist_ok=True)
+    _logger.debug("fetch_files: %s -> %s, remote_dir=%s, %d worker",
+                   start_date, end_date, remote_dir, n_workers)
 
     index_path = os.path.join(local_dir, MTIME_INDEX_FILENAME)
     index = load_index(index_path)
@@ -222,6 +226,7 @@ def download_files(cfg: dict, log, progress=None, stop_event: threading.Event = 
         try:
             ftp = _worker_connect(cfg, log)
         except Exception as e:
+            _logger.exception("Kết nối FTP thất bại")
             with connect_lock:
                 connect_errors.append(e)
             return   # queue untouched; other workers (if any) still drain it fully
@@ -239,12 +244,14 @@ def download_files(cfg: dict, log, progress=None, stop_event: threading.Event = 
                 try:
                     ftp.cwd(target_dir)
                 except (error_perm, error_temp) as e:
+                    _logger.debug("cwd %s thất bại: %s", target_dir, e)
                     log("ERR", f"Không truy cập được thư mục {target_dir}: {e}")
                     _mark_cluster_missing(cluster_hours, local_buckets, progress,
                                           counter, counter_lock, total)
                     continue
 
                 dir_facts = _dir_facts(ftp)
+                _logger.debug("cwd %s ok, %d giờ trong cụm", target_dir, len(cluster_hours))
                 for ts in cluster_hours:
                     if stop_event is not None and stop_event.is_set():
                         break

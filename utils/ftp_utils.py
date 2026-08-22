@@ -9,6 +9,10 @@ import os
 import time
 from ftplib import FTP, error_perm, error_temp
 
+from utils import log_utils
+
+_logger = log_utils.get_logger("ftp")
+
 
 def _is_stable(ftp: FTP, filename: str, wait_seconds: float) -> bool:
     """False only when 2 SIZE calls `wait_seconds` apart both succeed and
@@ -74,7 +78,8 @@ def download_one(ftp: FTP, filename: str, local_path: str,
                     ftp.retrbinary(f"RETR {filename}", f.write)
             except error_temp:
                 transient = True
-            except (error_perm, OSError, EOFError):
+            except (error_perm, OSError, EOFError) as e:
+                _logger.debug("%s: lỗi không tạm thời (%s), không thử lại", filename, e)
                 if os.path.exists(tmp):
                     os.remove(tmp)
                 return 2
@@ -88,8 +93,11 @@ def download_one(ftp: FTP, filename: str, local_path: str,
         if os.path.exists(tmp):
             os.remove(tmp)
         if attempt < attempts - 1:
+            _logger.debug("%s: lần %d/%d tạm thời thất bại, thử lại sau %ss",
+                           filename, attempt + 1, attempts, retry_wait)
             time.sleep(retry_wait)
             continue
+        _logger.debug("%s: hết %d lần thử, bỏ cuộc", filename, attempts)
         return 2
 
     return 2

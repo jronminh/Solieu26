@@ -12,6 +12,9 @@ import os
 from bulletin.decode import decode_history
 from utils.csv_utils import write_csv
 from utils.filename_utils import parse_obs_dt
+from utils import log_utils
+
+_logger = log_utils.get_logger("decode")
 
 
 # =============================================================================
@@ -127,6 +130,7 @@ def export_history_by_date(local_files: list, out_dir: str) -> dict:
     QtYYMMDDHH.txt timestamp falls under the "unknown" bucket instead of being
     dropped).
     """
+    _logger.debug("export_history_by_date: %d file đầu vào -> %s", len(local_files), out_dir)
     by_date = {}
     for item in decode_history(local_files):
         obs_dt = parse_obs_dt(item["file"])
@@ -140,5 +144,6 @@ def export_history_by_date(local_files: list, out_dir: str) -> dict:
                 for item in items]
         out_path = os.path.join(out_dir, f"history_{date_key.replace('-', '')}.csv")
         write_csv(out_path, rows)
+        _logger.debug("%s: %d record -> %s", date_key, len(rows), out_path)
         exported[date_key] = {"csv": out_path, "records": len(rows)}
     return exported

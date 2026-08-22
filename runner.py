@@ -29,10 +29,12 @@ import threading
 from tkinter import messagebox
 
 from utils import config_utils as config
+from utils import log_utils
 from utils.ini_utils import update_ini_key
 from pipeline import fetch as pipeline_fetch
 
 CATCHUP_MARK_FMT = "%Y-%m-%d %H:%M:%S"
+_logger = log_utils.get_logger("runner")
 
 
 class Runner:
@@ -254,6 +256,7 @@ class Runner:
         try:
             dl = pipeline_fetch.fetch_files(cfg, log=log, progress=progress)
         except Exception as e:
+            _logger.exception("fetch_files thất bại")
             q.put(("error", f"{type(e).__name__}: {e}"))
             return
 
@@ -268,6 +271,7 @@ class Runner:
             history_files = pipeline_decode.export_history_by_date(sorted(dl["files"]), output_dir)
             q.put(("export_done", {"output_dir": output_dir, "history_files": history_files}))
         except Exception as e:
+            _logger.exception("export_history_by_date thất bại")
             q.put(("export_error", f"{type(e).__name__}: {e}"))
 
     def _poll(self):
