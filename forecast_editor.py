@@ -222,7 +222,7 @@ class ForecastEditor:
         table_frame.pack(fill="both", expand=True, pady=(6, 0))
         columns = ("station", "time", "field", "value")
         tree = ttk.Treeview(table_frame, columns=columns, show="headings",
-                            height=10, selectmode="browse")
+                            height=6, selectmode="browse")
         tree.heading("station", text="Trạm")
         tree.heading("time", text="Thời gian")
         tree.heading("field", text="Trường dữ liệu")
@@ -384,7 +384,7 @@ class ForecastEditor:
         preview_frame = ttk.Frame(box)
         preview_frame.pack(fill="both", expand=True, pady=(6, 0))
         preview_cols = ["station", "hour"] + list(FIELD_ORDER)
-        tree = ttk.Treeview(preview_frame, columns=preview_cols, show="headings", height=7)
+        tree = ttk.Treeview(preview_frame, columns=preview_cols, show="headings", height=6)
         tree.heading("station", text="Trạm")
         tree.column("station", width=90, anchor="w")
         tree.heading("hour", text="Giờ")

@@ -16,7 +16,7 @@ import tkinter as tk
 from tkinter import ttk, scrolledtext
 
 from utils import config_utils as config
-from common import LOG_COLORS
+from common import LOG_COLORS, make_scrollable_tab
 from pipeline.fetch import expected_hours
 from utils.filename_utils import quantrac_filename_at
 from runner import Runner
@@ -136,12 +136,12 @@ class App:
         notebook.pack(fill="both", expand=True)
         self.notebook = notebook
 
-        tab_main = ttk.Frame(notebook, padding=10)
-        tab_forecast = ttk.Frame(notebook, padding=10)
-        tab_score = ttk.Frame(notebook, padding=10)
-        tab_load = ttk.Frame(notebook, padding=10)
-        tab_log = ttk.Frame(notebook, padding=10)
-        tab_settings = ttk.Frame(notebook, padding=10)
+        tab_main = ttk.Frame(notebook)
+        tab_forecast = ttk.Frame(notebook)
+        tab_score = ttk.Frame(notebook)
+        tab_load = ttk.Frame(notebook)
+        tab_log = ttk.Frame(notebook)
+        tab_settings = ttk.Frame(notebook)
 
         notebook.add(tab_main, text="Số liệu")
         notebook.add(tab_forecast, text="Dự báo")
@@ -150,15 +150,19 @@ class App:
         notebook.add(tab_log, text="Log")
         notebook.add(tab_settings, text="Thiết lập")
 
+        # Each tab is wrapped in a Canvas+Scrollbar (see common.make_scrollable_tab)
+        # so content taller than the window still stays reachable, even though the
+        # sizing below already targets everything fitting without scrolling on HD.
+
         # Log tab built FIRST: the other tabs auto-load a file as part of
         # build() (e.g. Số liệu/Dự báo load today's data right away) and that
         # logs through self.log, which must exist before they run.
-        self._build_log_tab(tab_log)
-        self.history_viewer.build(tab_main)
-        self.forecast_editor.build(tab_forecast)
-        self.score_viewer.build(tab_score)
-        self._build_load_tab(tab_load)
-        self.settings_dialog.build(tab_settings)
+        self._build_log_tab(make_scrollable_tab(tab_log))
+        self.history_viewer.build(make_scrollable_tab(tab_main))
+        self.forecast_editor.build(make_scrollable_tab(tab_forecast))
+        self.score_viewer.build(make_scrollable_tab(tab_score))
+        self._build_load_tab(make_scrollable_tab(tab_load))
+        self.settings_dialog.build(make_scrollable_tab(tab_settings))
 
         self.refresh_range_panel_state()
 
@@ -261,8 +265,21 @@ class App:
         # height / ~20px width on top of this before it's on screen).
         max_w = min(1150, self.root.winfo_screenwidth() - 40)
         max_h = min(600, self.root.winfo_screenheight() - 100)
-        w = min(self.root.winfo_reqwidth(), max_w)
-        h = min(self.root.winfo_reqheight(), max_h)
+        # Each tab is wrapped in a Canvas (see common.make_scrollable_tab), which does
+        # NOT propagate its child's required size upward - root.winfo_reqwidth/height()
+        # would otherwise just report the Canvas's own small default size. Measure the
+        # real content directly from each tab's inner scrollable frame instead.
+        req_w = req_h = 0
+        for tab_id in self.notebook.tabs():
+            outer = self.notebook.nametowidget(tab_id)
+            for canvas in outer.winfo_children():
+                if not isinstance(canvas, tk.Canvas):
+                    continue
+                for inner in canvas.winfo_children():
+                    req_w = max(req_w, inner.winfo_reqwidth())
+                    req_h = max(req_h, inner.winfo_reqheight())
+        w = min(req_w, max_w)
+        h = min(req_h, max_h)
         self.root.geometry(f"{w}x{h}")
 
     # ----- Logging -------------------------------------------------------

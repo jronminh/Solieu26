@@ -10,7 +10,7 @@ this module only reports their result (report_open).
 
 import re
 import tkinter as tk
-from tkinter import messagebox
+from tkinter import messagebox, ttk
 
 
 # =============================================================================
@@ -120,6 +120,31 @@ def center_over_root(root, win):
     rw, rh = root.winfo_width(), root.winfo_height()
     ww, wh = win.winfo_width(), win.winfo_height()
     win.geometry(f"+{max(rx + (rw - ww)//2, 0)}+{max(ry + (rh - wh)//3, 0)}")
+
+
+def make_scrollable_tab(parent) -> ttk.Frame:
+    """Wrap `parent` in a Canvas + vertical Scrollbar, returning an inner Frame to
+    build tab content into. Only becomes visible/usable once content exceeds the
+    tab's visible height - a safety net for screens smaller than the app targets
+    (see main.py::_fit_window_to_content) or tabs that grow taller later."""
+    canvas = tk.Canvas(parent, highlightthickness=0)
+    vsb = ttk.Scrollbar(parent, orient="vertical", command=canvas.yview)
+    canvas.configure(yscrollcommand=vsb.set)
+    canvas.pack(side="left", fill="both", expand=True)
+    vsb.pack(side="right", fill="y")
+
+    inner = ttk.Frame(canvas, padding=10)
+    window_id = canvas.create_window((0, 0), window=inner, anchor="nw")
+    inner.bind("<Configure>", lambda e: canvas.configure(scrollregion=canvas.bbox("all")))
+    canvas.bind("<Configure>", lambda e: canvas.itemconfig(window_id, width=e.width))
+
+    # Bound only while the pointer is over the canvas itself (not bind_all), so a
+    # Treeview's own row-scroll binding still wins when the pointer is over it.
+    def _on_wheel(event):
+        canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
+    canvas.bind("<Enter>", lambda e: canvas.bind("<MouseWheel>", _on_wheel))
+    canvas.bind("<Leave>", lambda e: canvas.unbind("<MouseWheel>"))
+    return inner
 
 
 def report_open(log, ok: bool, info: str, what: str = None, warn: bool = False):
