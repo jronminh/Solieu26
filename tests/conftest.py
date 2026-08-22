@@ -17,6 +17,26 @@ import pytest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+from tests.fake_ftp import FakeFTPWorld, make_ftp_factory
+
+
+@pytest.fixture
+def ftp_world():
+    return FakeFTPWorld()
+
+
+@pytest.fixture
+def patch_ftp(monkeypatch):
+    """patch_ftp(world, module) replaces `module.FTP` with a factory that
+    hands out FakeFTP connections into `world`; module defaults to
+    pipeline.fetch (the only place that constructs an FTP today)."""
+    def _patch(world, module=None):
+        if module is None:
+            from pipeline import fetch as module
+        monkeypatch.setattr(module, "FTP", make_ftp_factory(world))
+        return world
+    return _patch
+
 FIXTURES_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "fixtures", "qt_files")
 
 # One file per interesting real-world trait:

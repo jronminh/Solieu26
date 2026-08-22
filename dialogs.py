@@ -69,6 +69,12 @@ class SettingsDialog:
                    row=2, column=0, sticky="w", pady=(6, 0))
         path_box.columnconfigure(1, weight=1)
 
+        workers_box = ttk.LabelFrame(frm, text="Tải song song", padding=8)
+        workers_box.pack(fill="x", pady=(8, 0))
+        workers_entry = self._row(workers_box, 0, "Số kết nối FTP song song",
+                                   app.v["parallel_workers"], width=6)
+        ttk.Label(workers_box, text="(1 = tuần tự, mặc định)").grid(row=0, column=2, padx=(8, 0))
+
         auto_box = ttk.LabelFrame(frm, text="Tự động truy vấn", padding=8)
         auto_box.pack(fill="x", pady=(8, 0))
         auto_entry = ttk.Entry(auto_box, textvariable=app.v["auto_value"], width=6)
@@ -85,7 +91,7 @@ class SettingsDialog:
 
         self._dirty_var = tk.BooleanVar(value=False)
         for entry in (host_entry, user_entry, pass_entry, remote_dir_entry,
-                      output_dir_entry, auto_entry):
+                      output_dir_entry, workers_entry, auto_entry):
             entry.bind("<KeyRelease>", self._mark_dirty)
         auto_unit.bind("<<ComboboxSelected>>", self._mark_dirty)
         on_startup_chk.config(command=self._mark_dirty)
@@ -107,12 +113,15 @@ class SettingsDialog:
         v = app.auto_query._auto_effective_value()
         app.v["auto_value"].set(str(v))
         unit_key = "hours" if app.v["auto_unit"].get() == "Giờ" else "minutes"
+        n_workers = app.runner._parallel_workers()
+        app.v["parallel_workers"].set(str(n_workers))
         values = {
             "ftp_host":           app.v["ftp_host"].get().strip(),
             "ftp_user":           app.v["ftp_user"].get().strip(),
             "ftp_pass":           app.v["ftp_pass"].get(),
             "remote_dir":         app.v["remote_dir"].get().strip(),
             "output_dir":         app.v["output_dir"].get().strip(),
+            "parallel_workers":   str(n_workers),
             "auto_query_value":   str(v),
             "auto_query_unit":    unit_key,
             "auto_query_on_startup": "true" if app.v["auto_on_startup"].get() else "false",
@@ -123,7 +132,7 @@ class SettingsDialog:
             config.CONFIG.update({
                 "ftp_host": values["ftp_host"], "ftp_user": values["ftp_user"],
                 "ftp_pass": values["ftp_pass"], "remote_dir": values["remote_dir"],
-                "output_dir": values["output_dir"],
+                "output_dir": values["output_dir"], "parallel_workers": n_workers,
                 "auto_query_value": v, "auto_query_unit": unit_key,
                 "auto_query_on_startup": app.v["auto_on_startup"].get(),
             })
@@ -184,6 +193,7 @@ class SettingsDialog:
         app.v["ftp_pass"].set(d["ftp_pass"])
         app.v["remote_dir"].set(d["remote_dir"])
         app.v["output_dir"].set(d["output_dir"])
+        app.v["parallel_workers"].set(str(d["parallel_workers"]))
         app.v["auto_value"].set(str(d["auto_query_value"]))
         app.v["auto_unit"].set("Giờ" if d["auto_query_unit"] == "hours" else "Phút")
         app.v["auto_on_startup"].set(bool(d["auto_query_on_startup"]))

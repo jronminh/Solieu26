@@ -29,7 +29,10 @@ import threading
 from tkinter import messagebox
 
 from utils import config_utils as config
+from utils.ini_utils import update_ini_key
 from pipeline import fetch as pipeline_fetch
+
+CATCHUP_MARK_FMT = "%Y-%m-%d %H:%M:%S"
 
 
 class Runner:
@@ -38,12 +41,41 @@ class Runner:
         self.q = queue.Queue()
         self.worker = None
         self._run_in_progress = False  # mirrors _set_actions_enabled, feeds refresh_range_panel_state + auto_query pause/resume
+        self._on_run_done = None    # one-shot callback fired next time a run finishes (see _run_catchup_then_normal)
         self.last_output_dir = None
         self.last_result = None     # result dict from the last completed run (for the info panel)
-        self.last_cfg = None        # cfg dict from the last _on_run (carries the queried date)
+        self.last_cfg = None        # cfg dict from the last run started (carries the queried date)
         self.last_updated_at = None # datetime the last run finished (success or not)
 
     # ----- Run pipeline ("Làm mới" / "Bắt đầu") ----------------------------
+    def _parallel_workers(self) -> int:
+        """Form value, parsed; garbage/blank/<1 falls back to 1 (tuần tự)."""
+        try:
+            n = int(self.app.v["parallel_workers"].get().strip())
+        except ValueError:
+            n = 1
+        return max(n, 1)
+
+    def _build_cfg_base(self) -> dict:
+        """Cfg fields that don't depend on a date range: FTP/paths/retry, read
+        from the form. Shared by _build_cfg() (UI date range) and the catch-up
+        path (its own computed range, bypassing the UI's start/end fields)."""
+        app = self.app
+        return {
+            "ftp_host": app.v["ftp_host"].get().strip(),
+            "ftp_user": app.v["ftp_user"].get().strip(),
+            "ftp_pass": app.v["ftp_pass"].get(),
+            "ftp_timeout": config.CONFIG.get("ftp_timeout", config.FTP_TIMEOUT),
+            "retry_temp": config.CONFIG.get("retry_temp", config.RETRY_TEMP),
+            "retry_wait": config.CONFIG.get("retry_wait", config.RETRY_WAIT),
+            "stability_check": config.CONFIG.get("stability_check", config.STABILITY_CHECK),
+            "stability_wait": config.CONFIG.get("stability_wait", config.STABILITY_WAIT),
+            "parallel_workers": self._parallel_workers(),
+            "remote_dir": app.v["remote_dir"].get().strip() or "/Quantrac",
+            "local_dir":  config.TEMP_DL_DIR,
+            "output_dir": app.v["output_dir"].get().strip() or config.DEFAULT_OUTPUT_DIR,
+        }
+
     def _build_cfg(self) -> dict:
         """Read the form → cfg dict; local_dir/timeout/retry come from config's fixed constants.
 
@@ -53,17 +85,7 @@ class Runner:
         and a date-range query both go through this same one path.
         """
         app = self.app
-        cfg = {
-            "ftp_host": app.v["ftp_host"].get().strip(),
-            "ftp_user": app.v["ftp_user"].get().strip(),
-            "ftp_pass": app.v["ftp_pass"].get(),
-            "ftp_timeout": config.CONFIG.get("ftp_timeout", config.FTP_TIMEOUT),
-            "retry_temp": config.CONFIG.get("retry_temp", config.RETRY_TEMP),
-            "retry_wait": config.CONFIG.get("retry_wait", config.RETRY_WAIT),
-            "remote_dir": app.v["remote_dir"].get().strip() or "/Quantrac",
-            "local_dir":  config.TEMP_DL_DIR,
-            "output_dir": app.v["output_dir"].get().strip() or config.DEFAULT_OUTPUT_DIR,
-        }
+        cfg = self._build_cfg_base()
 
         try:
             start = datetime.datetime.strptime(app.v["start_date"].get().strip(), "%Y-%m-%d")
@@ -77,6 +99,111 @@ class Runner:
 
         return cfg
 
+    def _start_worker(self, cfg: dict) -> bool:
+        """Start the worker thread for an already-built cfg (start_date/end_date
+        included). Shared by _on_run() (UI-driven cfg) and the catch-up path
+        (explicit computed range). Returns True iff actually started."""
+        if self.worker and self.worker.is_alive():
+            return False
+        app = self.app
+        app._divider()
+        if cfg["start_date"].date() == cfg["end_date"].date():
+            app._log("ACT", f"Bắt đầu: ngày {cfg['start_date']:%Y-%m-%d} (00h–23h)")
+        else:
+            days = (cfg["end_date"].date() - cfg["start_date"].date()).days + 1
+            app._log("ACT", f"Bắt đầu: {cfg['start_date']:%Y-%m-%d} → "
+                             f"{cfg['end_date']:%Y-%m-%d} ({days} ngày)")
+        self.last_cfg = cfg
+        self._set_actions_enabled(False)
+        app.status.config(text="Đang chạy...")
+        app._reset_download_queue(cfg["start_date"], cfg["end_date"])
+
+        self.worker = threading.Thread(target=self._work, args=(cfg,), daemon=True)
+        self.worker.start()
+        return True
+
+    # ----- Mốc catch-up sau downtime ---------------------------------------
+    def _pending_catchup_range(self, now: datetime.datetime):
+        """(start, end) to backfill since the last contiguous mark, or None if
+        there's no mark yet or the gap is under 1 giờ (not worth a separate run)."""
+        raw = config.CONFIG.get("catchup_mark")
+        if not raw:
+            return None
+        try:
+            mark = datetime.datetime.strptime(raw, CATCHUP_MARK_FMT)
+        except ValueError:
+            return None
+        start = mark + datetime.timedelta(hours=1)
+        if now - start < datetime.timedelta(hours=1):
+            return None
+        return start, now
+
+    def _run_catchup_then_normal(self):
+        """Entry point for auto-triggered runs (startup + auto-query tick):
+        backfill any gap since the last contiguous mark first, then run the
+        normal 'hiện tại' pipeline once that finishes. Manual 'Bắt đầu' in the
+        "Tải số liệu theo khoảng" tab still calls _on_run() directly and reads
+        its own date-range fields — unaffected by this."""
+        app = self.app
+        catchup_range = self._pending_catchup_range(datetime.datetime.now())
+        if catchup_range is None:
+            self._on_run()
+            return
+        start, end = catchup_range
+        try:
+            cfg = self._build_cfg_base()
+            if not cfg["ftp_host"]:
+                raise ValueError("Chưa nhập FTP host")
+        except ValueError as e:
+            app._log("ERR", f"Nhập sai (bù mốc liền mạch): {e}")
+            self._on_run()
+            return
+        cfg["start_date"] = start
+        cfg["end_date"] = end
+        app._log("ACT", f"Bù khoảng thiếu {start:%Y-%m-%d %H:%M} → "
+                         f"{end:%Y-%m-%d %H:%M} (mốc liền mạch)")
+        self._on_run_done = self._on_run
+        if not self._start_worker(cfg):
+            self._on_run_done = None
+            self._on_run()
+
+    def _contiguous_advance(self, start: datetime.datetime, end: datetime.datetime,
+                             missing_filenames) -> datetime.datetime:
+        """Latest hour, walking forward from `start`, such that every hour up to
+        and including it is NOT in `missing_filenames` — the new mark candidate.
+        Returns start - 1h (i.e. "nothing confirmed") if even the first hour is missing."""
+        missing = set(missing_filenames)
+        mark = start - datetime.timedelta(hours=1)
+        for ts in pipeline_fetch.expected_hours(start, end):
+            if pipeline_fetch.quantrac_filename_at(ts) in missing:
+                break
+            mark = ts
+        return mark
+
+    def _advance_catchup_mark(self, start: datetime.datetime, end: datetime.datetime,
+                               missing_filenames):
+        """Persist the new contiguous mark if this cycle's result confirms a
+        later hour than what's already stored. Called from every _on_fetch_done,
+        regardless of what triggered the run (manual/auto/catch-up)."""
+        candidate = self._contiguous_advance(start, end, missing_filenames)
+        if candidate < start:
+            return   # first hour of this cycle was itself missing, nothing new confirmed
+
+        raw = config.CONFIG.get("catchup_mark")
+        if raw:
+            try:
+                current = datetime.datetime.strptime(raw, CATCHUP_MARK_FMT)
+            except ValueError:
+                current = None
+        else:
+            current = None
+        if current is not None and candidate <= current:
+            return
+
+        mark_str = candidate.strftime(CATCHUP_MARK_FMT)
+        config.CONFIG["catchup_mark"] = mark_str
+        update_ini_key(self.app.cfg_path, config.CONFIG_SECTION, "catchup_mark", mark_str)
+
     def _set_actions_enabled(self, enabled: bool):
         """Toggle 'Bắt đầu' (tab 'Tải số liệu theo khoảng' trong main.py): khóa
         khi có tác vụ đang chạy. Cũng tạm dừng/tiếp tục tự động truy vấn ngay tại
@@ -88,6 +215,10 @@ class Runner:
         else:
             app.auto_query.pause()
         app.refresh_range_panel_state()
+        if enabled and self._on_run_done is not None:
+            callback = self._on_run_done
+            self._on_run_done = None
+            callback()
 
     def _on_run(self) -> bool:
         """Returns True iff a worker thread was actually started, False if
@@ -104,22 +235,7 @@ class Runner:
             app._log("ERR", f"Nhập sai: {e}")
             messagebox.showerror("Nhập sai", str(e))
             return False
-
-        app._divider()
-        if cfg["start_date"].date() == cfg["end_date"].date():
-            app._log("ACT", f"Bắt đầu: ngày {cfg['start_date']:%Y-%m-%d} (00h–23h)")
-        else:
-            days = (cfg["end_date"].date() - cfg["start_date"].date()).days + 1
-            app._log("ACT", f"Bắt đầu: {cfg['start_date']:%Y-%m-%d} → "
-                             f"{cfg['end_date']:%Y-%m-%d} ({days} ngày)")
-        self.last_cfg = cfg
-        self._set_actions_enabled(False)
-        app.status.config(text="Đang chạy...")
-        app._reset_download_queue(cfg["start_date"], cfg["end_date"])
-
-        self.worker = threading.Thread(target=self._work, args=(cfg,), daemon=True)
-        self.worker.start()
-        return True
+        return self._start_worker(cfg)
 
     def _work(self, cfg):
         """
@@ -194,6 +310,9 @@ class Runner:
         miss = dl.get("missing") or []
         if miss:
             app._log("WARN", f"Thiếu {len(miss)} file trên server")
+
+        if self.last_cfg is not None:
+            self._advance_catchup_mark(self.last_cfg["start_date"], self.last_cfg["end_date"], miss)
 
         if not dl["files"]:
             self._set_actions_enabled(True)

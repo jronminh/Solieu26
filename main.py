@@ -72,6 +72,7 @@ class App:
             "ftp_pass":    tk.StringVar(value=d.get("ftp_pass", "")),
             "remote_dir":  tk.StringVar(value=d.get("remote_dir", "/Quantrac")),
             "output_dir":  tk.StringVar(value=d.get("output_dir") or config.DEFAULT_OUTPUT_DIR),
+            "parallel_workers": tk.StringVar(value=str(d.get("parallel_workers", 1))),
             # "Tải số liệu theo khoảng" tab's date range, defaults to today so
             # "Bắt đầu" with no changes behaves like a plain current-day fetch.
             "start_date":  tk.StringVar(value=today.strftime("%Y-%m-%d")),
@@ -88,6 +89,7 @@ class App:
             "data_status":   tk.StringVar(value="Chưa có dữ liệu"),
             "auto_status":   tk.StringVar(value="-"),
             "missing":       tk.StringVar(value="-"),
+            "catchup_mark":  tk.StringVar(value="-"),
         }
 
         # The 4 tab controllers, constructed once and kept for the app's
@@ -116,7 +118,7 @@ class App:
 
         if self.v["auto_on_startup"].get():
             self._log("ACT", "Tự động truy vấn khi khởi động")
-            self.root.after(300, self.runner._on_run)   # small delay so the window renders first
+            self.root.after(300, self.runner._run_catchup_then_normal)   # small delay so the window renders first
 
     # ----- UI construction ---------------------------------------------
     def _build_ui(self):
@@ -182,6 +184,7 @@ class App:
         info_row(2, "Dữ liệu:", self.info["data_status"])
         info_row(3, "Tự động:", self.info["auto_status"])
         info_row(4, "File thiếu:", self.info["missing"])
+        info_row(5, "Mốc liền mạch:", self.info["catchup_mark"])
         info_box.columnconfigure(1, weight=1)
 
         # --- Khoảng thời gian ---
@@ -324,6 +327,9 @@ class App:
             self.info["data_status"].set(f"{rng}, cập nhật lúc {self.runner.last_updated_at:%H:%M:%S}")
         else:
             self.info["data_status"].set("Chưa có dữ liệu")
+
+        mark = config.CONFIG.get("catchup_mark")
+        self.info["catchup_mark"].set(mark if mark else "Chưa có")
 
         if self.runner._run_in_progress:
             self.info["auto_status"].set("Tạm dừng, đang tải số liệu")

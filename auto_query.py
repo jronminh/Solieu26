@@ -54,7 +54,7 @@ class AutoQuery:
             app._log("SKIP", "Tự động truy vấn: bỏ qua vì đang có tác vụ chạy")
         else:
             app._log("ACT", "Tự động truy vấn: chạy truy vấn")
-            app.runner._on_run()
+            app.runner._run_catchup_then_normal()
         self._schedule_auto_tick()
 
     def _on_auto_change(self, event=None):

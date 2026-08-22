@@ -47,6 +47,15 @@ FTP_TIMEOUT = 30                         # seconds
 RETRY_TEMP  = 1                          # extra retry attempts when server reports busy (4xx)
 RETRY_WAIT  = 2                          # seconds to wait between retries
 
+# Poll-size-hai-lần (see download_one() in utils/ftp_utils.py): guards against
+# downloading a file the server is still mid-write on. Pipeline tuning, not a
+# user-facing setting — same treatment as RETRY_TEMP/RETRY_WAIT above (can be
+# hand-edited into config.ini, no field in the "Thiết lập" tab). Safe to flip
+# STABILITY_CHECK off once the server's write behavior is confirmed atomic
+# (write-temp-then-rename) and this check is confirmed redundant.
+STABILITY_CHECK = True
+STABILITY_WAIT  = 1                      # seconds between the 2 SIZE calls
+
 
 # =============================================================================
 # DEFAULT CONFIG (also the schema written to/read from config.ini)
@@ -61,11 +70,24 @@ CONFIG = {
     "retry_temp": RETRY_TEMP,
     "retry_wait": RETRY_WAIT,
 
+    "stability_check": STABILITY_CHECK,  # advanced, config.ini-only (see STABILITY_CHECK above)
+    "stability_wait":  STABILITY_WAIT,
+
     "remote_dir": "Quantrac",
     "local_dir":  TEMP_DL_DIR,           # downloads go under the user folder
     "output_dir": DEFAULT_OUTPUT_DIR,
 
+    # 1 = tuần tự (mặc định, an toàn cho bản build đầu tiên có tính năng này);
+    # >=2 dùng nhiều connection FTP song song, xem pipeline/fetch.py.
+    "parallel_workers": 1,
+
     "station_code": "k15",
+
+    # Runtime-managed, not a user setting: last hour fetched with no gap since it
+    # ("YYYY-MM-DD HH:MM:SS", empty = no mark yet). Deliberately absent from
+    # _default_config_lines() below so it never appears in a fresh config.ini
+    # template; runner.py writes it via update_ini_key() as it advances.
+    "catchup_mark": "",
 
     "viewer_hidden_columns": [],         # GUI-only: columns hidden in the CSV viewer
 
@@ -94,9 +116,11 @@ CONFIG_FILENAME = "config.ini"          # default name, looked up in TEMP_DL_DIR
 CONFIG_SECTION  = "Solieu26"
 
 _STR_KEYS  = ("ftp_host", "ftp_user", "ftp_pass",
-              "remote_dir", "output_dir", "station_code", "auto_query_unit")
-_INT_KEYS  = ("ftp_timeout", "retry_temp", "retry_wait", "auto_query_value")
-_BOOL_KEYS = ("auto_query_on_startup",)
+              "remote_dir", "output_dir", "station_code", "auto_query_unit",
+              "catchup_mark")
+_INT_KEYS  = ("ftp_timeout", "retry_temp", "retry_wait", "auto_query_value", "stability_wait",
+              "parallel_workers")
+_BOOL_KEYS = ("auto_query_on_startup", "stability_check")
 
 
 def _to_bool(v: str):
@@ -165,6 +189,7 @@ def _default_config_lines() -> list:
         f"ftp_pass = {d['ftp_pass']}",
         f"remote_dir = {d['remote_dir']}",
         f"output_dir = {d['output_dir']}",
+        f"parallel_workers = {d['parallel_workers']}",
         f"station_code = {d['station_code']}",
         f"auto_query_value = {d['auto_query_value']}",
         f"auto_query_unit = {d['auto_query_unit']}",
