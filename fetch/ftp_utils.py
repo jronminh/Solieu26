@@ -9,7 +9,7 @@ import os
 import time
 from ftplib import FTP, error_perm, error_temp
 
-from utils import log_utils
+from . import log_utils
 
 _logger = log_utils.get_logger("ftp")
 

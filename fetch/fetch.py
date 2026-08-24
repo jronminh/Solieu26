@@ -1,5 +1,5 @@
 """
-pipeline/fetch.py
+fetch/fetch.py
 ====================
 Khối 1 (lấy file số liệu): toàn bộ tầng FTP, độc lập hoàn toàn với khối decode và khối chấm điểm.
 Dùng qua fetch_files() (đầu vào cfg, log callback dùng level cố định INFO/OK/SKIP/MISS/WARN/ERR); không có demo CLI, chạy trực tiếp cần config FTP thật qua main.py.
@@ -20,10 +20,10 @@ import threading
 import time
 from ftplib import FTP, error_perm, error_temp
 
-from utils.filename_utils import quantrac_filename_at
-from utils.ftp_utils import fetch_and_bucket
-from utils.mtime_index import load_index, save_index
-from utils import log_utils
+from .filename_utils import quantrac_filename_at
+from .ftp_utils import fetch_and_bucket
+from .mtime_index import load_index, save_index
+from . import log_utils
 
 MTIME_INDEX_FILENAME = "mtime_index.json"
 _CONNECT_MAX_ATTEMPTS = 3   # 1 lần thử đầu + tối đa 2 lần thử lại khi gặp lỗi tạm (vd 421)
