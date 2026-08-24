@@ -250,6 +250,28 @@ def test_export_forecast_score_multi_date_writes_one_csv_per_date(tmp_path, qt_0
         assert all(r["date"] == date_str for r in rows)
 
 
+def test_export_forecast_score_scoped_to_explicit_files_does_not_touch_other_dates_csv(
+        tmp_path, qt_00, qt_other_day):
+    """Thư mục chứa file của 2 ngày (mô phỏng thư mục tải tạm dùng chung
+    giữa các lượt chạy, xem TEMP_DL_DIR ở utils/config_utils.py) - chỉ
+    truyền path của 1 ngày phải chỉ ghi CSV của đúng ngày đó, KHÔNG được lấy
+    nhầm/ghi đè CSV của ngày kia dù nó nằm chung thư mục (bug đã sửa: trước
+    đây export_forecast_score() chỉ dùng local_files[0] để suy ra thư mục
+    rồi quét cả thư mục, kéo theo mọi ngày khác có mặt ở đó)."""
+    dl_dir = tmp_path / "dl"
+    dl_dir.mkdir()
+    shutil.copy(qt_00, dl_dir / os.path.basename(qt_00))
+    shutil.copy(qt_other_day, dl_dir / os.path.basename(qt_other_day))
+
+    out_dir = tmp_path / "out"
+    out_dir.mkdir()
+    exported = export_forecast_score(
+        [str(dl_dir / os.path.basename(qt_00))], FORECAST_CSV, str(out_dir))
+
+    assert set(exported.keys()) == {"2026-08-10"}
+    assert not os.path.exists(out_dir / "score_20260811.csv")
+
+
 def test_export_forecast_score_reads_archived_forecast_table(tmp_path, full_day_qt_files):
     """forecast_csv_path also accepts a file written by
     pipeline/forecast.py::export_forecast_table() (the archive of a

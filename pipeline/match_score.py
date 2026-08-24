@@ -15,7 +15,7 @@ tests/fixtures/qt_files/full_day_20260810/.
 import os
 
 from pipeline.forecast import build_hourly_table, load_records_csv
-from pipeline.obs import build_scalar_history
+from pipeline.obs import build_scalar_history_from_files
 from utils.csv_utils import write_csv
 from scoring.scorer import (
     score_do_cao_man_may,
@@ -115,9 +115,11 @@ def score_history(joined_rows: list) -> list:
 
 def export_forecast_score(local_files: list, forecast_csv_path: str, out_dir: str) -> dict:
     """
-    local_files: list đường dẫn file QtYYMMDDHH.txt cục bộ đã tải sẵn, chỉ
-    dùng để xác định thư mục chứa chúng (build_scalar_history() tự quét thư
-    mục đó để tìm mọi ngày có mặt, có thể nhiều ngày trong 1 lần gọi).
+    local_files: list đường dẫn file QtYYMMDDHH.txt cục bộ đã tải sẵn — đúng
+    các file này được gộp thành lịch sử quan trắc
+    (build_scalar_history_from_files()), không quét thêm gì khác trong thư
+    mục chứa chúng; có thể trải nhiều ngày trong 1 lần gọi nếu truyền đủ
+    file của các ngày đó.
     forecast_csv_path: đường dẫn 1 file CSV đúng shape load_records_csv()
     đọc được (dự báo viên nhập trực tiếp hoặc file archive từ
     export_forecast_table(), cùng shape nên dùng chung tham số này); falsy
@@ -135,12 +137,12 @@ def export_forecast_score(local_files: list, forecast_csv_path: str, out_dir: st
     (forecast toàn None, score toàn bỏ cặp).
 
     Trả về {"YYYY-MM-DD": {"csv": path, "records": n}, ...}; local_files
-    rỗng hoặc thư mục không có ngày nào parse được thì trả về {}.
+    rỗng hoặc không file nào parse được thì trả về {}.
     """
     forecast_records = load_records_csv(forecast_csv_path) if forecast_csv_path else []
     forecast_rows = build_hourly_table(forecast_records)
 
-    history_by_date = build_scalar_history(os.path.dirname(local_files[0])) if local_files else {}
+    history_by_date = build_scalar_history_from_files(local_files)
 
     exported = {}
     for date_str, scalar_history in sorted(history_by_date.items()):

@@ -82,6 +82,20 @@ trong repo).
   phải quan trắc viên xác nhận trời quang. Mega-bucket "N_0" (mã có báo cáo
   nhưng không có hiện tượng gì đáng kể) đổi tên thành `"khong"`, nhãn hiển
   thị rút gọn thành "Không" (`scoring/score_tables.py`).
+- **Sửa lỗi ghi đè `score_YYYYMMDD.csv` chéo ngày (2026-08-24)**: dòng
+  67-72 ở trên ("lọc xuống đúng 1 ngày ... không áp nhầm dự báo ngày A cho
+  ngày B") chưa đủ — `export_forecast_score()` chỉ dùng `local_files[0]` để
+  suy ra thư mục rồi tự quét LẠI cả thư mục đó
+  (`build_scalar_history()`), nên vẫn kéo theo mọi ngày khác từng tải nằm
+  chung `TEMP_DL_DIR` (thư mục tải tạm dùng chung, không tự dọn qua các lượt
+  chạy) và ghi đè `score_YYYYMMDD.csv` của những ngày đó bằng dự báo của
+  ngày đang xử lý. Thêm `build_scalar_history_from_files()`
+  (`pipeline/obs.py`) nhận thẳng danh sách file thay vì quét thư mục,
+  `export_forecast_score()` chuyển sang dùng hàm này; đồng thời
+  `Runner._score_days()` đổi nguồn ngày cần chấm từ `history_files.keys()`
+  (kết quả luồng decode) sang khoảng ngày của chính lượt chạy
+  (`cfg["start_date"]`/`["end_date"]`, qua `_dates_in_range()` mới) để luồng
+  chấm điểm không còn phụ thuộc kết quả luồng decode.
 
 ### Tái cấu trúc module
 - Tách `pipeline.py`/`core.py` cũ thành các khối độc lập không import lẫn

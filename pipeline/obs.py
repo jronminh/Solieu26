@@ -4,8 +4,10 @@ pipeline/obs.py
 Adapter: 1 bản ghi quan trắc đã decode + giờ quan trắc -> dict "obs" đủ 6
 field chấm điểm (tong_luong_may/do_cao_man_may/hien_tuong/huong_gio/toc_do_gio/
 tam_nhin) cộng "hour"+"buoi"+"station_code". build_obs() xử lý đúng 1 quan
-trắc (1 dòng, 1 trạm, 1 giờ); build_scalar_history() quét cả thư mục, giữ
-mọi trạm báo cáo mỗi giờ, và trả về 1 dict/ngày (station_code × 24 giờ).
+trắc (1 dòng, 1 trạm, 1 giờ); build_scalar_history() quét cả thư mục,
+build_scalar_history_from_files() làm y hệt nhưng nhận thẳng danh sách file
+(không quét gì thêm ngoài danh sách đó) — cả 2 đều giữ mọi trạm báo cáo mỗi
+giờ, trả về 1 dict/ngày (station_code × 24 giờ).
 
 Chạy trực tiếp (python -m pipeline.obs) để xem demo trên
 tests/fixtures/qt_files/Qt26081000.txt và
@@ -180,31 +182,29 @@ def _empty_obs_row(hour: int, station_code) -> dict:
     }
 
 
-def build_scalar_history(local_dir: str) -> dict:
-    """
-    local_dir: thư mục chứa file QtYYMMDDHH.txt; tự quét và parse mỗi tên
-    file qua parse_obs_dt() để biết nó thuộc ngày/giờ nào (không nhận date
-    riêng, không tự dựng tên file kỳ vọng rồi kiểm tra tồn tại).
-
-    Với mỗi ngày tìm thấy (còn ít nhất 1 file parse được thuộc ngày đó): gom
-    tập hợp mọi station_code xuất hiện ở bất kỳ giờ nào trong ngày đó, rồi
-    dựng đủ 24 dòng/giờ cho mỗi trạm đó, dùng build_obs() khi trạm có báo
-    cáo giờ đó và _empty_obs_row(hour, station_code) khi không, không bỏ
-    qua và không raise.
-
-    Trả về {"YYYY-MM-DD": [(station_code × 24) dict, mỗi phần tử 1 (trạm,
-    giờ) đủ khoá "station_code"/"hour"/"buoi"+6 field, sắp theo
-    (station_code, hour) tăng dần], ...}, 1 entry/ngày thực sự có ít nhất 1
-    file trong local_dir; local_dir rỗng hoặc không file nào parse được thì
-    trả về {}.
-    """
+def _group_by_date_hour(paths: list) -> dict:
+    """path list -> {date: {hour: path}}, bỏ qua path không parse được qua
+    parse_obs_dt() (hàm đó tự đọc os.path.basename(), nên path ở đây giữ
+    nguyên trạng, không join lại với thư mục nào)."""
     by_date_hour = {}
-    for name in os.listdir(local_dir):
-        dt = parse_obs_dt(name)
+    for path in paths:
+        dt = parse_obs_dt(path)
         if dt is None:
             continue
-        by_date_hour.setdefault(dt.date(), {})[dt.hour] = os.path.join(local_dir, name)
+        by_date_hour.setdefault(dt.date(), {})[dt.hour] = path
+    return by_date_hour
 
+
+def _scalar_history_for_dates(by_date_hour: dict) -> dict:
+    """{date: {hour: path}} -> {"YYYY-MM-DD": [(station_code × 24) dict, ...], ...}.
+
+    Với mỗi ngày: gom tập hợp mọi station_code xuất hiện ở bất kỳ giờ nào
+    trong ngày đó, rồi dựng đủ 24 dòng/giờ cho mỗi trạm đó, dùng build_obs()
+    khi trạm có báo cáo giờ đó và _empty_obs_row(hour, station_code) khi
+    không, không bỏ qua và không raise. Mỗi dòng đủ khoá
+    "station_code"/"hour"/"buoi"+6 field, sắp theo (station_code, hour)
+    tăng dần.
+    """
     result = {}
     for date, hour_to_path in sorted(by_date_hour.items()):
         # 1 lượt quét: giải mã mọi file có trong ngày, gom bản ghi theo
@@ -227,6 +227,28 @@ def build_scalar_history(local_dir: str) -> dict:
                             else _empty_obs_row(hour, station_code))
         result[date.strftime("%Y-%m-%d")] = rows
     return result
+
+
+def build_scalar_history(local_dir: str) -> dict:
+    """
+    local_dir: thư mục chứa file QtYYMMDDHH.txt; tự quét và parse mỗi tên
+    file qua parse_obs_dt() để biết nó thuộc ngày/giờ nào (không nhận date
+    riêng, không tự dựng tên file kỳ vọng rồi kiểm tra tồn tại).
+
+    Trả về {"YYYY-MM-DD": [...], ...}, 1 entry/ngày thực sự có ít nhất 1
+    file trong local_dir (xem _scalar_history_for_dates() cho hình dạng mỗi
+    dòng); local_dir rỗng hoặc không file nào parse được thì trả về {}.
+    """
+    paths = [os.path.join(local_dir, name) for name in os.listdir(local_dir)]
+    return _scalar_history_for_dates(_group_by_date_hour(paths))
+
+
+def build_scalar_history_from_files(paths: list) -> dict:
+    """Như build_scalar_history(), nhưng nhận thẳng danh sách đường dẫn file
+    thay vì quét cả 1 thư mục — dùng khi thư mục chứa các file này có thể
+    lẫn dữ liệu của lượt tải khác (vd thư mục tải tạm dùng chung giữa các
+    lượt chạy), chỉ đúng các file trong `paths` mới được xét tới."""
+    return _scalar_history_for_dates(_group_by_date_hour(paths))
 
 
 if __name__ == "__main__":

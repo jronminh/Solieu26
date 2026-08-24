@@ -11,7 +11,8 @@ import os
 import shutil
 
 from bulletin.decode import decode_qt_file
-from pipeline.obs import build_obs, build_scalar_history, ww_code_to_mega, wind_dd_to_huong_gio
+from pipeline.obs import (build_obs, build_scalar_history, build_scalar_history_from_files,
+                          ww_code_to_mega, wind_dd_to_huong_gio)
 from scoring.score_tables import BUCKETS
 from utils.filename_utils import quantrac_filename_at
 
@@ -239,3 +240,29 @@ def test_build_scalar_history_multi_date_dir_splits_per_date(tmp_path, full_day_
         assert by_station
         for station_code, srows in by_station.items():
             assert [r["hour"] for r in srows] == list(range(24))
+
+
+# =============================================================================
+# build_scalar_history_from_files
+# =============================================================================
+
+def test_build_scalar_history_from_files_ignores_unrelated_dates_in_same_dir(
+        tmp_path, full_day_dir, qt_other_day):
+    """1 thư mục có file của 2 ngày (mô phỏng thư mục tải tạm dùng chung
+    giữa các lượt chạy) - truyền thẳng path của riêng 1 ngày phải chỉ trả
+    về đúng ngày đó, không lấy nhầm ngày kia dù nó nằm chung thư mục."""
+    name_10 = quantrac_filename_at(datetime.datetime(2026, 8, 10, 0))
+    path_10 = tmp_path / name_10
+    shutil.copy(os.path.join(full_day_dir, name_10), path_10)
+    shutil.copy(qt_other_day, tmp_path / os.path.basename(qt_other_day))
+
+    history = build_scalar_history_from_files([str(path_10)])
+
+    assert set(history.keys()) == {"2026-08-10"}
+
+
+def test_build_scalar_history_from_files_matches_build_scalar_history(full_day_dir):
+    """Cùng tập file, truyền qua danh sách path tường minh phải cho kết quả
+    y hệt truyền qua thư mục - 2 hàm chỉ khác cách lấy danh sách file đầu vào."""
+    paths = [os.path.join(full_day_dir, name) for name in os.listdir(full_day_dir)]
+    assert build_scalar_history_from_files(paths) == build_scalar_history(full_day_dir)
