@@ -1,5 +1,5 @@
 """
-headless/cli_runner.py
+cli_runner.py
 ====================
 One-shot CLI entry point for pipeline.fetch -> pipeline.decode_files, with no
 Tkinter/GUI dependency: all inputs come from command-line arguments, output
@@ -11,7 +11,7 @@ queue/poll layer (like runner.py's worker+poll split, which exists only to
 keep a Tkinter mainloop responsive) is needed here.
 
 Usage:
-    python -m headless.cli_runner --ftp-host HOST --ftp-user USER --ftp-pass PASS \
+    python -m cli_runner --ftp-host HOST --ftp-user USER --ftp-pass PASS \
         --start-date 2026-08-20 --end-date 2026-08-24
 """
 

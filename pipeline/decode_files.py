@@ -9,7 +9,7 @@ không ảnh hưởng bước tải file hay khởi động main.py.
 
 import os
 
-from bulletin.decode import decode_history
+from core.decode import decode_history
 from utils.csv_utils import write_csv
 from utils.filename_utils import parse_obs_dt
 from utils import log_utils

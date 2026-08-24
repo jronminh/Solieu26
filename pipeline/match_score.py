@@ -17,7 +17,7 @@ import os
 from pipeline.forecast import build_hourly_table, load_records_csv
 from pipeline.obs import build_scalar_history_from_files
 from utils.csv_utils import write_csv
-from scoring.scorer import (
+from core.scorer import (
     score_do_cao_man_may,
     score_hien_tuong,
     score_huong_gio,

@@ -16,13 +16,12 @@ tests/fixtures/qt_files/full_day_20260810/.
 
 import os
 
-from bulletin.decode import decode_qt_file
-from scoring.score_tables import BUCKETS
-from scoring.scorer import solve_ceiling, sub_of_hour
+from core.decode import decode_qt_file
+from core.score_tables import BUCKETS
+from core.scorer import solve_ceiling, sub_of_hour
 from utils.filename_utils import parse_obs_dt
 
-# Mỗi hướng ứng với các mốc CHỤC ĐỘ nó bao, theo
-# reference/Bang_cham_huong_gio_16_huong.md (4 hướng chính N/E/S/W ôm 3 mốc
+# Mỗi hướng ứng với các mốc CHỤC ĐỘ nó bao (4 hướng chính N/E/S/W ôm 3 mốc
 # chục, còn lại ôm 2 - hệ quả làm tròn 22.5°/hướng về chục, không phải lỗi).
 _DIRECTION_DECADES = {
     "N":   (350, 0, 10),
@@ -53,9 +52,8 @@ def wind_dd_to_huong_gio(wind_dd):
     BUCKETS["huong_gio"]["labels"]). None -> None (gió lặng/hướng không xác
     định - xem BUCKETS["huong_gio"]["na"]).
 
-    Theo bảng tay reference/Bang_cham_huong_gio_16_huong.md: làm tròn về
-    chục trước rồi tra (wind_dd ở đây đã sẵn là bội số 10 nên làm tròn
-    không đổi gì, chỉ phòng khi có nguồn khác truyền độ lẻ vào)."""
+    Làm tròn về chục trước rồi tra (wind_dd ở đây đã sẵn là bội số 10 nên
+    làm tròn không đổi gì, chỉ phòng khi có nguồn khác truyền độ lẻ vào)."""
     if wind_dd is None:
         return None
     decade = round(wind_dd / 10) * 10 % 360
@@ -64,7 +62,7 @@ def wind_dd_to_huong_gio(wind_dd):
 
 
 # Mã ww (2 ký tự) -> mega (BUCKETS["hien_tuong"]["mega_buckets"]). Chuyển
-# nguyên từ scoring/score_tables.py (2026-08-18) - score_tables.py chỉ còn
+# nguyên từ core/score_tables.py (2026-08-18) - score_tables.py chỉ còn
 # mô tả HÌNH DẠNG bucket, không biết quan trắc thô ánh xạ vào đó thế nào,
 # cùng lý do bảng hướng gió ở trên không nằm ở đó.
 #   - 13 (chớp không sấm), 18 (tố), 19 (vòi rồng): báo hiệu/đi kèm dông ->

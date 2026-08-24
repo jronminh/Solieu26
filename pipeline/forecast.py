@@ -11,8 +11,8 @@ tests/fixtures/forecast_sample.csv.
 import csv
 import os
 
-from scoring.score_tables import BUCKETS
-from scoring.scorer import sub_of_hour
+from core.score_tables import BUCKETS
+from core.scorer import sub_of_hour
 from utils.csv_utils import write_csv
 
 FIELD_ORDER = list(BUCKETS.keys())
