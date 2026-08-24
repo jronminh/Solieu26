@@ -189,29 +189,29 @@ def test_score_huong_gio_missing_data_is_none():
 
 def test_score_hien_tuong_mega_mismatch_is_false():
     assert score_hien_tuong(
-        {"hien_tuong": "N_0", "buoi": "dem"},
+        {"hien_tuong": "khong", "buoi": "dem"},
         {"hien_tuong": "suong_mu", "buoi": "dem"}) is False
 
 
 def test_score_hien_tuong_mega_match_sub_within_tolerance():
     assert score_hien_tuong(
-        {"hien_tuong": "N_0", "buoi": "dem"},
-        {"hien_tuong": "N_0", "buoi": "dem"}) is True
+        {"hien_tuong": "khong", "buoi": "dem"},
+        {"hien_tuong": "khong", "buoi": "dem"}) is True
 
 
 def test_score_hien_tuong_mega_match_sub_outside_tolerance():
     # 'chieu' (idx 4) vs 'dem' (idx 1) -> off by 3, no wrap (sub_circular off)
     assert score_hien_tuong(
-        {"hien_tuong": "N_0", "buoi": "chieu"},
-        {"hien_tuong": "N_0", "buoi": "dem"}) is False
+        {"hien_tuong": "khong", "buoi": "chieu"},
+        {"hien_tuong": "khong", "buoi": "dem"}) is False
 
 
 def test_score_hien_tuong_missing_data_is_none():
     assert score_hien_tuong(
         {"hien_tuong": None, "buoi": "dem"},
-        {"hien_tuong": "N_0", "buoi": "dem"}) is None
+        {"hien_tuong": "khong", "buoi": "dem"}) is None
     assert score_hien_tuong(
-        {"hien_tuong": "N_0", "buoi": "dem"},
+        {"hien_tuong": "khong", "buoi": "dem"},
         {"hien_tuong": None, "buoi": "dem"}) is None
 
 
@@ -219,22 +219,22 @@ def test_score_hien_tuong_missing_buoi_is_none():
     """Mega khớp nhưng buổi 1 trong 2 phía không xác định được (nhãn lạ/
     thiếu) -> bỏ cặp, không coi như khớp."""
     assert score_hien_tuong(
-        {"hien_tuong": "N_0", "buoi": None},
-        {"hien_tuong": "N_0", "buoi": "dem"}) is None
+        {"hien_tuong": "khong", "buoi": None},
+        {"hien_tuong": "khong", "buoi": "dem"}) is None
     assert score_hien_tuong(
-        {"hien_tuong": "N_0", "buoi": "dem"},
-        {"hien_tuong": "N_0", "buoi": None}) is None
+        {"hien_tuong": "khong", "buoi": "dem"},
+        {"hien_tuong": "khong", "buoi": None}) is None
 
 
-def test_score_hien_tuong_no_ww_reported_scores_false_not_none():
-    """Trạm không báo cáo ww (pipeline/obs.py::ww_code_to_mega(None) ==
-    "N_0") mà dự báo lại chọn 1 mega khác "N_0" -> phải chấm SAI (False),
-    không bị bỏ cặp."""
+def test_score_hien_tuong_no_ww_reported_is_bo_cap():
+    """Trạm không báo cáo ww (pipeline/obs.py::ww_code_to_mega(None) is
+    None) -> bỏ cặp (None), thiếu dữ liệu thật chứ không phải xác nhận
+    "khong" (có báo cáo, không hiện tượng) - dù dự báo chọn mega nào."""
     from pipeline.obs import ww_code_to_mega
 
     obs = {"hien_tuong": ww_code_to_mega(None), "buoi": "dem"}
     forecast_row = {"hien_tuong": "dong_mua_rao", "buoi": "dem"}
-    assert score_hien_tuong(forecast_row, obs) is False
+    assert score_hien_tuong(forecast_row, obs) is None
 
 
 # =============================================================================

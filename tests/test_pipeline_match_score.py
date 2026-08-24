@@ -30,11 +30,11 @@ FORECAST_CSV = "tests/fixtures/forecast_sample.csv"
 # checked against an already-trusted forecast/obs pair.
 _ALL_TRUE_FORECAST = {
     "station_code": "k31", "hour": 1, "buoi": "dem", "tong_luong_may": 2, "do_cao_man_may": 1,
-    "hien_tuong": "N_0", "huong_gio": 0, "toc_do_gio": 2, "tam_nhin": 1,
+    "hien_tuong": "khong", "huong_gio": 0, "toc_do_gio": 2, "tam_nhin": 1,
 }
 _ALL_TRUE_OBS = {
     "station_code": "k31", "hour": 1, "buoi": "dem", "tong_luong_may": 5, "do_cao_man_may": 50,
-    "hien_tuong": "N_0", "huong_gio": 15, "toc_do_gio": 5, "tam_nhin": 0.5,
+    "hien_tuong": "khong", "huong_gio": 15, "toc_do_gio": 5, "tam_nhin": 0.5,
 }
 _ALL_NONE_ROW = {
     "station_code": "k31", "hour": 1, "buoi": None, "tong_luong_may": None, "do_cao_man_may": None,
@@ -72,7 +72,7 @@ def test_score_history_hien_tuong_reads_buoi_independently_from_each_side():
     """score_history() truyền NGUYÊN forecast_row/obs_row (không tách tay)
     tới score_hien_tuong() - "buoi" mỗi bên đọc từ chính dict của bên đó,
     không bị ép trùng nhau. Dựng forecast_row["buoi"]="chieu" khác hẳn
-    obs_row["buoi"]="dem" (mega vẫn khớp "N_0") - phải ra False vì buổi
+    obs_row["buoi"]="dem" (mega vẫn khớp "khong") - phải ra False vì buổi
     lệch quá tolerance, chứng minh dispatch không âm thầm suy lại buổi từ
     "hour" (nếu suy lại từ "hour" dùng chung, 2 buổi sẽ luôn trùng nhau)."""
     forecast_row = dict(_ALL_TRUE_FORECAST, buoi="chieu")

@@ -30,6 +30,7 @@ from tkinter import messagebox
 
 from utils import config_utils as config
 from utils import log_utils
+from utils.filename_utils import parse_obs_dt
 from utils.ini_utils import update_ini_key
 from pipeline import fetch as pipeline_fetch
 
@@ -269,10 +270,44 @@ class Runner:
             output_dir = os.path.abspath(cfg.get("output_dir") or config.DEFAULT_OUTPUT_DIR)
             os.makedirs(output_dir, exist_ok=True)
             history_files = pipeline_decode.export_history_by_date(sorted(dl["files"]), output_dir)
-            q.put(("export_done", {"output_dir": output_dir, "history_files": history_files}))
+            score_files = self._score_days(dl["files"], history_files, output_dir, log)
+            q.put(("export_done", {"output_dir": output_dir, "history_files": history_files,
+                                    "score_files": score_files}))
         except Exception as e:
             _logger.exception("export_history_by_date thất bại")
             q.put(("export_error", f"{type(e).__name__}: {e}"))
+
+    def _score_days(self, local_files: list, history_files: dict, output_dir: str, log) -> dict:
+        """For each date just exported to history_YYYYMMDD.csv, run
+        export_forecast_score() if a forecast_YYYYMMDD.csv already exists for
+        that date (dự báo viên đã lưu trước đó) - skip dates without one, no
+        forecast means nothing to score yet. local_files is filtered down to
+        one date per call since export_forecast_score() applies its whole
+        forecast_csv_path to every date it finds in the files' directory, and
+        a range query can span several days each with its own forecast file.
+
+        Errors here are logged and swallowed rather than raised: history CSVs
+        already written successfully must not be reported as a failed run
+        just because scoring hit a problem."""
+        from pipeline import match_score as pipeline_score
+
+        exported = {}
+        for date_key in history_files:
+            ymd = date_key.replace("-", "")
+            forecast_path = os.path.join(output_dir, f"forecast_{ymd}.csv")
+            if not os.path.isfile(forecast_path):
+                continue
+            date_files = [f for f in local_files
+                          if (dt := parse_obs_dt(f)) and dt.strftime("%Y-%m-%d") == date_key]
+            if not date_files:
+                continue
+            try:
+                exported.update(pipeline_score.export_forecast_score(
+                    date_files, forecast_path, output_dir))
+            except Exception as e:
+                _logger.exception("export_forecast_score thất bại cho %s", date_key)
+                log("ERR", f"Chấm điểm dự báo {date_key} thất bại: {type(e).__name__}: {e}")
+        return exported
 
     def _poll(self):
         app = self.app
@@ -339,6 +374,13 @@ class Runner:
                  for _, hinfo in sorted(history_files.items())]
         app._log("OK", "Hoàn tất, đã xuất: " + (", ".join(parts) if parts else "(không có)"))
         app.history_viewer.refresh_date_list()
+
+        score_files = info.get("score_files") or {}
+        if score_files:
+            parts = [f"{os.path.basename(sinfo['csv'])} ({sinfo['records']} dòng)"
+                     for _, sinfo in sorted(score_files.items())]
+            app._log("OK", "Đã chấm điểm: " + ", ".join(parts))
+            app.score_viewer.refresh_date_list()
 
     def _on_export_error(self, msg: str):
         """Khối 1 đã xong (self.last_result đã có files/missing từ _on_fetch_done),

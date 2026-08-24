@@ -3,7 +3,6 @@ score_tables.py
 ====================
 Cấu hình BUCKETS cho 6 trường dự báo được chấm điểm, cộng hằng số sentinel
 NO_CEILING. Không có hàm chấm điểm ở đây, chỉ dữ liệu.
-Vài mốc nghiệp vụ trong bảng còn chờ xác nhận, xem TODO.md.
 """
 
 # Sentinel cho trạng thái "không có trần" (trường do_cao_man_may), là một
@@ -79,7 +78,7 @@ BUCKETS = {
     #      1 mưa thường, mưa phùn                                         #
     #      2 sương mù                                                     #
     #      3 mù, mù khô                                                   #
-    #      4 N_0 (không có hiện tượng / không thuộc 4 nhóm trên)          #
+    #      4 khong (không có hiện tượng / không thuộc 4 nhóm trên)        #
     #                                                                    #
     #    TẦNG SUB: buổi trong ngày, GIỐNG NHAU trong mọi mega, ±1 KẸP    #
     #    MÉP (n=5): 0 tối, 1 đêm, 2 sáng, 3 trưa, 4 chiều. Dự báo cho     #
@@ -95,14 +94,14 @@ BUCKETS = {
             "mua_mua_phun",
             "suong_mu",
             "mu_mu_kho",
-            "N_0",
+            "khong",
         ],
         "mega_labels": {
             "dong_mua_rao": "Dông, mưa rào",
             "mua_mua_phun": "Mưa thường, mưa phùn",
             "suong_mu":     "Sương mù",
             "mu_mu_kho":    "Mù, mù khô",
-            "N_0":          "Không có hiện tượng (hoặc không thuộc 4 nhóm trên)",
+            "khong":        "Không",
         },
         "mega_tolerance": 0,            # khớp chính xác 100%
         # Quy đổi MÃ ww GỐC -> mega không còn ở đây - xem

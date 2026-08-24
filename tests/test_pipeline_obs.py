@@ -69,9 +69,9 @@ def test_ww_code_to_mega_mu_mu_kho_group():
     assert ww_code_to_mega("04") == "mu_mu_kho"
 
 
-def test_ww_code_to_mega_n_0_group():
-    assert ww_code_to_mega("00") == "N_0"
-    assert ww_code_to_mega("66") == "N_0"  # rare mưa đông kết, VN edge case
+def test_ww_code_to_mega_khong_group():
+    assert ww_code_to_mega("00") == "khong"
+    assert ww_code_to_mega("66") == "khong"  # rare mưa đông kết, VN edge case
 
 
 def test_ww_code_to_mega_distinguishes_identical_labels_by_raw_code():
@@ -83,11 +83,10 @@ def test_ww_code_to_mega_distinguishes_identical_labels_by_raw_code():
     assert ww_code_to_mega("82") == "dong_mua_rao"
 
 
-def test_ww_code_to_mega_none():
-    """Không báo cáo ww -> "N_0" (không có gì đáng kể), không phải None -
-    thiếu dữ liệu thật chỉ xảy ra khi mã CÓ báo cáo nhưng không khớp nhóm
-    nào (xem test_ww_code_to_mega_unknown_code)."""
-    assert ww_code_to_mega(None) == "N_0"
+def test_ww_code_to_mega_none_is_missing_data():
+    """Không báo cáo ww -> None (bỏ cặp, thiếu dữ liệu thật) - khác "khong"
+    (có báo cáo, không hiện tượng gì đáng kể, xem test_ww_code_to_mega_khong_group)."""
+    assert ww_code_to_mega(None) is None
 
 
 def test_ww_code_to_mega_unknown_code():
@@ -116,13 +115,13 @@ def test_build_obs_real_fixture_yenbai(qt_00):
     }
 
 
-def test_build_obs_missing_groups_come_back_none_except_hien_tuong_and_buoi():
+def test_build_obs_missing_groups_come_back_none_except_buoi():
     """A record with none of the optional groups reported (only location):
-    5 field ra None (thiếu dữ liệu thật), không raise trên dict thiếu.
-    Riêng hien_tuong ra "N_0" (không báo cáo ww = không có gì đáng kể, xem
-    ww_code_to_mega()) và buoi luôn tính được từ hour truyền vào (giờ 5 ->
-    "sang") - 2 trường này không phụ thuộc record có báo cáo gì hay không.
-    station_code vẫn lấy được từ location dù các nhóm khác đều thiếu."""
+    6 field ra None (thiếu dữ liệu thật, kể cả hien_tuong - không báo ww =
+    bỏ cặp, xem ww_code_to_mega()), không raise trên dict thiếu. Riêng buoi
+    luôn tính được từ hour truyền vào (giờ 5 -> "sang") vì không phụ thuộc
+    record có báo cáo gì hay không. station_code vẫn lấy được từ location
+    dù các nhóm khác đều thiếu."""
     record = {"location": {"station_code": "k31"}}
     obs = build_obs(record, hour=5)
     assert obs == {
@@ -131,7 +130,7 @@ def test_build_obs_missing_groups_come_back_none_except_hien_tuong_and_buoi():
         "station_code": "k31",
         "tong_luong_may": None,
         "do_cao_man_may": None,
-        "hien_tuong": "N_0",
+        "hien_tuong": None,
         "huong_gio": None,
         "toc_do_gio": None,
         "tam_nhin": None,

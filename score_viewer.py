@@ -168,6 +168,15 @@ class ScoreViewer:
     def _refresh_date_options(self):
         self._date_combo["values"] = sorted(self._available_score_files())
 
+    def refresh_date_list(self):
+        """Repopulate the Ngày dropdown's choices without disturbing what's
+        currently loaded (called after a run finishes writing new score
+        files); only jumps to the newest date if nothing was loaded before."""
+        dates = sorted(self._available_score_files())
+        self._date_combo["values"] = dates
+        if not self._rows and dates and self._date_filter.get() not in dates:
+            self._date_filter.set(dates[-1])
+
     # ----- Loading a day -----------------------------------------------
     def _on_date_change(self):
         date_str = self._date_filter.get()

@@ -69,9 +69,9 @@ def wind_dd_to_huong_gio(wind_dd):
 #     gộp dong_mua_rao.
 #   - 04 (khói), 06 (bụi lơ lửng): giảm tầm nhìn như mù khô -> gộp mu_mu_kho.
 #   - 66,67 (mưa đông kết), 68,69 (mưa+tuyết), 83-86 (rào lẫn tuyết/tuyết
-#     rào): hiếm gặp VN -> N_0 hết, không tách riêng.
+#     rào): hiếm gặp VN -> khong hết, không tách riêng.
 #   - 20-29 (hiện tượng "giờ trước"): tính như hiện tượng hiện tại, xếp
-#     theo loại, không gộp hết vào N_0.
+#     theo loại, không gộp hết vào khong.
 #
 # Lưu ý: mã 64/65 và 82 cùng nhãn tiếng Việt "Mưa to" nhưng khác mega-bucket
 # (mưa thường to -> mua_mua_phun; mưa rào dữ dội -> dong_mua_rao). Tra bảng
@@ -99,10 +99,10 @@ _WW_TO_MEGA = {
     ]},
     # --- mu_mu_kho: mù, mù khô, khói, bụi lơ lửng ---
     **{c: "mu_mu_kho" for c in ["04", "05", "06", "10"]},
-    # --- N_0: phần còn lại (mây tan/hình thành/không đổi, mưa xa chưa tới
+    # --- khong: phần còn lại (mây tan/hình thành/không đổi, mưa xa chưa tới
     #     trạm, tuyết/băng/mưa đông kết/hỗn hợp mưa-tuyết hiếm gặp VN,
     #     bụi/lốc bụi/bão bụi-cát/tuyết cuốn) ---
-    **{c: "N_0" for c in [
+    **{c: "khong" for c in [
         "00", "01", "02", "03",
         "07", "08", "09",
         "14", "15", "16",
@@ -118,13 +118,14 @@ _WW_TO_MEGA = {
 def ww_code_to_mega(ww_code):
     """Mã ww GỐC (decode_weather()'s "ww_code") -> nhãn mega-bucket
     (BUCKETS["hien_tuong"]["mega_buckets"]). KHÔNG báo cáo mã (ww_code is
-    None) -> "N_0", không phải thiếu dữ liệu (giả định này chưa kiểm chứng
-    chắc chắn, xem TODO.md). Mã CÓ báo cáo nhưng không khớp nhóm nào (lỗi
-    giải mã/mã lạ ngoài 00-99) mới -> None (bỏ cặp thật sự, xem
-    score_hien_tuong()) - _WW_TO_MEGA đã phủ đủ 00-99 nên ca này gần như
-    không xảy ra với dữ liệu hợp lệ."""
+    None) -> None (bỏ cặp, thiếu dữ liệu thật - không đồng nghĩa quan trắc
+    viên xác nhận trời quang). Mã CÓ báo cáo, dù rơi vào nhóm "khong" (không
+    có hiện tượng gì đáng kể) hay không khớp nhóm nào (lỗi giải mã/mã lạ
+    ngoài 00-99), đều là 1 lần quan trắc thật; nhóm không khớp cũng -> None
+    (bỏ cặp, xem score_hien_tuong()) nhưng _WW_TO_MEGA đã phủ đủ 00-99 nên
+    ca này gần như không xảy ra với dữ liệu hợp lệ."""
     if ww_code is None:
-        return "N_0"
+        return None
     return _WW_TO_MEGA.get(ww_code)
 
 

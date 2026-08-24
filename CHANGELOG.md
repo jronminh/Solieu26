@@ -4,7 +4,7 @@ Các thay đổi đáng chú ý của Solieu26, mới nhất lên đầu. Chi ti
 xem `git log`; việc đang mở/chưa quyết xem `TODO.md` (file local, không nằm
 trong repo).
 
-## v5.0 — 2026-08-16 → 2026-08-21
+## v5.0 — 2026-08-16 → 2026-08-24
 
 ### Thiết kế lại UI theo mockup (`reference/Redesign Solieu26 (ban Tkinter thuc te).dc.html`)
 - Thêm cửa sổ "Dự báo" (`forecast_editor.py`): dự báo viên nhập bucket cho 6
@@ -63,6 +63,25 @@ trong repo).
   ghép theo `(station_code, hour)`, do quan trắc dẫn dắt (mọi trạm báo cáo
   đều ra 1 dòng, kể cả trạm chưa ai dự báo). `score_YYYYMMDD.csv` giờ nhiều
   trạm/file (cột `station_code`), giống quy ước `history_YYYYMMDD.csv`.
+- Nối `export_forecast_score()` vào `runner.py` (2026-08-22): sau
+  `export_history_by_date()` chạy xong, với mỗi ngày vừa tải quan trắc mà đã
+  có sẵn `forecast_YYYYMMDD.csv`, tự gọi `export_forecast_score()` để sinh/
+  cập nhật `score_YYYYMMDD.csv` — không cần thao tác thêm; trước đó chỉ có
+  `score_viewer.py` đọc file, không ai từng ghi ra. `local_files` lọc xuống
+  đúng 1 ngày trước khi gọi (mỗi ngày dùng đúng `forecast_YYYYMMDD.csv` của
+  ngày đó) để 1 lần tải nhiều ngày không áp nhầm dự báo ngày A cho ngày B;
+  lỗi chấm điểm chỉ log, không làm hỏng kết quả `export_history_by_date()`
+  đã xong. Thêm `ScoreViewer.refresh_date_list()` (theo mẫu
+  `HistoryViewer.refresh_date_list()`) để tab "Xem chấm điểm" tự thấy ngày
+  mới mà không cần thao tác gì thêm.
+- Tách "không báo cáo ww" khỏi "có báo cáo, không hiện tượng gì đáng kể"
+  trong `pipeline/obs.py::ww_code_to_mega()` (2026-08-24, xác nhận nghiệp
+  vụ): `ww_code is None` giờ trả `None` (bỏ cặp, thiếu dữ liệu thật) thay
+  vì trả nhóm "không có hiện tượng" như trước — trước đây 2 trường hợp này
+  bị gộp làm một, có thể chấm SAI khi thực ra chỉ là mất dữ liệu, không
+  phải quan trắc viên xác nhận trời quang. Mega-bucket "N_0" (mã có báo cáo
+  nhưng không có hiện tượng gì đáng kể) đổi tên thành `"khong"`, nhãn hiển
+  thị rút gọn thành "Không" (`scoring/score_tables.py`).
 
 ### Tái cấu trúc module
 - Tách `pipeline.py`/`core.py` cũ thành các khối độc lập không import lẫn

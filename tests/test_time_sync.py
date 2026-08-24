@@ -64,7 +64,7 @@ def test_join_forecast_obs_station_without_forecast_gets_empty_forecast_row():
     (6 field None), KHÔNG raise và KHÔNG bị bỏ qua - khác hành vi cũ (raise
     ngay) vì giờ forecast_rows có thể chỉ phủ 1 phần trạm quan trắc được."""
     obs_row = {"station_code": "k99", "hour": 0, "buoi": "dem", "tong_luong_may": 5,
-               "do_cao_man_may": None, "hien_tuong": "N_0", "huong_gio": None,
+               "do_cao_man_may": None, "hien_tuong": "khong", "huong_gio": None,
                "toc_do_gio": None, "tam_nhin": None}
 
     rows = join_forecast_obs([], [obs_row])
