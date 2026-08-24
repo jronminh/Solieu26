@@ -2,7 +2,9 @@
 fetch/fetch.py
 ====================
 Khối 1 (lấy file số liệu): toàn bộ tầng FTP, độc lập hoàn toàn với khối decode và khối chấm điểm.
-Dùng qua fetch_files() (đầu vào cfg, log callback dùng level cố định INFO/OK/SKIP/MISS/WARN/ERR); không có demo CLI, chạy trực tiếp cần config FTP thật qua main.py.
+Dùng qua fetch_files() (đầu vào cfg, log callback dùng level cố định INFO/OK/SKIP/MISS/WARN/ERR).
+Chạy độc lập qua CLI: python fetch/fetch.py --ftp-host <host> --ftp-user <user> --ftp-pass <mat_khau> \
+    --start-date 2026-08-20 --end-date 2026-08-24
 
 download_files() tự quản lý mọi kết nối FTP nó cần: một hàng đợi cụm
 (năm/tháng) dùng chung, N worker (cfg['parallel_workers'], mặc định 1) mỗi
@@ -13,17 +15,29 @@ giống hệt một vòng lặp tuần tự vì các cụm được xếp sẵn 
 gian trước khi đưa vào hàng đợi.
 """
 
+import argparse
 import datetime
 import os
 import queue
+import sys
 import threading
 import time
 from ftplib import FTP, error_perm, error_temp
 
-from .filename_utils import quantrac_filename_at
-from .ftp_utils import fetch_and_bucket
-from .mtime_index import load_index, save_index
-from . import log_utils
+try:
+    from .filename_utils import quantrac_filename_at
+    from .ftp_utils import fetch_and_bucket
+    from .mtime_index import load_index, save_index
+    from . import log_utils
+except ImportError:
+    # chạy trực tiếp "python fetch/fetch.py" (không phải -m fetch.fetch) thì
+    # đây không phải package, không import relative được — fallback sang
+    # import tuyệt đối, hoạt động vì Python tự thêm thư mục chứa fetch.py
+    # (fetch/) vào sys.path khi chạy trực tiếp.
+    from filename_utils import quantrac_filename_at
+    from ftp_utils import fetch_and_bucket
+    from mtime_index import load_index, save_index
+    import log_utils
 
 MTIME_INDEX_FILENAME = "mtime_index.json"
 _CONNECT_MAX_ATTEMPTS = 3   # 1 lần thử đầu + tối đa 2 lần thử lại khi gặp lỗi tạm (vd 421)
@@ -318,3 +332,89 @@ def fetch_files(cfg: dict, log, progress=None) -> dict:
     else:
         log("WARN", "Không tải được file nào")
     return dl
+
+
+# =============================================================================
+# CLI (chạy độc lập, không cần decode/chấm điểm)
+# =============================================================================
+
+DEFAULT_LOCAL_DIR = os.path.join(os.path.expanduser("~"), "solieu26_dl", "data")
+
+_EXAMPLE_CMD = (
+    "python fetch/fetch.py --ftp-host <host> --ftp-user <user> --ftp-pass <mat_khau> "
+    "--start-date 2026-08-20 --end-date 2026-08-24"
+)
+
+
+def _cli_log(level: str, msg: str):
+    print(f"[{level}] {msg}")
+
+
+def _cli_progress(done, total, status, filename):
+    print(f"\r{done}/{total} {filename}", end="", flush=True)
+    if done == total:
+        print()
+
+
+def _parse_args(argv=None):
+    today = datetime.date.today().strftime("%Y-%m-%d")
+    p = argparse.ArgumentParser(
+        description="Tải file số liệu Quantrac qua FTP, không GUI, không decode/chấm điểm.",
+        epilog=f"Ví dụ: {_EXAMPLE_CMD}")
+    p.add_argument("--ftp-host", default=None)
+    p.add_argument("--ftp-user", default=None)
+    p.add_argument("--ftp-pass", default=None)
+    p.add_argument("--remote-dir", default="/Quantrac")
+    p.add_argument("--local-dir", default=DEFAULT_LOCAL_DIR)
+    p.add_argument("--parallel-workers", type=int, default=1)
+    p.add_argument("--start-date", default=today, help="YYYY-MM-DD, mặc định hôm nay")
+    p.add_argument("--end-date", default=today, help="YYYY-MM-DD, mặc định hôm nay")
+    return p.parse_args(argv)
+
+
+def _build_cfg(args) -> dict:
+    if not (args.ftp_host and args.ftp_user and args.ftp_pass):
+        raise ValueError(
+            f"Thiếu --ftp-host/--ftp-user/--ftp-pass. Ví dụ câu lệnh đầy đủ:\n  {_EXAMPLE_CMD}")
+
+    try:
+        start = datetime.datetime.strptime(args.start_date, "%Y-%m-%d")
+        end = datetime.datetime.strptime(args.end_date, "%Y-%m-%d")
+    except ValueError:
+        raise ValueError(
+            "--start-date/--end-date phải theo định dạng YYYY-MM-DD. Ví dụ câu lệnh đầy đủ:\n"
+            f"  {_EXAMPLE_CMD}")
+    if end < start:
+        raise ValueError("--end-date phải sau hoặc bằng --start-date")
+
+    return {
+        "ftp_host": args.ftp_host,
+        "ftp_user": args.ftp_user,
+        "ftp_pass": args.ftp_pass,
+        "parallel_workers": max(args.parallel_workers, 1),
+        "remote_dir": args.remote_dir,
+        "local_dir": args.local_dir,
+        "start_date": start,
+        "end_date": end,
+    }
+
+
+def main(argv=None) -> int:
+    args = _parse_args(argv)
+    try:
+        cfg = _build_cfg(args)
+    except ValueError as e:
+        _cli_log("ERR", str(e))
+        return 1
+
+    try:
+        fetch_files(cfg, log=_cli_log, progress=_cli_progress)
+    except Exception as e:
+        _logger.exception("fetch_files thất bại")
+        _cli_log("ERR", f"{type(e).__name__}: {e}")
+        return 1
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

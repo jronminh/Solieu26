@@ -9,7 +9,11 @@ import os
 import time
 from ftplib import FTP, error_perm, error_temp
 
-from . import log_utils
+try:
+    from . import log_utils
+except ImportError:
+    # xem ghi chú fallback tương ứng trong fetch.py
+    import log_utils
 
 _logger = log_utils.get_logger("ftp")
 
