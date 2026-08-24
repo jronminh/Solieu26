@@ -2,8 +2,11 @@
 cli_runner.py
 ====================
 One-shot CLI entry point for pipeline.fetch -> pipeline.decode_files, with no
-Tkinter/GUI dependency: all inputs come from command-line arguments, output
-goes to stdout (plus the usual rotating file log from utils/log_utils.py).
+Tkinter/GUI dependency. FTP host/user/pass/remote_dir/output_dir/
+parallel_workers come from config.ini (next to this file); any matching
+--ftp-host/... argument overrides the value in config.ini. If config.ini is
+missing, a template is written to CONFIG_PATH on first run for the user to
+fill in.
 
 Runs synchronously on the main thread - fetch_files()/download_files() already
 use their own worker threads internally for parallel_workers > 1, so no extra
@@ -11,21 +14,39 @@ queue/poll layer (like runner.py's worker+poll split, which exists only to
 keep a Tkinter mainloop responsive) is needed here.
 
 Usage:
-    python -m cli_runner --ftp-host HOST --ftp-user USER --ftp-pass PASS \
-        --start-date 2026-08-20 --end-date 2026-08-24
+    python -m cli_runner --start-date 2026-08-20 --end-date 2026-08-24
+    python -m cli_runner --ftp-host HOST --ftp-user USER --ftp-pass PASS
 """
 
 import argparse
+import configparser
 import datetime
 import os
 import sys
 
-from utils import config_utils as config
 from utils import log_utils
 from utils.filename_utils import parse_obs_dt
 from pipeline import fetch as pipeline_fetch
 
 _logger = log_utils.get_logger("cli_runner")
+
+PROJECT_ROOT = os.path.dirname(os.path.abspath(__file__))
+CONFIG_PATH = os.path.join(PROJECT_ROOT, "config.ini")
+CONFIG_SECTION = "Solieu26"
+
+# Downloaded data + log files stay under the user's home (survive the project
+# folder being moved/reinstalled), unlike config.ini which now lives with the code.
+DEFAULT_OUTPUT_DIR = os.path.join(os.path.expanduser("~"), "solieu26_dl")
+TEMP_DL_DIR = os.path.join(DEFAULT_OUTPUT_DIR, "data")
+
+FTP_TIMEOUT = 30          # seconds
+RETRY_TEMP  = 1           # extra retry attempts when server reports busy (4xx)
+RETRY_WAIT  = 2           # seconds to wait between retries
+STABILITY_CHECK = True    # poll-size-hai-lần trước khi tải, xem download_one() trong utils/ftp_utils.py
+STABILITY_WAIT  = 1       # seconds between the 2 SIZE calls
+
+_DEFAULT_REMOTE_DIR = "/Quantrac"
+_DEFAULT_PARALLEL_WORKERS = 1
 
 
 def _log(level: str, msg: str):
@@ -38,15 +59,67 @@ def _progress(done, total, status, filename):
         print()
 
 
+# =============================================================================
+# CONFIG.INI (project root; CLI args override its values)
+# =============================================================================
+
+def _write_default_config(path: str):
+    lines = [
+        "# config.ini cho Solieu26, sửa giá trị rồi lưu lại.",
+        "# Xóa dòng nào muốn dùng mặc định/truyền qua CLI arg thay vào đó.",
+        f"[{CONFIG_SECTION}]",
+        "ftp_host = ",
+        "ftp_user = ",
+        "ftp_pass = ",
+        f"remote_dir = {_DEFAULT_REMOTE_DIR}",
+        f"output_dir = {DEFAULT_OUTPUT_DIR}",
+        f"parallel_workers = {_DEFAULT_PARALLEL_WORKERS}",
+    ]
+    with open(path, "w", encoding="utf-8") as f:
+        f.write("\n".join(lines) + "\n")
+
+
+def load_config_file(path: str) -> dict:
+    """Đọc config.ini -> dict override; {} nếu file thiếu/hỏng/không có section."""
+    if not os.path.isfile(path):
+        return {}
+    parser = configparser.ConfigParser(interpolation=None)  # disable %(...)s so paths stay safe
+    try:
+        parser.read(path, encoding="utf-8")
+    except Exception as e:
+        _log("WARN", f"Không đọc được config '{path}': {e}")
+        return {}
+    if not parser.has_section(CONFIG_SECTION):
+        return {}
+
+    raw = dict(parser.items(CONFIG_SECTION))
+    out = {}
+    for k in ("ftp_host", "ftp_user", "ftp_pass", "remote_dir", "output_dir"):
+        if raw.get(k, "").strip():
+            out[k] = raw[k].strip()
+    if raw.get("parallel_workers", "").strip():
+        try:
+            out["parallel_workers"] = int(raw["parallel_workers"])
+        except ValueError:
+            _log("WARN", "config 'parallel_workers' không phải số nguyên -> bỏ qua")
+    return out
+
+
+# =============================================================================
+# ARGS + CONFIG MERGE
+# =============================================================================
+
 def _parse_args(argv=None):
     today = datetime.date.today().strftime("%Y-%m-%d")
     p = argparse.ArgumentParser(description="Tải và giải mã số liệu Quantrac, không GUI.")
-    p.add_argument("--ftp-host", required=True)
-    p.add_argument("--ftp-user", required=True)
-    p.add_argument("--ftp-pass", required=True)
-    p.add_argument("--remote-dir", default="/Quantrac")
-    p.add_argument("--output-dir", default=config.DEFAULT_OUTPUT_DIR)
-    p.add_argument("--parallel-workers", type=int, default=1)
+    p.add_argument("--config", default=None,
+                    help=f"đường dẫn config.ini (mặc định: {CONFIG_PATH})")
+    p.add_argument("--ftp-host", default=None, help="bắt buộc, trừ khi đã có trong config.ini")
+    p.add_argument("--ftp-user", default=None, help="bắt buộc, trừ khi đã có trong config.ini")
+    p.add_argument("--ftp-pass", default=None, help="bắt buộc, trừ khi đã có trong config.ini")
+    p.add_argument("--remote-dir", default=None)
+    p.add_argument("--output-dir", default=None)
+    p.add_argument("--parallel-workers", type=int, default=None)
     p.add_argument("--start-date", default=today, help="YYYY-MM-DD, mặc định hôm nay")
     p.add_argument("--end-date", default=today, help="YYYY-MM-DD, mặc định hôm nay")
     return p.parse_args(argv)
@@ -61,19 +134,34 @@ def _build_cfg(args) -> dict:
     if end < start:
         raise ValueError("--end-date phải sau hoặc bằng --start-date")
 
+    config_path = args.config or CONFIG_PATH
+    if not os.path.isfile(config_path):
+        _write_default_config(config_path)
+        _log("INFO", f"Đã tạo config.ini mẫu tại {config_path}, điền FTP host/user/pass rồi chạy lại.")
+    overrides = load_config_file(config_path)
+
+    ftp_host = args.ftp_host or overrides.get("ftp_host", "")
+    ftp_user = args.ftp_user or overrides.get("ftp_user", "")
+    ftp_pass = args.ftp_pass or overrides.get("ftp_pass", "")
+    if not (ftp_host and ftp_user and ftp_pass):
+        raise ValueError(
+            "Thiếu ftp_host/ftp_user/ftp_pass - điền vào "
+            f"{config_path} hoặc truyền qua --ftp-host/--ftp-user/--ftp-pass")
+
     return {
-        "ftp_host": args.ftp_host,
-        "ftp_user": args.ftp_user,
-        "ftp_pass": args.ftp_pass,
-        "ftp_timeout": config.FTP_TIMEOUT,
-        "retry_temp": config.RETRY_TEMP,
-        "retry_wait": config.RETRY_WAIT,
-        "stability_check": config.STABILITY_CHECK,
-        "stability_wait": config.STABILITY_WAIT,
-        "parallel_workers": max(args.parallel_workers, 1),
-        "remote_dir": args.remote_dir,
-        "local_dir": config.TEMP_DL_DIR,
-        "output_dir": args.output_dir,
+        "ftp_host": ftp_host,
+        "ftp_user": ftp_user,
+        "ftp_pass": ftp_pass,
+        "ftp_timeout": FTP_TIMEOUT,
+        "retry_temp": RETRY_TEMP,
+        "retry_wait": RETRY_WAIT,
+        "stability_check": STABILITY_CHECK,
+        "stability_wait": STABILITY_WAIT,
+        "parallel_workers": max(
+            args.parallel_workers or overrides.get("parallel_workers", _DEFAULT_PARALLEL_WORKERS), 1),
+        "remote_dir": args.remote_dir or overrides.get("remote_dir", _DEFAULT_REMOTE_DIR),
+        "local_dir": TEMP_DL_DIR,
+        "output_dir": args.output_dir or overrides.get("output_dir", DEFAULT_OUTPUT_DIR),
         "start_date": start,
         "end_date": end,
     }

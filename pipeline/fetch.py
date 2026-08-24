@@ -20,7 +20,6 @@ import threading
 import time
 from ftplib import FTP, error_perm, error_temp
 
-from utils.config_utils import FTP_TIMEOUT
 from utils.filename_utils import quantrac_filename_at
 from utils.ftp_utils import fetch_and_bucket
 from utils.mtime_index import load_index, save_index
@@ -28,6 +27,7 @@ from utils import log_utils
 
 MTIME_INDEX_FILENAME = "mtime_index.json"
 _CONNECT_MAX_ATTEMPTS = 3   # 1 lần thử đầu + tối đa 2 lần thử lại khi gặp lỗi tạm (vd 421)
+_DEFAULT_FTP_TIMEOUT = 30   # seconds; used only if caller's cfg omits "ftp_timeout"
 _logger = log_utils.get_logger("fetch")
 
 
@@ -82,7 +82,7 @@ def _worker_connect(cfg: dict, log):
     credentials, host unreachable) is not retried. Raises on final failure;
     caller decides whether that's fatal for the whole run or just this worker."""
     host = cfg["ftp_host"]
-    timeout = cfg.get("ftp_timeout", FTP_TIMEOUT)
+    timeout = cfg.get("ftp_timeout", _DEFAULT_FTP_TIMEOUT)
     retry_wait = cfg.get("retry_wait", 2)
     last_exc = None
     for attempt in range(_CONNECT_MAX_ATTEMPTS):

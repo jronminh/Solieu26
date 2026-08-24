@@ -1,7 +1,7 @@
 """
 log_utils.py
 ====================
-File logging setup: one rotating file under USER_BASE_DIR/logs, DEBUG level,
+File logging setup: one rotating file under ~/solieu26_dl/logs, DEBUG level,
 with module/function/line and full tracebacks. Separate from the in-app log
 tab (main.py's App._log, RAM-only, capped at MAX_LOG_LINES) - this is the
 channel for post-mortem debugging when that buffer isn't enough or the app
@@ -12,9 +12,7 @@ import logging
 import logging.handlers
 import os
 
-from utils import config_utils as config
-
-LOG_DIR = os.path.join(config.USER_BASE_DIR, "logs")
+LOG_DIR = os.path.join(os.path.expanduser("~"), "solieu26_dl", "logs")
 LOG_FILE = os.path.join(LOG_DIR, "solieu26.log")
 
 # Maps the GUI's ad-hoc level strings (common.LOG_COLORS) onto stdlib levels,
