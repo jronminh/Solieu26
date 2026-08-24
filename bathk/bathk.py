@@ -1,20 +1,40 @@
 """
-pipeline/decode_files.py
+bathk/bathk.py
 ====================
-Khối 2: decode file bulletin đã tải sẵn trên đĩa thành CSV hiển thị (khác luồng
-type-coercion bulletin/decode.py dùng cho chấm điểm), độc lập hoàn toàn với tầng FTP.
-GUI-only, không chạy standalone; runner.py import lazily nên lỗi decode ở đây
-không ảnh hưởng bước tải file hay khởi động main.py.
+CLI độc lập để decode file bulletin Quantrac đã tải sẵn trên đĩa (QtYYMMDDHH.txt)
+thành CSV hiển thị. Không phụ thuộc core/ hay utils/ ở gốc repo — tự mang bản sao
+decode.py/code_tables.py/csv_utils.py/filename_utils.py/log_utils.py, giống cách
+fetch/fetch.py độc lập với FTP layer.
+
+Nhận đúng 1 ngày quan trắc (--date), quét --input-dir tìm các file QtYYMMDDHH.txt
+của ngày đó (bỏ qua file ngày khác cùng thư mục, vd tồn đọng từ lần fetch trước),
+decode rồi xuất history_YYYYMMDD.csv vào --output-dir.
+
+Chạy: python bathk/bathk.py --date 2026-08-20 \
+    --input-dir <thư mục chứa Qt*.txt> --output-dir <thư mục xuất CSV>
 """
 
+import argparse
+import datetime
 import os
+import sys
 
-from core.decode import decode_history
-from utils.csv_utils import write_csv
-from utils.filename_utils import parse_obs_dt
-from utils import log_utils
+try:
+    from .decode import decode_history
+    from .csv_utils import write_csv
+    from .filename_utils import parse_obs_dt
+    from . import log_utils
+except ImportError:
+    # chạy trực tiếp "python bathk/bathk.py" (không phải -m bathk.bathk) thì đây
+    # không phải package, không import relative được — fallback sang import
+    # tuyệt đối, hoạt động vì Python tự thêm thư mục chứa bathk.py (bathk/) vào
+    # sys.path khi chạy trực tiếp.
+    from decode import decode_history
+    from csv_utils import write_csv
+    from filename_utils import parse_obs_dt
+    import log_utils
 
-_logger = log_utils.get_logger("decode")
+_logger = log_utils.get_logger("bathk")
 
 
 # =============================================================================
@@ -124,7 +144,6 @@ def export_history_by_date(local_files: list, out_dir: str) -> dict:
     file belonging to it has been decoded, so a query spanning N days produces
     N files instead of one growing history.csv.
 
-    The sole remaining CSV-producing function now that "latest" export is gone.
     Returns {"YYYY-MM-DD": {"csv": path, "records": n}, ...}, one entry per date
     actually present in local_files (a file whose name doesn't parse as a
     QtYYMMDDHH.txt timestamp falls under the "unknown" bucket instead of being
@@ -147,3 +166,78 @@ def export_history_by_date(local_files: list, out_dir: str) -> dict:
         _logger.debug("%s: %d record -> %s", date_key, len(rows), out_path)
         exported[date_key] = {"csv": out_path, "records": len(rows)}
     return exported
+
+
+# =============================================================================
+# CLI
+# =============================================================================
+
+DEFAULT_INPUT_DIR = os.path.join(os.path.expanduser("~"), "solieu26_dl", "data")
+DEFAULT_OUTPUT_DIR = os.path.join(os.path.expanduser("~"), "solieu26_dl")
+
+_EXAMPLE_CMD = "python bathk/bathk.py --date 2026-08-20"
+
+
+def _cli_log(level: str, msg: str):
+    print(f"[{level}] {msg}")
+
+
+def _parse_args(argv=None):
+    today = datetime.date.today().strftime("%Y-%m-%d")
+    p = argparse.ArgumentParser(
+        description="Decode file bulletin Quantrac đã tải sẵn trên đĩa thành history_YYYYMMDD.csv, không GUI.",
+        epilog=f"Ví dụ: {_EXAMPLE_CMD}")
+    p.add_argument("--input-dir", default=DEFAULT_INPUT_DIR,
+                    help="thư mục chứa file QtYYMMDDHH.txt, mặc định %(default)s")
+    p.add_argument("--output-dir", default=DEFAULT_OUTPUT_DIR,
+                    help="thư mục xuất history_YYYYMMDD.csv, mặc định %(default)s")
+    p.add_argument("--date", default=today, help="YYYY-MM-DD, mặc định hôm nay")
+    return p.parse_args(argv)
+
+
+def _files_for_date(input_dir: str, date_str: str) -> list:
+    """Every file in input_dir whose parsed observation date (parse_obs_dt)
+    matches date_str — skips files that don't parse as QtYYMMDDHH.txt and
+    files belonging to a different date (e.g. left over from an earlier
+    fetch run sharing the same input_dir)."""
+    matches = []
+    for name in os.listdir(input_dir):
+        path = os.path.join(input_dir, name)
+        obs_dt = parse_obs_dt(path)
+        if obs_dt and obs_dt.strftime("%Y-%m-%d") == date_str:
+            matches.append(path)
+    return matches
+
+
+def main(argv=None) -> int:
+    args = _parse_args(argv)
+
+    try:
+        date_str = datetime.datetime.strptime(args.date, "%Y-%m-%d").strftime("%Y-%m-%d")
+    except ValueError:
+        _cli_log("ERR", f"--date phải theo định dạng YYYY-MM-DD. Ví dụ câu lệnh đầy đủ:\n  {_EXAMPLE_CMD}")
+        return 1
+
+    os.makedirs(args.output_dir, exist_ok=True)
+    _logger.debug("bathk: date=%s, input_dir=%s, output_dir=%s",
+                   date_str, args.input_dir, args.output_dir)
+
+    files = _files_for_date(args.input_dir, date_str)
+    if not files:
+        _cli_log("WARN", f"Không tìm thấy file nào của ngày {date_str} trong {args.input_dir}")
+        return 0
+
+    try:
+        exported = export_history_by_date(sorted(files), args.output_dir)
+    except Exception as e:
+        _logger.exception("export_history_by_date thất bại")
+        _cli_log("ERR", f"Decode thất bại: {type(e).__name__}: {e}")
+        return 2
+
+    for _, info in sorted(exported.items()):
+        _cli_log("OK", f"{os.path.basename(info['csv'])} ({info['records']} record)")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
