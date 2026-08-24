@@ -3,9 +3,9 @@ mtime_index.py
 ====================
 Per-filename record of the server mtime/size seen at download time, so a
 later listing can tell a re-uploaded/corrected file (same name, newer
-content) from one already up to date. Lives at TEMP_DL_DIR/mtime_index.json,
-alongside the downloaded bulletins; see pipeline/fetch.py's download_files()
-for how it's consulted.
+content) from one already up to date. Lives alongside the downloaded
+bulletins in the download's local directory; see fetch/fetch.py for how
+it's consulted.
 """
 
 import json
