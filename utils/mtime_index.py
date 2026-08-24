@@ -13,8 +13,8 @@ import os
 
 
 def load_index(path: str) -> dict:
-    """{} if the file is missing, unreadable, or not a JSON object — same
-    "absent means no data yet" stance as cli_runner.load_config_file()."""
+    """{} if the file is missing, unreadable, or not a JSON object — absent
+    means no data yet, not an error."""
     if not os.path.isfile(path):
         return {}
     try:
