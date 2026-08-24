@@ -197,9 +197,7 @@ def test_run_catchup_then_normal_falls_back_to_on_run_when_no_gap():
 # right before the gap, not past it.
 # =============================================================================
 
-def test_fetch_cycle_advances_mark_stopping_before_gap(ftp_world, patch_ftp, tmp_path, monkeypatch):
-    import runner as runner_module
-    monkeypatch.setattr(runner_module.messagebox, "showerror", lambda *a, **kw: None)
+def test_fetch_cycle_advances_mark_stopping_before_gap(ftp_world, patch_ftp, tmp_path):
     patch_ftp(ftp_world)
 
     start = datetime.datetime(2026, 8, 10, 0)

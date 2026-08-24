@@ -26,8 +26,6 @@ import os
 import queue
 import threading
 
-from tkinter import messagebox
-
 from utils import config_utils as config
 from utils import log_utils
 from utils.filename_utils import parse_obs_dt
@@ -43,6 +41,7 @@ class Runner:
         self.app = app
         self.q = queue.Queue()
         self.worker = None
+        self.on_error = lambda title, msg: None   # GUI wires this to a real dialog (see main.py)
         self._run_in_progress = False  # mirrors _set_actions_enabled, feeds refresh_range_panel_state + auto_query pause/resume
         self._on_run_done = None    # one-shot callback fired next time a run finishes (see _run_catchup_then_normal)
         self.last_output_dir = None
@@ -236,7 +235,7 @@ class Runner:
                 raise ValueError("Chưa nhập FTP host")
         except ValueError as e:
             app._log("ERR", f"Nhập sai: {e}")
-            messagebox.showerror("Nhập sai", str(e))
+            self.on_error("Nhập sai", str(e))
             return False
         return self._start_worker(cfg)
 
@@ -270,21 +269,35 @@ class Runner:
             output_dir = os.path.abspath(cfg.get("output_dir") or config.DEFAULT_OUTPUT_DIR)
             os.makedirs(output_dir, exist_ok=True)
             history_files = pipeline_decode.export_history_by_date(sorted(dl["files"]), output_dir)
-            score_files = self._score_days(dl["files"], history_files, output_dir, log)
+            score_files = self._score_days(dl["files"], cfg["start_date"], cfg["end_date"], output_dir, log)
             q.put(("export_done", {"output_dir": output_dir, "history_files": history_files,
                                     "score_files": score_files}))
         except Exception as e:
             _logger.exception("export_history_by_date thất bại")
             q.put(("export_error", f"{type(e).__name__}: {e}"))
 
-    def _score_days(self, local_files: list, history_files: dict, output_dir: str, log) -> dict:
-        """For each date just exported to history_YYYYMMDD.csv, run
-        export_forecast_score() if a forecast_YYYYMMDD.csv already exists for
-        that date (dự báo viên đã lưu trước đó) - skip dates without one, no
-        forecast means nothing to score yet. local_files is filtered down to
-        one date per call since export_forecast_score() applies its whole
-        forecast_csv_path to every date it finds in the files' directory, and
-        a range query can span several days each with its own forecast file.
+    def _dates_in_range(self, start: datetime.datetime, end: datetime.datetime) -> list:
+        """Mọi ngày (chuỗi 'YYYY-MM-DD') từ start đến end, 2 đầu bao gồm.
+        Theo ngày lịch, không theo giờ như pipeline_fetch.expected_hours() -
+        khớp đúng tên file forecast_YYYYMMDD.csv/score_YYYYMMDD.csv, không
+        cần mịn tới giờ."""
+        dates = []
+        day, last = start.date(), end.date()
+        while day <= last:
+            dates.append(day.strftime("%Y-%m-%d"))
+            day += datetime.timedelta(days=1)
+        return dates
+
+    def _score_days(self, local_files: list, start_date: datetime.datetime,
+                     end_date: datetime.datetime, output_dir: str, log) -> dict:
+        """For each calendar date in [start_date, end_date] (this run's own
+        queried range, independent of what export_history_by_date() actually
+        produced), run export_forecast_score() if a forecast_YYYYMMDD.csv
+        already exists for that date (dự báo viên đã lưu trước đó) - skip
+        dates without one, no forecast means nothing to score yet.
+        local_files is filtered down to one date per call since
+        export_forecast_score() applies its whole forecast_csv_path to every
+        date it's given, and each date needs its own forecast file.
 
         Errors here are logged and swallowed rather than raised: history CSVs
         already written successfully must not be reported as a failed run
@@ -292,7 +305,7 @@ class Runner:
         from pipeline import match_score as pipeline_score
 
         exported = {}
-        for date_key in history_files:
+        for date_key in self._dates_in_range(start_date, end_date):
             ymd = date_key.replace("-", "")
             forecast_path = os.path.join(output_dir, f"forecast_{ymd}.csv")
             if not os.path.isfile(forecast_path):
@@ -330,7 +343,7 @@ class Runner:
                     app._log("ERR", item[1])
                     app.status.config(text="Lỗi")
                     self._set_actions_enabled(True)
-                    messagebox.showerror("Lỗi", item[1])
+                    self.on_error("Lỗi", item[1])
         except queue.Empty:
             pass
         app.root.after(100, self._poll)
@@ -389,4 +402,4 @@ class Runner:
         self._set_actions_enabled(True)
         app._log("ERR", f"Xử lý số liệu thất bại (đã tải xong file, chỉ bước xử lý lỗi): {msg}")
         app.status.config(text="Tải xong, xử lý lỗi")
-        messagebox.showerror("Lỗi xử lý", msg)
+        self.on_error("Lỗi xử lý", msg)

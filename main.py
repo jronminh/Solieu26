@@ -14,7 +14,7 @@ import os
 import sys
 
 import tkinter as tk
-from tkinter import ttk, scrolledtext
+from tkinter import ttk, scrolledtext, messagebox
 
 from utils import config_utils as config
 from utils import log_utils
@@ -43,6 +43,7 @@ class App:
         self.root = root
         self._dialogs = {}          # keeps references to small aux popups (column pickers, etc.)
         self.runner = Runner(self)
+        self.runner.on_error = self._show_error
         self.auto_query = AutoQuery(self)
 
         # Load the external config (if any) BEFORE prefilling the form. The log
@@ -311,6 +312,9 @@ class App:
         self.log.see("end")
         self.log.config(state="disabled")
         self._file_logger.log(log_utils.UI_LEVEL_MAP.get(level, logging.INFO), msg)
+
+    def _show_error(self, title: str, msg: str):
+        messagebox.showerror(title, msg)
 
     def _on_tk_exception(self, exc_type, exc_value, exc_tb):
         """Tkinter's default report_callback_exception just prints to stderr,
