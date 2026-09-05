@@ -1,39 +1,56 @@
 """
-pipeline/match_score.py
+score/match_score.py
 ====================
 Matcher (join_forecast_obs) + chấm điểm (score_history): ghép bảng dự báo và
-quan trắc theo khoá (station_code, hour) rồi chấm 6 field bằng
-scoring/scorer.py; export_forecast_score() là điểm vào cho caller, nhận file
-CSV dự báo và danh sách file quan trắc cục bộ, ghi ra 1 file
-score_YYYYMMDD.csv/ngày.
+quan trắc theo khoá (station_code, hour) rồi chấm 6 field bằng scorer.py;
+export_forecast_score() là điểm vào cho caller, nhận file CSV dự báo và danh
+sách file quan trắc cục bộ, ghi ra 1 file score_YYYYMMDD.csv/ngày.
 
-Chạy trực tiếp (python -m pipeline.match_score) để xem demo trên
+Chạy trực tiếp (python -m score.match_score) để xem demo trên
 tests/fixtures/forecast_sample.csv ghép với
 tests/fixtures/qt_files/full_day_20260810/.
 """
 
 import os
 
-from pipeline.forecast import build_hourly_table, load_records_csv
-from pipeline.obs import build_scalar_history_from_files
-from utils.csv_utils import write_csv
-from core.scorer import (
-    score_do_cao_man_may,
-    score_hien_tuong,
-    score_huong_gio,
-    score_tam_nhin,
-    score_toc_do_gio,
-    score_tong_luong_may,
-    sub_of_hour,
-)
+try:
+    from .forecast import build_hourly_table, load_records_csv
+    from .obs import build_scalar_history_from_files
+    from .csv_utils import write_csv
+    from .scorer import (
+        score_do_cao_man_may,
+        score_hien_tuong,
+        score_huong_gio,
+        score_tam_nhin,
+        score_toc_do_gio,
+        score_tong_luong_may,
+        sub_of_hour,
+    )
+except ImportError:
+    # chạy trực tiếp "python score/match_score.py" (không phải -m
+    # score.match_score) thì đây không phải package, không import relative
+    # được — fallback sang import tuyệt đối, hoạt động vì Python tự thêm thư
+    # mục chứa match_score.py (score/) vào sys.path khi chạy trực tiếp.
+    from forecast import build_hourly_table, load_records_csv
+    from obs import build_scalar_history_from_files
+    from csv_utils import write_csv
+    from scorer import (
+        score_do_cao_man_may,
+        score_hien_tuong,
+        score_huong_gio,
+        score_tam_nhin,
+        score_toc_do_gio,
+        score_tong_luong_may,
+        sub_of_hour,
+    )
 
 # Cùng thứ tự BUCKETS.keys() (score_tables.py) - để mỗi giờ trong
 # score_history() ra đúng 6 dòng liên tiếp theo 1 thứ tự cố định.
 FIELD_ORDER = ("tong_luong_may", "do_cao_man_may", "hien_tuong", "huong_gio",
                "toc_do_gio", "tam_nhin")
 
-# Cả 6 hàm cùng chữ ký (forecast_row, obs) -> bool|None (scoring/scorer.py) -
-# dispatch đồng nhất, không còn ngoại lệ nào.
+# Cả 6 hàm cùng chữ ký (forecast_row, obs) -> bool|None (scorer.py) - dispatch
+# đồng nhất, không còn ngoại lệ nào.
 _SCORERS = {
     "tong_luong_may": score_tong_luong_may,
     "do_cao_man_may": score_do_cao_man_may,
@@ -166,8 +183,12 @@ def export_forecast_score(local_files: list, forecast_csv_path: str, out_dir: st
 if __name__ == "__main__":
     import tempfile
 
-    from pipeline.forecast import build_hourly_table, load_records_csv
-    from pipeline.obs import build_scalar_history
+    try:
+        from .forecast import build_hourly_table, load_records_csv
+        from .obs import build_scalar_history
+    except ImportError:
+        from forecast import build_hourly_table, load_records_csv
+        from obs import build_scalar_history
 
     forecast_rows = build_hourly_table(load_records_csv("tests/fixtures/forecast_sample.csv"))
     scalar_history = build_scalar_history("tests/fixtures/qt_files/full_day_20260810")["2026-08-10"]

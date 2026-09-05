@@ -1,19 +1,28 @@
 """
-pipeline/forecast.py
+score/forecast.py
 ====================
 Dựng bảng dự báo theo giờ từ các bản ghi {station_code, start_hour, end_hour,
 field_name, bucket_selected} do dự báo viên chọn (mỗi field 1 bucket rời rạc,
 không nhập giá trị tự do).
-Chạy trực tiếp (python -m pipeline.forecast) để xem demo trên
+Chạy trực tiếp (python -m score.forecast) để xem demo trên
 tests/fixtures/forecast_sample.csv.
 """
 
 import csv
 import os
 
-from core.score_tables import BUCKETS
-from core.scorer import sub_of_hour
-from utils.csv_utils import write_csv
+try:
+    from .score_tables import BUCKETS
+    from .scorer import sub_of_hour
+    from .csv_utils import write_csv
+except ImportError:
+    # chạy trực tiếp "python score/forecast.py" (không phải -m score.forecast)
+    # thì đây không phải package, không import relative được — fallback sang
+    # import tuyệt đối, hoạt động vì Python tự thêm thư mục chứa forecast.py
+    # (score/) vào sys.path khi chạy trực tiếp.
+    from score_tables import BUCKETS
+    from scorer import sub_of_hour
+    from csv_utils import write_csv
 
 FIELD_ORDER = list(BUCKETS.keys())
 

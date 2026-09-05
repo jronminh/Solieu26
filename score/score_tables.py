@@ -105,7 +105,7 @@ BUCKETS = {
         },
         "mega_tolerance": 0,            # khớp chính xác 100%
         # Quy đổi MÃ ww GỐC -> mega không còn ở đây - xem
-        # pipeline/obs.py::ww_code_to_mega() (chuyển 2026-08-18, cùng lý do
+        # score/obs.py::ww_code_to_mega() (chuyển 2026-08-18, cùng lý do
         # wind_dd_to_huong_gio() không nằm ở BUCKETS["huong_gio"]).
         # --- TẦNG SUB: buổi trong ngày, ±1 kẹp mép ---
         "sub_buckets": ["toi", "dem", "sang", "trua", "chieu"],
